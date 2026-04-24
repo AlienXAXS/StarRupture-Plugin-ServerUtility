@@ -330,6 +330,21 @@
     <ClInclude Include="rcon\console_ctrl.h" />
     <ClInclude Include="rcon\server\rcon_server.h" />
     <ClInclude Include="rcon\server\query_server.h" />
+    <ClInclude Include="admin\admin_panel.h" />
+    <ClInclude Include="admin\admin_json.h" />
+    <ClInclude Include="admin\admin_gamethread.h" />
+    <ClInclude Include="admin\session\session_store.h" />
+    <ClInclude Include="admin\endpoints\ep_auth_login.h" />
+    <ClInclude Include="admin\endpoints\ep_players_list.h" />
+    <ClInclude Include="admin\endpoints\ep_players_kick.h" />
+    <ClInclude Include="admin\endpoints\ep_players_ban.h" />
+    <ClInclude Include="admin\endpoints\ep_wave_status.h" />
+    <ClInclude Include="admin\endpoints\ep_wave_start.h" />
+    <ClInclude Include="admin\endpoints\ep_wave_cancel.h" />
+    <ClInclude Include="admin\endpoints\ep_wave_pause.h" />
+    <ClInclude Include="admin\endpoints\ep_wave_resume.h" />
+    <ClInclude Include="admin\endpoints\ep_inventory_give.h" />
+    <ClInclude Include="admin\endpoints\wave_common.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(StarRuptureSDKSourceDir)Basic.cpp">
@@ -358,6 +373,18 @@
     <ClCompile Include="rcon\console_ctrl.cpp" />
     <ClCompile Include="rcon\server\rcon_server.cpp" />
     <ClCompile Include="rcon\server\query_server.cpp" />
+    <ClCompile Include="admin\admin_panel.cpp" />
+    <ClCompile Include="admin\session\session_store.cpp" />
+    <ClCompile Include="admin\endpoints\ep_auth_login.cpp" />
+    <ClCompile Include="admin\endpoints\ep_players_list.cpp" />
+    <ClCompile Include="admin\endpoints\ep_players_kick.cpp" />
+    <ClCompile Include="admin\endpoints\ep_players_ban.cpp" />
+    <ClCompile Include="admin\endpoints\ep_wave_status.cpp" />
+    <ClCompile Include="admin\endpoints\ep_wave_start.cpp" />
+    <ClCompile Include="admin\endpoints\ep_wave_cancel.cpp" />
+    <ClCompile Include="admin\endpoints\ep_wave_pause.cpp" />
+    <ClCompile Include="admin\endpoints\ep_wave_resume.cpp" />
+    <ClCompile Include="admin\endpoints\ep_inventory_give.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

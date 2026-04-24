@@ -8,6 +8,7 @@
 #include "rcon/rcon.h"
 #include "rcon/console_ctrl.h"
 #include "rcon/commands/command_handler.h"
+#include "admin/admin_panel.h"
 
 // -----------------------------------------------------------------------
 // Global plugin self pointer
@@ -51,11 +52,15 @@ static void OnEngineInit()
 
 	// Install FHttpConnection::ProcessRequest hook
 	HttpConnectionHook::Install();
+
+	// Initialise admin web panel (HTTP routes)
+	AdminPanel::Init(g_self);
 }
 
 static void OnEngineShutdown()
 {
 	LOG_INFO("Engine shutting down - removing hooks...");
+	AdminPanel::Shutdown(g_self);
 	ConsoleCtrl::Remove();
 	ParseSettingsHook::Remove();
 	MaxPlayersHook::Remove();

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "plugin_interface.h"
+#include <string>
 
 namespace ServerUtilityConfig
 {
@@ -26,6 +27,27 @@ namespace ServerUtilityConfig
 			ConfigValueType::Boolean,
 			"true",
 			"Blocks unauthorized /remote/object/call HTTP requests. Only calls targeting the DedicatedServerSettingsComp object path are permitted. Attempts are logged as warnings."
+		},
+		{
+			"AdminPanel",
+			"Enabled",
+			ConfigValueType::Boolean,
+			"false",
+			"Enable the admin web panel. Requires ApiKey to be set."
+		},
+		{
+			"AdminPanel",
+			"ApiKey",
+			ConfigValueType::String,
+			"",
+			"API key required to authenticate with the admin web panel. Leave empty to disable the admin panel."
+		},
+		{
+			"AdminPanel",
+			"SessionExpiry",
+			ConfigValueType::Integer,
+			"3600",
+			"How long (in seconds) an admin session token remains valid after login. Clamped to 60-86400. Default: 3600."
 		}
 	};
 
@@ -70,6 +92,27 @@ namespace ServerUtilityConfig
 			return s_self
 				       ? s_self->config->ReadBool(s_self, "PluginSettings", "RemoteVulnerabilityPatch", true)
 				       : true;
+		}
+
+		static bool IsAdminPanelEnabled()
+		{
+			return s_self ? s_self->config->ReadBool(s_self, "AdminPanel", "Enabled", false) : false;
+		}
+
+		static std::string GetAdminApiKey()
+		{
+			if (!s_self) return {};
+			char buf[256] = {};
+			s_self->config->ReadString(s_self, "AdminPanel", "ApiKey", buf, sizeof(buf), "");
+			return buf;
+		}
+
+		static int GetAdminSessionExpiry()
+		{
+			int val = s_self ? s_self->config->ReadInt(s_self, "AdminPanel", "SessionExpiry", 3600) : 3600;
+			if (val < 60)    val = 60;
+			if (val > 86400) val = 86400;
+			return val;
 		}
 
 	private:

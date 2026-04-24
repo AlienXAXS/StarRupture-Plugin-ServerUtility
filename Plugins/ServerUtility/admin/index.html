@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ServerUtility Admin Panel</title>
+<style>
+  body { font-family: monospace; background: #1a1a1a; color: #e0e0e0; max-width: 900px; margin: 40px auto; padding: 0 20px; }
+  h1 { color: #4fc3f7; }
+  h2 { color: #81c784; border-bottom: 1px solid #333; padding-bottom: 6px; }
+  h3 { color: #ffb74d; margin-bottom: 4px; }
+  code { background: #2a2a2a; padding: 2px 6px; border-radius: 3px; color: #f48fb1; }
+  pre { background: #2a2a2a; padding: 14px; border-radius: 6px; overflow-x: auto; color: #a5d6a7; line-height: 1.5; }
+  .endpoint { border: 1px solid #333; border-radius: 6px; padding: 14px 18px; margin: 16px 0; }
+  .method { display: inline-block; background: #1565c0; color: #fff; padding: 2px 8px; border-radius: 3px; font-size: 0.85em; margin-right: 8px; }
+  .url { color: #80deea; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  th, td { text-align: left; padding: 6px 10px; border: 1px solid #333; }
+  th { background: #2a2a2a; color: #90a4ae; }
+  .note { color: #9e9e9e; font-size: 0.9em; margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<h1>ServerUtility Admin Panel</h1>
+<p>This is the admin API for the ServerUtility dedicated server plugin. All endpoints require <strong>POST</strong> requests with a JSON body. Authentication is session-token based.</p>
+
+<h2>Authentication</h2>
+<div class="endpoint">
+  <h3><span class="method">POST</span> <span class="url">/ServerUtility/api/auth/login</span></h3>
+  <p>Exchange your API key for a session token. Tokens expire after the configured <code>SessionExpiry</code> (default 3600 s).</p>
+  <table>
+    <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>api_key</code></td><td>string</td><td>The key configured in <code>ServerUtility.ini → [AdminPanel] ApiKey</code></td></tr>
+  </table>
+  <pre>// Request
+{ "api_key": "your-secret-key" }
+
+// Response
+{ "ok": true, "session_token": "a3f9..." }</pre>
+</div>
+
+<h2>Player Management</h2>
+<div class="endpoint">
+  <h3><span class="method">POST</span> <span class="url">/ServerUtility/api/players/list</span></h3>
+  <p>List all currently connected players.</p>
+  <pre>{ "session_token": "..." }
+// → { "ok": true, "players": [{ "index": 0, "name": "Alice", "ping": 42, "ip": "1.2.3.4" }] }</pre>
+</div>
+<div class="endpoint">
+  <h3><span class="method">POST</span> <span class="url">/ServerUtility/api/players/kick</span></h3>
+  <table>
+    <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>session_token</code></td><td>string</td><td>Active session token</td></tr>
+    <tr><td><code>player_index</code></td><td>int</td><td>Zero-based index from <code>/players/list</code></td></tr>
+  </table>
+  <pre>{ "session_token": "...", "player_index": 0 }
+// → { "ok": true }</pre>
+</div>
+<div class="endpoint">
+  <h3><span class="method">POST</span> <span class="url">/ServerUtility/api/players/ban</span></h3>
+  <p>Kick the player and record their IP in <code>Plugins/ServerUtility/bans.txt</code>.</p>
+  <pre>{ "session_token": "...", "player_index": 0 }
+// → { "ok": true }</pre>
+</div>
+
+<h2>Wave Control</h2>
+<div class="endpoint">
+  <h3><span class="method">POST</span> <span class="url">/ServerUtility/api/wave/status</span></h3>
+  <pre>{ "session_token": "..." }
+// → { "ok": true, "in_progress": true, "paused": false, "type": 2, "stage": 1, "progress": 0.35 }</pre>
+</div>
+<div class="endpoint">
+  <h3><span class="method">POST</span> <span class="url">/ServerUtility/api/wave/start</span></h3>
+  <table>
+    <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>wave_type</code></td><td>int</td><td>EEnviroWave enum value</td></tr>
+  </table>
+  <pre>{ "session_token": "...", "wave_type": 1 }</pre>
+</div>
+<div class="endpoint">
+  <h3><span class="method">POST</span> <span class="url">/ServerUtility/api/wave/cancel</span></h3>
+  <pre>{ "session_token": "..." }</pre>
+</div>
+<div class="endpoint">
+  <h3><span class="method">POST</span> <span class="url">/ServerUtility/api/wave/pause</span></h3>
+  <pre>{ "session_token": "..." }</pre>
+</div>
+<div class="endpoint">
+  <h3><span class="method">POST</span> <span class="url">/ServerUtility/api/wave/resume</span></h3>
+  <pre>{ "session_token": "..." }</pre>
+</div>
+
+<h2>Inventory</h2>
+<div class="endpoint">
+  <h3><span class="method">POST</span> <span class="url">/ServerUtility/api/inventory/give</span></h3>
+  <p>Give an item to a connected player by full Unreal Engine asset path.</p>
+  <table>
+    <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>player_index</code></td><td>int</td><td>Zero-based index from <code>/players/list</code></td></tr>
+    <tr><td><code>asset_path</code></td><td>string</td><td>Full UE asset path, e.g. <code>/Game/Items/Weapons/BP_Sword</code></td></tr>
+    <tr><td><code>count</code></td><td>int</td><td>Number of items to give (default: 1)</td></tr>
+  </table>
+  <pre>{ "session_token": "...", "player_index": 0, "asset_path": "/Game/Items/Weapons/BP_Sword", "count": 5 }
+// → { "ok": true }</pre>
+</div>
+
+<h2>Configuration (ServerUtility.ini)</h2>
+<pre>[AdminPanel]
+Enabled=true
+ApiKey=your-secret-key-here
+SessionExpiry=3600</pre>
+<p class="note">All failed requests return <code>{ "ok": false, "error": "..." }</code>. Unauthorized requests return HTTP 401. Non-POST requests to <code>/api/</code> paths return HTTP 403.</p>
+
+</body>
+</html>

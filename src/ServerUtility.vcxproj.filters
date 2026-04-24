@@ -49,6 +49,42 @@
     <ClCompile Include="hooks\http_connection\http_connection.cpp">
       <Filter>hooks\http_connections</Filter>
     </ClCompile>
+    <ClCompile Include="admin\admin_panel.cpp">
+      <Filter>admin</Filter>
+    </ClCompile>
+    <ClCompile Include="admin\session\session_store.cpp">
+      <Filter>admin\session</Filter>
+    </ClCompile>
+    <ClCompile Include="admin\endpoints\ep_auth_login.cpp">
+      <Filter>admin\endpoints</Filter>
+    </ClCompile>
+    <ClCompile Include="admin\endpoints\ep_players_list.cpp">
+      <Filter>admin\endpoints</Filter>
+    </ClCompile>
+    <ClCompile Include="admin\endpoints\ep_players_kick.cpp">
+      <Filter>admin\endpoints</Filter>
+    </ClCompile>
+    <ClCompile Include="admin\endpoints\ep_players_ban.cpp">
+      <Filter>admin\endpoints</Filter>
+    </ClCompile>
+    <ClCompile Include="admin\endpoints\ep_wave_status.cpp">
+      <Filter>admin\endpoints</Filter>
+    </ClCompile>
+    <ClCompile Include="admin\endpoints\ep_wave_start.cpp">
+      <Filter>admin\endpoints</Filter>
+    </ClCompile>
+    <ClCompile Include="admin\endpoints\ep_wave_cancel.cpp">
+      <Filter>admin\endpoints</Filter>
+    </ClCompile>
+    <ClCompile Include="admin\endpoints\ep_wave_pause.cpp">
+      <Filter>admin\endpoints</Filter>
+    </ClCompile>
+    <ClCompile Include="admin\endpoints\ep_wave_resume.cpp">
+      <Filter>admin\endpoints</Filter>
+    </ClCompile>
+    <ClCompile Include="admin\endpoints\ep_inventory_give.cpp">
+      <Filter>admin\endpoints</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="plugin.h" />
@@ -97,6 +133,51 @@
     <ClInclude Include="hooks\http_connection\http_connection.h">
       <Filter>hooks\http_connections</Filter>
     </ClInclude>
+    <ClInclude Include="admin\admin_panel.h">
+      <Filter>admin</Filter>
+    </ClInclude>
+    <ClInclude Include="admin\admin_json.h">
+      <Filter>admin</Filter>
+    </ClInclude>
+    <ClInclude Include="admin\admin_gamethread.h">
+      <Filter>admin</Filter>
+    </ClInclude>
+    <ClInclude Include="admin\session\session_store.h">
+      <Filter>admin\session</Filter>
+    </ClInclude>
+    <ClInclude Include="admin\endpoints\ep_auth_login.h">
+      <Filter>admin\endpoints</Filter>
+    </ClInclude>
+    <ClInclude Include="admin\endpoints\ep_players_list.h">
+      <Filter>admin\endpoints</Filter>
+    </ClInclude>
+    <ClInclude Include="admin\endpoints\ep_players_kick.h">
+      <Filter>admin\endpoints</Filter>
+    </ClInclude>
+    <ClInclude Include="admin\endpoints\ep_players_ban.h">
+      <Filter>admin\endpoints</Filter>
+    </ClInclude>
+    <ClInclude Include="admin\endpoints\ep_wave_status.h">
+      <Filter>admin\endpoints</Filter>
+    </ClInclude>
+    <ClInclude Include="admin\endpoints\ep_wave_start.h">
+      <Filter>admin\endpoints</Filter>
+    </ClInclude>
+    <ClInclude Include="admin\endpoints\ep_wave_cancel.h">
+      <Filter>admin\endpoints</Filter>
+    </ClInclude>
+    <ClInclude Include="admin\endpoints\ep_wave_pause.h">
+      <Filter>admin\endpoints</Filter>
+    </ClInclude>
+    <ClInclude Include="admin\endpoints\ep_wave_resume.h">
+      <Filter>admin\endpoints</Filter>
+    </ClInclude>
+    <ClInclude Include="admin\endpoints\ep_inventory_give.h">
+      <Filter>admin\endpoints</Filter>
+    </ClInclude>
+    <ClInclude Include="admin\endpoints\wave_common.h">
+      <Filter>admin\endpoints</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="hooks">
@@ -128,6 +209,15 @@
     </Filter>
     <Filter Include="hooks\http_connections">
       <UniqueIdentifier>{3ab7b82c-aa31-4eda-adfd-28a6e1c232e4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="admin">
+      <UniqueIdentifier>{e5f6a7b8-c9d0-1234-ef01-345678901234}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="admin\session">
+      <UniqueIdentifier>{f6a7b8c9-d0e1-2345-f012-456789012345}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="admin\endpoints">
+      <UniqueIdentifier>{a7b8c9d0-e1f2-3456-0123-567890123456}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>
