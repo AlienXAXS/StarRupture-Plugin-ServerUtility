@@ -4,6 +4,25 @@
 #include "../admin_gamethread.h"
 #include "wave_common.h"
 
+#if WAVE_HAS_SDK
+// No C++ objects with destructors in this frame — SEH is legal.
+static const char* WaveStart_SEH(int waveType)
+{
+	__try
+	{
+		SDK::UCrEnviroWaveSubsystem* ws = GetWaveSubsystem();
+		if (!ws) return R"({"ok":false,"error":"wave subsystem unavailable"})";
+
+		ws->StartWave(static_cast<SDK::EEnviroWave>(waveType));
+		return R"({"ok":true})";
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		return R"({"ok":false,"error":"exception starting wave"})";
+	}
+}
+#endif
+
 namespace Ep_WaveStart
 {
 	void Handle(const PluginHttpRequest* req, PluginHttpResponse* resp)
@@ -29,18 +48,7 @@ namespace Ep_WaveStart
 		const std::string result = AdminGT::Dispatch([waveType]() -> std::string
 		{
 #if WAVE_HAS_SDK
-			__try
-			{
-				SDK::UCrEnviroWaveSubsystem* ws = GetWaveSubsystem();
-				if (!ws) return R"({"ok":false,"error":"wave subsystem unavailable"})";
-
-				ws->StartWave(static_cast<SDK::EEnviroWave>(waveType));
-				return R"({"ok":true})";
-			}
-			__except (EXCEPTION_EXECUTE_HANDLER)
-			{
-				return R"({"ok":false,"error":"exception starting wave"})";
-			}
+			return WaveStart_SEH(waveType);
 #else
 			return R"({"ok":false,"error":"SDK not available in this build"})";
 #endif

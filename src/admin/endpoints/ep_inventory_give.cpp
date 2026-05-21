@@ -14,6 +14,64 @@
 
 #include <string>
 
+#if INV_HAS_SDK
+// Separated from the SEH helper so std::string objects don't live in the __try frame.
+static SDK::UAuItemDataBase* FindItemByPath(SDK::UAuItemDataBaseSubsystem* itemSubsys, const char* assetPath)
+{
+	const int32_t itemCount = itemSubsys->ItemDataBaseArray.Num();
+	for (int32_t i = 0; i < itemCount; ++i)
+	{
+		SDK::UAuItemDataBase* item = itemSubsys->ItemDataBaseArray[i];
+		if (!item) continue;
+
+		std::string fullName = item->GetFullName();
+		if (fullName.find(assetPath) != std::string::npos)
+			return item;
+	}
+	return nullptr;
+}
+
+// No C++ objects with destructors in this frame — SEH is legal.
+static const char* GiveItem_SEH(int playerIndex, int count, const char* assetPath)
+{
+	__try
+	{
+		auto* world = static_cast<SDK::UWorld*>(SDK::UWorld::GetWorld());
+		if (!world) return R"({"ok":false,"error":"world unavailable"})";
+
+		SDK::AGameStateBase* gs = world->GameState;
+		if (!gs) return R"({"ok":false,"error":"game state unavailable"})";
+		if (playerIndex >= gs->PlayerArray.Num()) return R"({"ok":false,"error":"player not found"})";
+
+		SDK::APlayerState* ps = gs->PlayerArray[playerIndex];
+		if (!ps) return R"({"ok":false,"error":"player not found"})";
+
+		SDK::APlayerController* pc = static_cast<SDK::APlayerController*>(ps->GetOwner());
+		if (!pc) return R"({"ok":false,"error":"player has no controller"})";
+
+		SDK::APawn* pawn = pc->K2_GetPawn();
+		if (!pawn) return R"({"ok":false,"error":"player has no pawn"})";
+
+		auto* character = static_cast<SDK::ACrCharacterPlayerBase*>(pawn);
+
+		auto* itemSubsys = static_cast<SDK::UAuItemDataBaseSubsystem*>(
+			SDK::USubsystemBlueprintLibrary::GetWorldSubsystem(
+				world, SDK::UAuItemDataBaseSubsystem::StaticClass()));
+		if (!itemSubsys) return R"({"ok":false,"error":"item subsystem unavailable"})";
+
+		SDK::UAuItemDataBase* foundItem = FindItemByPath(itemSubsys, assetPath);
+		if (!foundItem) return R"({"ok":false,"error":"item not found"})";
+
+		character->ServerAddItem(foundItem, static_cast<int32_t>(count));
+		return R"({"ok":true})";
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		return R"({"ok":false,"error":"exception giving item"})";
+	}
+}
+#endif
+
 namespace Ep_InventoryGive
 {
 	void Handle(const PluginHttpRequest* req, PluginHttpResponse* resp)
@@ -53,60 +111,7 @@ namespace Ep_InventoryGive
 		const std::string result = AdminGT::Dispatch([playerIndex, count, assetPath]() -> std::string
 		{
 #if INV_HAS_SDK
-			__try
-			{
-				auto* world = static_cast<SDK::UWorld*>(SDK::UWorld::GetWorld());
-				if (!world) return R"({"ok":false,"error":"world unavailable"})";
-
-				// Find player
-				SDK::AGameStateBase* gs = world->GameState;
-				if (!gs) return R"({"ok":false,"error":"game state unavailable"})";
-				if (playerIndex >= gs->PlayerArray.Num()) return R"({"ok":false,"error":"player not found"})";
-
-				SDK::APlayerState* ps = gs->PlayerArray[playerIndex];
-				if (!ps) return R"({"ok":false,"error":"player not found"})";
-
-				SDK::APlayerController* pc = ps->GetOwningPlayerController();
-				if (!pc) return R"({"ok":false,"error":"player has no controller"})";
-
-				SDK::APawn* pawn = pc->K2_GetPawn();
-				if (!pawn) return R"({"ok":false,"error":"player has no pawn"})";
-
-				auto* character = static_cast<SDK::ACrCharacterPlayerBase*>(pawn);
-
-				// Find item in UAuItemDataBaseSubsystem
-				auto* itemSubsys = static_cast<SDK::UAuItemDataBaseSubsystem*>(
-					SDK::USubsystemBlueprintLibrary::GetWorldSubsystem(
-						world, SDK::UAuItemDataBaseSubsystem::StaticClass()));
-
-				if (!itemSubsys) return R"({"ok":false,"error":"item subsystem unavailable"})";
-
-				SDK::UAuItemDataBase* foundItem = nullptr;
-				const int32_t itemCount = itemSubsys->ItemDataBaseArray.Num();
-				for (int32_t i = 0; i < itemCount; ++i)
-				{
-					SDK::UAuItemDataBase* item = itemSubsys->ItemDataBaseArray[i];
-					if (!item) continue;
-
-					// GetFullName returns "ClassName /Package/Path.ObjectName"
-					// Match against the provided asset_path substring
-					std::string fullName = item->GetFullName();
-					if (fullName.find(assetPath) != std::string::npos)
-					{
-						foundItem = item;
-						break;
-					}
-				}
-
-				if (!foundItem) return R"({"ok":false,"error":"item not found"})";
-
-				character->ServerAddItem(foundItem, static_cast<int32_t>(count));
-				return R"({"ok":true})";
-			}
-			__except (EXCEPTION_EXECUTE_HANDLER)
-			{
-				return R"({"ok":false,"error":"exception giving item"})";
-			}
+			return GiveItem_SEH(playerIndex, count, assetPath.c_str());
 #else
 			return R"({"ok":false,"error":"SDK not available in this build"})";
 #endif

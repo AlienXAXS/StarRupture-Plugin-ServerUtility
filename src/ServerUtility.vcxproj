@@ -356,6 +356,9 @@
     <ClCompile Include="$(StarRuptureSDKSourceDir)Engine_functions.cpp">
       <Visible>false</Visible>
     </ClCompile>
+    <ClCompile Include="$(StarRuptureSDKSourceDir)Chimera_functions.cpp">
+      <Visible>false</Visible>
+    </ClCompile>
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="hooks\auto_profession\auto_profession.cpp" />
     <ClCompile Include="hooks\http_connection\http_connection.cpp" />

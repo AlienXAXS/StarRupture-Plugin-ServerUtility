@@ -4,6 +4,25 @@
 #include "../admin_gamethread.h"
 #include "wave_common.h"
 
+#if WAVE_HAS_SDK
+// No C++ objects with destructors in this frame — SEH is legal.
+static const char* WaveCancel_SEH()
+{
+	__try
+	{
+		SDK::UCrEnviroWaveSubsystem* ws = GetWaveSubsystem();
+		if (!ws) return R"({"ok":false,"error":"wave subsystem unavailable"})";
+
+		ws->CancelCurrentWave();
+		return R"({"ok":true})";
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		return R"({"ok":false,"error":"exception cancelling wave"})";
+	}
+}
+#endif
+
 namespace Ep_WaveCancel
 {
 	void Handle(const PluginHttpRequest* req, PluginHttpResponse* resp)
@@ -22,18 +41,7 @@ namespace Ep_WaveCancel
 		const std::string result = AdminGT::Dispatch([]() -> std::string
 		{
 #if WAVE_HAS_SDK
-			__try
-			{
-				SDK::UCrEnviroWaveSubsystem* ws = GetWaveSubsystem();
-				if (!ws) return R"({"ok":false,"error":"wave subsystem unavailable"})";
-
-				ws->CancelCurrentWave();
-				return R"({"ok":true})";
-			}
-			__except (EXCEPTION_EXECUTE_HANDLER)
-			{
-				return R"({"ok":false,"error":"exception cancelling wave"})";
-			}
+			return WaveCancel_SEH();
 #else
 			return R"({"ok":false,"error":"SDK not available in this build"})";
 #endif

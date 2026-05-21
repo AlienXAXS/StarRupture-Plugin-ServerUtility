@@ -10,6 +10,42 @@
 #  define KICK_HAS_SDK 0
 #endif
 
+#if KICK_HAS_SDK
+static void KickPlayerController(SDK::APlayerController* pc)
+{
+	SDK::FText reason{};
+	pc->ClientReturnToMainMenuWithTextReason(reason);
+}
+
+static const char* KickPlayer_SEH(int playerIndex)
+{
+	__try
+	{
+		auto* world = static_cast<SDK::UWorld*>(SDK::UWorld::GetWorld());
+		if (!world) return R"({"ok":false,"error":"world unavailable"})";
+
+		SDK::AGameStateBase* gs = world->GameState;
+		if (!gs) return R"({"ok":false,"error":"game state unavailable"})";
+
+		if (playerIndex >= gs->PlayerArray.Num())
+			return R"({"ok":false,"error":"player not found"})";
+
+		SDK::APlayerState* ps = gs->PlayerArray[playerIndex];
+		if (!ps) return R"({"ok":false,"error":"player not found"})";
+
+		SDK::APlayerController* pc = static_cast<SDK::APlayerController*>(ps->GetOwner());
+		if (!pc) return R"({"ok":false,"error":"player controller unavailable"})";
+
+		KickPlayerController(pc);
+		return R"({"ok":true})";
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		return R"({"ok":false,"error":"exception during kick"})";
+	}
+}
+#endif
+
 namespace Ep_PlayersKick
 {
 	void Handle(const PluginHttpRequest* req, PluginHttpResponse* resp)
@@ -35,32 +71,7 @@ namespace Ep_PlayersKick
 		const std::string result = AdminGT::Dispatch([playerIndex]() -> std::string
 		{
 #if KICK_HAS_SDK
-			__try
-			{
-				auto* world = static_cast<SDK::UWorld*>(SDK::UWorld::GetWorld());
-				if (!world) return R"({"ok":false,"error":"world unavailable"})";
-
-				SDK::AGameStateBase* gs = world->GameState;
-				if (!gs) return R"({"ok":false,"error":"game state unavailable"})";
-
-				if (playerIndex >= gs->PlayerArray.Num())
-					return R"({"ok":false,"error":"player not found"})";
-
-				SDK::APlayerState* ps = gs->PlayerArray[playerIndex];
-				if (!ps) return R"({"ok":false,"error":"player not found"})";
-
-				SDK::APlayerController* pc = ps->GetOwningPlayerController();
-				if (!pc) return R"({"ok":false,"error":"player controller unavailable"})";
-
-				// FText with empty string — kick reason shown on client
-				SDK::FText reason{};
-				pc->ClientReturnToMainMenuWithTextReason(reason);
-				return R"({"ok":true})";
-			}
-			__except (EXCEPTION_EXECUTE_HANDLER)
-			{
-				return R"({"ok":false,"error":"exception during kick"})";
-			}
+			return KickPlayer_SEH(playerIndex);
 #else
 			return R"({"ok":false,"error":"SDK not available in this build"})";
 #endif

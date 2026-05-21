@@ -48,13 +48,15 @@ static void OnEngineInit()
 	Rcon::Init();
 
 	// Install console control handler (CTRL+C, CTRL+BREAK, window close, etc.)
-	ConsoleCtrl::Install();
+	// Skip installing this, it causes some weird issues
+	//ConsoleCtrl::Install();
 
 	// Install FHttpConnection::ProcessRequest hook
 	HttpConnectionHook::Install();
 
 	// Initialise admin web panel (HTTP routes)
-	AdminPanel::Init(g_self);
+	// This isnt ready yet.
+	//AdminPanel::Init(g_self);
 }
 
 static void OnEngineShutdown()

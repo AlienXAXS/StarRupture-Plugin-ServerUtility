@@ -1,3 +1,4 @@
+#define _CRT_RAND_S
 #include "session_store.h"
 
 #include <algorithm>
@@ -7,7 +8,6 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
-#define _CRT_RAND_S
 #include <stdlib.h> // rand_s
 
 AdminSessionStore& AdminSessionStore::Get()
