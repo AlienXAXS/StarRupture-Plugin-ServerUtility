@@ -30,7 +30,8 @@ static PluginInfo s_pluginInfo = {
 	MODLOADER_BUILD_TAG,
 	"AlienX",
 	"Provides dedicated-server settings via command-line parameters, bypassing DSSettings.txt as well as other various fixes",
-	PLUGIN_INTERFACE_VERSION
+	PLUGIN_INTERFACE_VERSION,
+	PLUGIN_TARGET_SERVER
 };
 
 // -----------------------------------------------------------------------
