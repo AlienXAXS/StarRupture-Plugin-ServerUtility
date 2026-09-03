@@ -39,6 +39,20 @@ static uintptr_t g_patchAddress = 0; // Address of the immediate byte (the "4")
 static uint8_t g_originalValue = 0; // Original value at that address
 static bool g_patched = false;
 
+// Resolved during OnPluginLoadHooks; 0 means the pattern missed on this build.
+static uintptr_t g_preLoginAddr = 0;
+
+void MaxPlayersHook::Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
+{
+	if (!self || !scanner)
+		return;
+
+	// Optional: a miss leaves the server on the stock 4-player limit rather than
+	// refusing the whole plugin, which is what the old scan-at-init path did.
+	g_preLoginAddr = scanner->ResolveOptional(
+		self, "ACrGameModeBase::PreLogin", PRELOGIN_PATTERN);
+}
+
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
@@ -59,19 +73,18 @@ void MaxPlayersHook::Install(int maxPlayers)
 
 	LOG_INFO("[MaxPlayers] Attempting to patch max player limit to %d...", maxPlayers);
 
-	auto* scanner = GetScanner();
 	auto* hooks = GetHooks();
-	if (!scanner || !hooks)
+	if (!hooks)
 	{
-		LOG_ERROR("[MaxPlayers] Scanner or hooks interface not available");
+		LOG_ERROR("[MaxPlayers] Hooks interface not available");
 		return;
 	}
 
-	// Step 1: Find PreLogin
-	uintptr_t preLoginAddr = scanner->FindPatternInMainModule(PRELOGIN_PATTERN);
+	// Step 1: PreLogin, resolved back in OnPluginLoadHooks
+	uintptr_t preLoginAddr = g_preLoginAddr;
 	if (preLoginAddr == 0)
 	{
-		LOG_ERROR("[MaxPlayers] Could not find ACrGameModeBase::PreLogin via pattern scan");
+		LOG_ERROR("[MaxPlayers] ACrGameModeBase::PreLogin unresolved");
 		return;
 	}
 

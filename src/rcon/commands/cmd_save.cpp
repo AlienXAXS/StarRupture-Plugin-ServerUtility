@@ -113,26 +113,30 @@ namespace Cmd_Save
 	// -----------------------------------------------------------------------
 	// Registration
 	// -----------------------------------------------------------------------
+	void Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
+	{
+		if (!self || !scanner)
+			return;
+
+		// Optional: a miss disables one RCON command, not the whole server
+		// utility, which is what the old scan-at-register path did.
+		uintptr_t addr = scanner->ResolveOptional(
+			self, "UCrSaveSubsystem::SaveNextSaveGame", SAVE_PATTERN);
+		if (addr)
+		{
+			g_saveFunc = reinterpret_cast<SaveNextSaveGame_t>(addr);
+			LOG_INFO("[RCON] UCrSaveSubsystem::SaveNextSaveGame resolved at 0x%llX",
+			         static_cast<unsigned long long>(addr));
+		}
+		else
+		{
+			LOG_ERROR("[RCON] UCrSaveSubsystem::SaveNextSaveGame unresolved - "
+				"save command will not work until the pattern is updated.");
+		}
+	}
+
 	void Register(CommandHandler& handler)
 	{
-		auto scanner = GetScanner();
-
-		// Resolve UCrSaveSubsystem::SaveNextSaveGame
-		if (scanner)
-		{
-			uintptr_t addr = scanner->FindPatternInMainModule(SAVE_PATTERN);
-			if (addr)
-			{
-				g_saveFunc = reinterpret_cast<SaveNextSaveGame_t>(addr);
-				LOG_INFO("[RCON] UCrSaveSubsystem::SaveNextSaveGame resolved at 0x%llX",
-				         static_cast<unsigned long long>(addr));
-			}
-			else
-			{
-				LOG_ERROR("[RCON] Failed to find UCrSaveSubsystem::SaveNextSaveGame pattern - "
-					"save command will not work until pattern is updated.");
-			}
-		}
 
 		handler.Register(
 			{"save", "savegame", "forcesave"},

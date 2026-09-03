@@ -14,10 +14,17 @@
 //   ret   ; C3
 // ---------------------------------------------------------------------------
 
+struct IPluginSelf;
+struct IPluginHookScanner;
+
 namespace AutoProfessionHook
 {
-	// Scan for GetProfessionForNewPlayer and patch its prologue.
-	// Call once after the scanner is available and MaxPlayers is enabled.
+	// Resolve GetProfessionForNewPlayer. Callable only from the plugin's
+	// OnPluginLoadHooks export -- the loader refuses scans made anywhere else.
+	void Resolve(IPluginSelf* self, IPluginHookScanner* scanner);
+
+	// Patch the resolved prologue. Call once, from PluginInit, when MaxPlayers
+	// is enabled.
 	void Install();
 
 	// Restore the original prologue bytes on shutdown.

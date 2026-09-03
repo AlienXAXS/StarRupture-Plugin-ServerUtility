@@ -36,22 +36,33 @@ static bool g_patched = false;
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
+// Resolved during OnPluginLoadHooks; 0 means the pattern missed on this build.
+static uintptr_t g_getProfessionAddr = 0;
+
+void AutoProfessionHook::Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
+{
+	if (!self || !scanner)
+		return;
+
+	// Optional: the profession patch only matters alongside the MaxPlayers
+	// patch, and the plugin already carried on without it.
+	g_getProfessionAddr = scanner->ResolveOptional(
+		self, "ACrGameModeBase::GetProfessionForNewPlayer", GET_PROFESSION_PATTERN);
+}
+
 void AutoProfessionHook::Install()
 {
-	auto* scanner = GetScanner();
 	auto* hooks = GetHooks();
-	if (!scanner || !hooks)
+	if (!hooks)
 	{
-		LOG_ERROR("[AutoProfession] Scanner or hooks interface not available");
+		LOG_ERROR("[AutoProfession] Hooks interface not available");
 		return;
 	}
 
-	LOG_INFO("[AutoProfession] Scanning for ACrGameModeBase::GetProfessionForNewPlayer...");
-
-	uintptr_t addr = scanner->FindPatternInMainModule(GET_PROFESSION_PATTERN);
+	uintptr_t addr = g_getProfessionAddr;
 	if (addr == 0)
 	{
-		LOG_ERROR("[AutoProfession] Pattern scan failed - could not locate GetProfessionForNewPlayer");
+		LOG_ERROR("[AutoProfession] GetProfessionForNewPlayer unresolved");
 		return;
 	}
 

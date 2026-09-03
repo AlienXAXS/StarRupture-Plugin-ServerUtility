@@ -6,8 +6,15 @@
 // When all required command-line parameters are present the hook returns 1
 // (success) immediately and writes the parsed values directly into the
 // component, bypassing the DSSettings.txt code path entirely.
+struct IPluginSelf;
+struct IPluginHookScanner;
+
 namespace ParseSettingsHook
 {
+	// Resolve the FMemory::Malloc call site. Callable only from the plugin's
+	// OnPluginLoadHooks export -- the loader refuses scans made anywhere else.
+	void Resolve(IPluginSelf* self, IPluginHookScanner* scanner);
+
 	// Called once the engine is ready and the pattern has been located.
 	void Install(uintptr_t targetAddress);
 

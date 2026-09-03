@@ -663,19 +663,26 @@ static bool SmokeTestAllocator(FMemoryMalloc_t mallocFn, FMemoryFree_t freeFn)
 // Find FMemory::Malloc via the call-site pattern.
 // The pattern starts on the E8 byte, so we just resolve the rel32.
 // ---------------------------------------------------------------------------
+// Resolved during OnPluginLoadHooks; 0 means the pattern missed on this build.
+static uintptr_t g_mallocCallSite = 0;
+
+void ParseSettingsHook::Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
+{
+	if (!self || !scanner)
+		return;
+
+	// Optional: the allocator lookup only feeds diagnostics here, and the hook
+	// itself installs against an address resolved in plugin.cpp.
+	g_mallocCallSite = scanner->ResolveOptional(
+		self, "FMemory::Malloc (call site)", FMEMORY_MALLOC_PATTERN);
+}
+
 static uintptr_t FindMallocViaPattern()
 {
-	auto* scanner = GetScanner();
-	if (!scanner)
-	{
-		LOG_ERROR("[FindMalloc] Scanner not available");
-		return 0;
-	}
-
-	uintptr_t callSite = scanner->FindPatternInMainModule(FMEMORY_MALLOC_PATTERN);
+	uintptr_t callSite = g_mallocCallSite;
 	if (callSite == 0)
 	{
-		LOG_WARN("[FindMalloc] Malloc call-site pattern not found");
+		LOG_WARN("[FindMalloc] Malloc call-site unresolved");
 		return 0;
 	}
 

@@ -9,8 +9,15 @@
 // reached.  This module locates the `cmp ebx, 4` instruction inside
 // PreLogin via pattern scanning and patches the immediate operand to the
 // configured MaxPlayers value.
+struct IPluginSelf;
+struct IPluginHookScanner;
+
 namespace MaxPlayersHook
 {
+	// Resolve ACrGameModeBase::PreLogin. Callable only from the plugin's
+	// OnPluginLoadHooks export -- the loader refuses scans made anywhere else.
+	void Resolve(IPluginSelf* self, IPluginHookScanner* scanner);
+
 	// Called once the engine is ready.
 	// maxPlayers: the desired maximum (1–127, clamped).  0 = disabled / don't patch.
 	void Install(int maxPlayers);

@@ -61,25 +61,30 @@ namespace Cmd_Stop
 		g_requestExit(false, L"Console ctrl event");
 	}
 
+	void Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
+	{
+		if (!self || !scanner)
+			return;
+
+		// Optional: a miss disables one RCON command, not the whole server
+		// utility, which is what the old scan-at-register path did.
+		uintptr_t addr = scanner->ResolveOptional(
+			self, "FWindowsPlatformMisc::RequestExit", REQUEST_EXIT_PATTERN);
+		if (addr)
+		{
+			g_requestExit = reinterpret_cast<RequestExit_t>(addr);
+			LOG_INFO("[RCON] FWindowsPlatformMisc::RequestExit resolved at 0x%llX",
+			         static_cast<unsigned long long>(addr));
+		}
+		else
+		{
+			LOG_ERROR("[RCON] FWindowsPlatformMisc::RequestExit unresolved - "
+				"stop command will not work");
+		}
+	}
+
 	void Register(CommandHandler& handler)
 	{
-		// Resolve RequestExit at registration time (engine is already up)
-		auto scanner = GetScanner();
-		if (scanner)
-		{
-			uintptr_t addr = scanner->FindPatternInMainModule(REQUEST_EXIT_PATTERN);
-			if (addr)
-			{
-				g_requestExit = reinterpret_cast<RequestExit_t>(addr);
-				LOG_INFO("[RCON] FWindowsPlatformMisc::RequestExit resolved at 0x%llX",
-				         static_cast<unsigned long long>(addr));
-			}
-			else
-			{
-				LOG_ERROR("[RCON] Failed to find FWindowsPlatformMisc::RequestExit pattern - "
-					"stop command will not work");
-			}
-		}
 
 		handler.Register(
 			{"stop", "quit", "exit", "shutdown"},

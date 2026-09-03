@@ -8,6 +8,8 @@
 #include "rcon/rcon.h"
 #include "rcon/console_ctrl.h"
 #include "rcon/commands/command_handler.h"
+#include "rcon/commands/cmd_save.h"
+#include "rcon/commands/cmd_stop.h"
 #include "admin/admin_panel.h"
 
 // -----------------------------------------------------------------------
@@ -39,6 +41,9 @@ static PluginInfo s_pluginInfo = {
 // "48 8B C4 55 41 54 48 8D 6C 24"
 // -----------------------------------------------------------------------
 static constexpr auto DEDSERVER_SETTINGS_COMP_PARSE_SETTINGS_PATTERN = "48 8B C4 55 41 54 48 8D 6C 24";
+
+// Resolved during OnPluginLoadHooks; 0 means the pattern missed on this build.
+static uintptr_t g_parseSettingsAddr = 0;
 
 // -----------------------------------------------------------------------
 // Engine lifecycle callbacks
@@ -88,6 +93,26 @@ __declspec(dllexport) PluginInfo* GetPluginInfo()
 	return &s_pluginInfo;
 }
 
+// Runs after GetPluginInfo and before PluginInit, and is the only context in
+// which the loader lets a plugin pattern scan. Resolve here, install from
+// PluginInit - self->hooks is null for the duration of this event.
+__declspec(dllexport) void OnPluginLoadHooks(IPluginSelf* self, IPluginHookScanner* scanner)
+{
+	g_self = self;
+
+	// Optional: without it the DSSettings command-line bypass is skipped, but the
+	// RCON server and the rest of the plugin still work.
+	g_parseSettingsAddr = scanner->ResolveOptional(
+		self, "UCrDedicatedServerSettingsComp::ParseSettings",
+		DEDSERVER_SETTINGS_COMP_PARSE_SETTINGS_PATTERN);
+
+	ParseSettingsHook::Resolve(self, scanner);
+	MaxPlayersHook::Resolve(self, scanner);
+	AutoProfessionHook::Resolve(self, scanner);
+	Cmd_Save::Resolve(self, scanner);
+	Cmd_Stop::Resolve(self, scanner);
+}
+
 __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 {
 	g_self = self;
@@ -125,12 +150,10 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 	g_self->hooks->Engine->RegisterOnShutdown(OnEngineShutdown);
 	LOG_DEBUG("Registered for engine shutdown callback");
 
-	LOG_INFO("Engine initialised - scanning for UCrDedicatedServerSettingsComp::ParseSettings...");
-
-	uintptr_t addr = g_self->scanner->FindPatternInMainModule(DEDSERVER_SETTINGS_COMP_PARSE_SETTINGS_PATTERN);
+	uintptr_t addr = g_parseSettingsAddr;
 	if (addr == 0)
 	{
-		LOG_ERROR("Pattern scan failed – could not locate ParseSettings");
+		LOG_ERROR("UCrDedicatedServerSettingsComp::ParseSettings unresolved");
 	}
 	else
 	{
