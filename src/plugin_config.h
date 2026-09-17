@@ -23,6 +23,13 @@ namespace ServerUtilityConfig
 		},
 		{
 			"PluginSettings",
+			"GatherableRespawnFix",
+			ConfigValueType::Boolean,
+			"true",
+			"Makes the gatherable seed/wave-stage replication actor always relevant so plants, eggs and golden balloons regrow for remote clients after enviro waves. Without it only players near world origin ever receive the regrowth."
+		},
+		{
+			"PluginSettings",
 			"RemoteVulnerabilityPatch",
 			ConfigValueType::Boolean,
 			"true",
@@ -84,6 +91,14 @@ namespace ServerUtilityConfig
 			if (val < 0) val = 0;
 			if (val > 127) val = 127;
 			return val;
+		}
+
+		// Returns true if the gatherable respawn relevancy fix is enabled (default: true).
+		static bool GetGatherableRespawnFix()
+		{
+			return s_self
+				       ? s_self->config->ReadBool(s_self, "PluginSettings", "GatherableRespawnFix", true)
+				       : true;
 		}
 
 		// Returns true if the RemoteVulnerabilityPatch is enabled (default: true).

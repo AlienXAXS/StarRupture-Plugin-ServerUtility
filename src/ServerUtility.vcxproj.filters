@@ -46,6 +46,9 @@
     <ClCompile Include="hooks\auto_profession\auto_profession.cpp">
       <Filter>hooks\max_players\helpers</Filter>
     </ClCompile>
+    <ClCompile Include="hooks\gatherable_relevancy\gatherable_relevancy.cpp">
+      <Filter>hooks\gatherable_relevancy</Filter>
+    </ClCompile>
     <ClCompile Include="hooks\http_connection\http_connection.cpp">
       <Filter>hooks\http_connections</Filter>
     </ClCompile>
@@ -131,6 +134,9 @@
     <ClInclude Include="hooks\auto_profession\auto_profession.h">
       <Filter>hooks\max_players\helpers</Filter>
     </ClInclude>
+    <ClInclude Include="hooks\gatherable_relevancy\gatherable_relevancy.h">
+      <Filter>hooks\gatherable_relevancy</Filter>
+    </ClInclude>
     <ClInclude Include="hooks\http_connection\http_connection.h">
       <Filter>hooks\http_connections</Filter>
     </ClInclude>
@@ -201,6 +207,9 @@
     </Filter>
     <Filter Include="rcon\server">
       <UniqueIdentifier>{d4e5f6a7-b8c9-0123-def0-234567890123}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="hooks\gatherable_relevancy">
+      <UniqueIdentifier>{7d3f1a2c-9b64-4e0f-8a15-c2d7e6f40b91}</UniqueIdentifier>
     </Filter>
     <Filter Include="hooks\max_players">
       <UniqueIdentifier>{2e4121e6-f248-4c43-8323-60089d894a97}</UniqueIdentifier>

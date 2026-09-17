@@ -6,6 +6,7 @@
 #include "hooks/max_players/max_players.h"
 #include "hooks/auto_profession/auto_profession.h"
 #include "hooks/http_connection/http_connection.h"
+#include "hooks/gatherable_relevancy/gatherable_relevancy.h"
 #include "rcon/rcon.h"
 #include "rcon/console_ctrl.h"
 #include "rcon/commands/command_handler.h"
@@ -69,6 +70,7 @@ static void OnEngineShutdown()
 	MaxPlayersHook::Remove();
 	AutoProfessionHook::Remove();
 	HttpConnectionHook::Remove();
+	GatherableRelevancyFix::Remove();
 
 	// Shut down RCON / Steam Query (must happen before UObject teardown)
 	Rcon::Shutdown();
@@ -105,6 +107,7 @@ __declspec(dllexport) void OnPluginLoadHooks(IPluginSelf* self, IPluginHookScann
 	AutoProfessionHook::Resolve(self, scanner);
 	Cmd_Save::Resolve(self, scanner);
 	Cmd_Stop::Resolve(self, scanner);
+	GatherableRelevancyFix::Resolve(self, scanner);
 }
 
 __declspec(dllexport) bool PluginInit(IPluginSelf* self)
@@ -165,6 +168,13 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 		// Auto-assign professions for players joining when MaxPlayers is patched
 		AutoProfessionHook::Install();
 	}
+
+	// Gatherable regrowth never reaches remote clients without this; see the
+	// module header for why.
+	if (ServerUtilityConfig::Config::GetGatherableRespawnFix())
+		GatherableRelevancyFix::Install();
+	else
+		LOG_INFO("GatherableRespawnFix disabled in config");
 
 	return true;
 }

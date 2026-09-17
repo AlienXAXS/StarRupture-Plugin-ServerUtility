@@ -47,6 +47,15 @@ namespace GameSig
 	inline constexpr auto PLATFORM_MISC_REQUEST_EXIT =
 		"48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 48 83 EC ?? 44 0F B6 05";
 
+	// UReplicationGraph::AddNetworkActor(AActor*) / RemoveNetworkActor(AActor*)
+	// Used by the gatherable respawn fix to re-route ACrGatherableSpawnersRepActor
+	// after its routing policy has been rewritten. Server binary 0x145ad8aa0 /
+	// 0x145af3ca0 (image base 0x140000000).
+	inline constexpr auto REPGRAPH_ADD_NETWORK_ACTOR =
+		"48 85 D2 0F 84 ?? ?? ?? ?? 48 89 54 24 ?? 55 53 41 56";
+	inline constexpr auto REPGRAPH_REMOVE_NETWORK_ACTOR =
+		"40 57 41 54 41 56 48 83 EC 70";
+
 
 	// =======================================================================
 	// Struct-field offsets
@@ -61,6 +70,39 @@ namespace GameSig
 		inline constexpr size_t OFFSET_SAVE_INTERVAL    = 0xD8; // int32   — (_DWORD*)this + 54 → 216
 		inline constexpr size_t OFFSET_START_NEW_GAME   = 0xDC; // bool    — (_BYTE*)this + 220
 		inline constexpr size_t OFFSET_LOAD_SAVED_GAME  = 0xDD; // bool    — (_BYTE*)this + 221
+	}
+
+	// UCrReplicationGraph::ClassRepNodePolicies
+	// TClassMap<EClassRepNodeMapping> = { TFunction InitNewElement; TMap<FObjectKey,
+	// EClassRepNodeMapping> Map; }. Not a UPROPERTY, so the SDK shows Pad_5D8 there.
+	// Offsets read from the zero-initialising stores in UCrReplicationGraph::
+	// UCrReplicationGraph (0x146fe7700): the map's Elements.Data at +0x610, ArrayNum
+	// +0x618, ArrayMax +0x61C, inline allocation-flag words +0x620, secondary bits
+	// pointer +0x630, NumBits +0x638 (MaxBits +0x63C = 128, FirstFreeIndex +0x640 = -1).
+	// PrintRepNodePolicies (0x1470098c0) indexes elements by `20 * Index`:
+	//   FObjectKey { int32 ObjectIndex; int32 ObjectSerialNumber; }  +0
+	//   uint32 EClassRepNodeMapping                                   +8
+	//   int32 HashNextId, int32 HashIndex                            +12
+	namespace ReplicationGraph
+	{
+		inline constexpr size_t OFFSET_POLICIES_ELEMENTS       = 0x610;
+		inline constexpr size_t OFFSET_POLICIES_ARRAY_NUM      = 0x618;
+		inline constexpr size_t OFFSET_POLICIES_ARRAY_MAX      = 0x61C;
+		inline constexpr size_t OFFSET_POLICIES_BITS_INLINE    = 0x620;
+		inline constexpr size_t OFFSET_POLICIES_BITS_SECONDARY = 0x630;
+		inline constexpr size_t OFFSET_POLICIES_NUM_BITS       = 0x638;
+		inline constexpr int    POLICIES_BITS_INLINE_CAPACITY  = 128;   // 4 x uint32
+		inline constexpr size_t POLICIES_ELEMENT_SIZE          = 20;
+		inline constexpr size_t POLICIES_KEY_OBJECT_INDEX      = 0;
+		inline constexpr size_t POLICIES_KEY_SERIAL_NUMBER     = 4;
+		inline constexpr size_t POLICIES_VALUE                 = 8;
+	}
+
+	// FUObjectItem { UObject* Object; int32 Flags; int32 ClusterRootIndex;
+	//                int32 SerialNumber; } -- 0x18 bytes, matching the SDK's Pad_8[0x10].
+	namespace UObjectItem
+	{
+		inline constexpr size_t OFFSET_SERIAL_NUMBER = 0x10;
 	}
 
 	// =======================================================================

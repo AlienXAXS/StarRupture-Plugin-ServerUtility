@@ -313,6 +313,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="hooks\auto_profession\auto_profession.h" />
+    <ClInclude Include="hooks\gatherable_relevancy\gatherable_relevancy.h" />
     <ClInclude Include="hooks\http_connection\http_connection.h" />
     <ClInclude Include="hooks\max_players\max_players.h" />
     <ClInclude Include="hooks\parse_settings\parse_settings.h" />
@@ -362,6 +363,7 @@
     </ClCompile>
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="hooks\auto_profession\auto_profession.cpp" />
+    <ClCompile Include="hooks\gatherable_relevancy\gatherable_relevancy.cpp" />
     <ClCompile Include="hooks\http_connection\http_connection.cpp" />
     <ClCompile Include="hooks\max_players\max_players.cpp" />
     <ClCompile Include="hooks\parse_settings\parse_settings.cpp" />
