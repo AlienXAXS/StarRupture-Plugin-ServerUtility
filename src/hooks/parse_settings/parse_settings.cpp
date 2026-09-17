@@ -1,26 +1,20 @@
 ﻿#include "parse_settings.h"
 #include "plugin_helpers.h"
+#include "game_signatures.h"
 
 #include <Windows.h>
-#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <cwchar>
 #include <exception>
 #include <string>
-#include <vector>
 
 // ---------------------------------------------------------------------------
 // UCrDedicatedServerSettingsComp memory layout
 //
 // ParseSettings writes five fields on the component object.  The offsets
-// below are derived from the IDA decompilation of the original function:
-//
-//   +0xB8  SessionName      FString  — (char*)this + 184
-// +0xC8  SaveGameName     FString  — (char*)this + 200
-//   +0xD8  SaveGameInterval int32    — (_DWORD*)this + 54  (54*4=216=0xD8)
-//   +0xDC  bStartNewGame  bool     — (_BYTE*)this + 220
-//   +0xDD  bLoadSavedGame   bool     — (_BYTE*)this + 221
+// are defined in game_signatures.h (GameSig::DedicatedServerSettingsComp)
+// and were derived from the IDA decompilation of the original function.
 // ---------------------------------------------------------------------------
 
 // Minimal FString mirror so we can manipulate engine strings from outside.
@@ -33,29 +27,12 @@ struct EngineString
 };
 
 // ---------------------------------------------------------------------------
-// Engine memory allocator function pointers
-//
-// Resolved at hook install time via pattern scanning.  These point into the
-// game binary's FMemory::Malloc / FMemory::Free which go through
-// FMallocBinned2 and properly set the canary values.
-//
-// Using these ensures that when the GC later calls FMemory::Free on an
-// FString::Data pointer we set, it sees a valid FMallocBinned2 block.
-// ---------------------------------------------------------------------------
-using FMemoryMalloc_t = void* (__cdecl*)(size_t Count, uint32_t Alignment);
-using FMemoryFree_t = void(__cdecl*)(void* Original);
-
-// ---------------------------------------------------------------------------
 // Field accessor namespace for UCrDedicatedServerSettingsComp
-// Offsets verified against IDA pseudocode of ParseSettings.
+// Offsets come from game_signatures.h.
 // ---------------------------------------------------------------------------
 namespace FieldAccessor
 {
-	constexpr size_t OFFSET_SESSION_NAME = 0xB8; // (char*)this + 184
-	constexpr size_t OFFSET_SAVEGAME_NAME = 0xC8; // (char*)this + 200
-	constexpr size_t OFFSET_SAVE_INTERVAL = 0xD8; // (_DWORD*)this + 54 → 216
-	constexpr size_t OFFSET_START_NEW_GAME = 0xDC; // (_BYTE*)this + 220
-	constexpr size_t OFFSET_LOAD_SAVED_GAME = 0xDD; // (_BYTE*)this + 221
+	using namespace GameSig::DedicatedServerSettingsComp;
 
 	inline EngineString* GetSessionName(void* thisPtr)
 	{
@@ -98,17 +75,19 @@ static constexpr int DEFAULT_SAVE_INTERVAL = 300;
 // ---------------------------------------------------------------------------
 // Helper: assign an FString using the engine's own allocator.
 //
-// Because the hook now skips the original function entirely when command-line
+// The mod loader exposes FMemory::Malloc / FMemory::Free through
+// hooks->Memory->Alloc / Free, so we never need to locate them ourselves.
+// Both go through FMallocBinned2, which means the canary values are correct
+// and the GC destructor will not crash when it later frees FString::Data.
+//
+// Because the hook skips the original function entirely when command-line
 // params are present, the FString fields are guaranteed to be in their
 // default-constructed state (Data=null, Num=0, Max=0) from UObject
 // initialisation.  We therefore:
-//   1. Free old Data via FMemory::Free only if it looks valid
-//   2. Allocate a new buffer via FMemory::Malloc
+//   1. Free old Data via hooks->Memory->Free only if it looks valid
+//   2. Allocate a new buffer via hooks->Memory->Alloc
 //   3. Copy the string into the new buffer
 //   4. Update Num and Max
-//
-// Because both Malloc and Free go through FMallocBinned2, the canary
-// values are correct and the GC destructor will not crash.
 // ---------------------------------------------------------------------------
 static bool AssignEngineString(EngineString* str, const wchar_t* value)
 {
@@ -116,11 +95,15 @@ static bool AssignEngineString(EngineString* str, const wchar_t* value)
 		return false;
 
 	auto* hooks = GetHooks();
-
-
-	if (!hooks->Memory)
+	if (!hooks || !hooks->Memory)
 	{
-		LOG_ERROR("[AssignEngineString] Engine allocator not resolved!");
+		LOG_ERROR("[AssignEngineString] Memory interface not available!");
+		return false;
+	}
+
+	if (!hooks->Memory->IsAllocatorAvailable())
+	{
+		LOG_ERROR("[AssignEngineString] Engine allocator not available via mod loader!");
 		return false;
 	}
 
@@ -165,7 +148,7 @@ static bool AssignEngineString(EngineString* str, const wchar_t* value)
 	void* newData = hooks->Memory->Alloc(byteSize, 16);
 	if (!newData)
 	{
-		LOG_ERROR("[AssignEngineString] FMemory::Malloc(%zu, 16) returned null!", byteSize);
+		LOG_ERROR("[AssignEngineString] Memory->Alloc(%zu, 16) returned null!", byteSize);
 		return false;
 	}
 
@@ -480,334 +463,6 @@ static __int64 __fastcall Hook_ParseSettings(void* thisPtr)
 }
 
 // ---------------------------------------------------------------------------
-// Engine allocator resolution
-//
-// Strategy: find FMemory::Malloc FIRST (easy – unique call-site pattern),
-// then derive FMemory::Free by cross-referencing the same GMalloc global
-// from within ParseSettings.
-//
-// From IDA, FMemory::Malloc body (at +0xF from entry):
-//   48 8B 0D xx xx xx xx   mov rcx, cs:GMalloc
-//
-// We use this GMalloc address to identify FMemory::Free among the E8 CALLs
-// inside ParseSettings (Free also loads GMalloc in its body).
-//
-// Final validation: Malloc/Free smoke test under SEH.
-// ---------------------------------------------------------------------------
-
-// Address of the ParseSettings function in the game binary.
-// Set by Install() before ResolveEngineAllocator is called.
-static uintptr_t g_parseSettingsAddress = 0;
-
-// Known offset from ParseSettings to the `call FMemory::Free` instruction.
-// From IDA:  ParseSettings+16F  call  ?Free@FMemory@@SAXPEAX@Z
-// Used as a hint in the fallback path.
-static constexpr size_t PARSESETTINGS_FREE_CALL_OFFSET = 0x16F;
-
-// ---------------------------------------------------------------------------
-// Pattern that lands directly on the E8 CALL to FMemory::Malloc.
-//
-// From IDA - UCrAbilitySystemGlobals::AllocAbilityActorInfo:
-//   sub rsp, 28h
-//   mov edx, 10h
-//   lea ecx, [rdx+70h]
-//   call FMemory::Malloc          <-- pattern starts here (E8 xx xx xx xx)
-//   mov rbx, rax
-//   test rax, rax
-// jz   ...
-//
-// The E8 is followed by: 48 8B D8 48 85 C0 0F 84
-// This sequence (save result, null-check, branch) is extremely common after
-// Malloc calls, but the full pattern with the trailing bytes is unique enough.
-// ---------------------------------------------------------------------------
-static auto FMEMORY_MALLOC_PATTERN =
-	"E8 ?? ?? ?? ?? 48 8B D8 48 85 C0 0F 84 ?? ?? ?? ?? "
-	"33 D2 41 B8 ?? ?? ?? ?? 48 8B C8 E8 ?? ?? ?? ?? "
-	"0F 10 05 ?? ?? ?? ?? 33 C0 48 C7 43 ?? ?? ?? ?? ?? "
-	"80 63 ?? ?? 48 89 43";
-
-// ---------------------------------------------------------------------------
-// Helper: resolve an E8 rel32 CALL instruction at a given address.
-// Returns the absolute target address, or 0 if the byte at addr is not 0xE8.
-// ---------------------------------------------------------------------------
-static uintptr_t ResolveE8Call(uintptr_t addr)
-{
-	const auto* bytes = reinterpret_cast<const uint8_t*>(addr);
-	if (bytes[0] != 0xE8)
-		return 0;
-
-	int32_t rel32;
-	memcpy(&rel32, bytes + 1, sizeof(int32_t));
-	return addr + 5 + static_cast<uintptr_t>(static_cast<intptr_t>(rel32));
-}
-
-// ---------------------------------------------------------------------------
-// Helper: dump the first N bytes at an address as hex for diagnostics.
-// ---------------------------------------------------------------------------
-static void DumpBytes(const char* label, uintptr_t addr, size_t count)
-{
-	const auto* bytes = reinterpret_cast<const uint8_t*>(addr);
-	char hexBuf[256] = {};
-	size_t pos = 0;
-	for (size_t i = 0; i < count && pos + 3 < sizeof(hexBuf); ++i)
-		pos += snprintf(hexBuf + pos, sizeof(hexBuf) - pos, "%02X ", bytes[i]);
-	LOG_DEBUG("[DumpBytes] %s at 0x%llX: %s", label, static_cast<unsigned long long>(addr), hexBuf);
-}
-
-// ---------------------------------------------------------------------------
-// Helper: check if an address range is readable (committed memory).
-// ---------------------------------------------------------------------------
-static bool IsReadableMemory(uintptr_t addr, size_t size)
-{
-	MEMORY_BASIC_INFORMATION mbi;
-	if (VirtualQuery(reinterpret_cast<const void*>(addr), &mbi, sizeof(mbi)) == 0)
-		return false;
-	if (mbi.State != MEM_COMMIT)
-		return false;
-	// Reject guard/noaccess pages
-	if (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS))
-		return false;
-	// Make sure the full range fits within this committed region
-	uintptr_t regionEnd = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
-	if (addr + size > regionEnd)
-		return false;
-	return true;
-}
-
-// ---------------------------------------------------------------------------
-// Helper: extract the absolute address of the GMalloc global pointer from
-// a function body.
-//
-// Looks for any RIP-relative MOV load into a 64-bit register:
-//   (48|4C) 8B ModRM xx xx xx xx
-// where ModRM has mod=00, r/m=101 (RIP-relative addressing).
-//
-// Returns the absolute address of the referenced global, or 0 on failure.
-// ---------------------------------------------------------------------------
-static uintptr_t ExtractGMallocAddress(uintptr_t funcAddr, size_t scanLen = 64)
-{
-	// Verify the memory is readable before scanning
-	if (!IsReadableMemory(funcAddr, scanLen))
-	{
-		LOG_DEBUG("[ExtractGMallocAddress] Address 0x%llX (len %zu) is not readable",
-		          static_cast<unsigned long long>(funcAddr), scanLen);
-		return 0;
-	}
-
-	const auto* bytes = reinterpret_cast<const uint8_t*>(funcAddr);
-
-	for (size_t i = 0; i + 7 <= scanLen; ++i)
-	{
-		// REX.W prefix: 48 or 4C (REX.W + REX.R)
-		if (bytes[i] != 0x48 && bytes[i] != 0x4C)
-			continue;
-
-		// Opcode: 8B = MOV r64, r/m64
-		if (bytes[i + 1] != 0x8B)
-			continue;
-
-		// ModRM: mod=00 r/m=101 → RIP-relative
-		uint8_t modrm = bytes[i + 2];
-		if ((modrm & 0xC7) != 0x05)
-			continue;
-
-		int32_t disp32;
-		memcpy(&disp32, &bytes[i + 3], sizeof(int32_t));
-
-		uintptr_t globalAddr = funcAddr + i + 7 + static_cast<uintptr_t>(static_cast<intptr_t>(disp32));
-
-		LOG_DEBUG("[ExtractGMallocAddress] Found RIP-relative MOV at +0x%zX (%02X %02X %02X) -> global at 0x%llX",
-		          i, bytes[i], bytes[i + 1], bytes[i + 2], static_cast<unsigned long long>(globalAddr));
-		return globalAddr;
-	}
-
-	LOG_DEBUG("[ExtractGMallocAddress] No RIP-relative MOV found in first %zu bytes of 0x%llX",
-	          scanLen, static_cast<unsigned long long>(funcAddr));
-	return 0;
-}
-
-// ---------------------------------------------------------------------------
-// Smoke test: attempt a small Malloc -> write -> Free cycle under SEH.
-// ---------------------------------------------------------------------------
-static bool SmokeTestAllocator(FMemoryMalloc_t mallocFn, FMemoryFree_t freeFn)
-{
-	LOG_DEBUG("[SmokeTestAllocator] Testing Malloc=0x%llX  Free=0x%llX ...",
-	          static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(mallocFn)),
-	          static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(freeFn)));
-
-	__try
-	{
-		void* ptr = mallocFn(64, 16);
-		if (!ptr)
-		{
-			LOG_WARN("[SmokeTestAllocator] Malloc returned null");
-			return false;
-		}
-
-		LOG_DEBUG("[SmokeTestAllocator] Malloc returned %p", ptr);
-		memset(ptr, 0xAB, 64);
-		freeFn(ptr);
-
-		LOG_DEBUG("[SmokeTestAllocator] PASSED - Malloc/Free cycle completed successfully");
-		return true;
-	}
-	__except (EXCEPTION_EXECUTE_HANDLER)
-	{
-		DWORD code = GetExceptionCode();
-		LOG_ERROR("[SmokeTestAllocator] FAILED - exception 0x%08lX during Malloc/Free cycle", code);
-		return false;
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Find FMemory::Malloc via the call-site pattern.
-// The pattern starts on the E8 byte, so we just resolve the rel32.
-// ---------------------------------------------------------------------------
-// Resolved during OnPluginLoadHooks; 0 means the pattern missed on this build.
-static uintptr_t g_mallocCallSite = 0;
-
-void ParseSettingsHook::Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
-{
-	if (!self || !scanner)
-		return;
-
-	// Optional: the allocator lookup only feeds diagnostics here, and the hook
-	// itself installs against an address resolved in plugin.cpp.
-	g_mallocCallSite = scanner->ResolveOptional(
-		self, "FMemory::Malloc (call site)", FMEMORY_MALLOC_PATTERN);
-}
-
-static uintptr_t FindMallocViaPattern()
-{
-	uintptr_t callSite = g_mallocCallSite;
-	if (callSite == 0)
-	{
-		LOG_WARN("[FindMalloc] Malloc call-site unresolved");
-		return 0;
-	}
-
-	LOG_INFO("[FindMalloc] Call-site pattern matched at 0x%llX", static_cast<unsigned long long>(callSite));
-
-	uintptr_t mallocAddr = ResolveE8Call(callSite);
-	if (mallocAddr == 0)
-	{
-		LOG_WARN("[FindMalloc] Failed to decode E8 CALL at pattern match");
-		return 0;
-	}
-
-	LOG_INFO("[FindMalloc] FMemory::Malloc = 0x%llX", static_cast<unsigned long long>(mallocAddr));
-	DumpBytes("FMemory::Malloc", mallocAddr, 64);
-	return mallocAddr;
-}
-
-// ---------------------------------------------------------------------------
-// Find FMemory::Free by scanning ParseSettings for E8 CALLs whose target
-// references the same GMalloc global as Malloc.
-// ---------------------------------------------------------------------------
-static uintptr_t FindFreeViaGMalloc(uintptr_t gmallocAddr)
-{
-	if (g_parseSettingsAddress == 0 || gmallocAddr == 0)
-		return 0;
-
-	LOG_DEBUG("[FindFree] Scanning ParseSettings at 0x%llX for calls referencing GMalloc 0x%llX...",
-	          static_cast<unsigned long long>(g_parseSettingsAddress),
-	          static_cast<unsigned long long>(gmallocAddr));
-
-	int callsFound = 0;
-	int callsReadable = 0;
-
-	for (size_t offset = 0; offset < 0x400; ++offset)
-	{
-		uintptr_t instrAddr = g_parseSettingsAddress + offset;
-		uintptr_t target = ResolveE8Call(instrAddr);
-		if (target == 0)
-			continue;
-
-		callsFound++;
-
-		// Validate the target address is readable before scanning its bytes
-		if (!IsReadableMemory(target, 64))
-		{
-			LOG_DEBUG("[FindFree]   +0x%03zX -> 0x%llX (NOT READABLE, skipping)",
-			          offset, static_cast<unsigned long long>(target));
-			continue;
-		}
-
-		callsReadable++;
-
-		// Check if this call target references the same GMalloc
-		uintptr_t candidateGMalloc = ExtractGMallocAddress(target, 64);
-		if (candidateGMalloc == gmallocAddr)
-		{
-			LOG_DEBUG("[FindFree] FMemory::Free = 0x%llX (from ParseSettings+0x%zX, same GMalloc)",
-			          static_cast<unsigned long long>(target), offset);
-			LOG_DEBUG("[FindFree]   Scanned %d E8 candidates (%d readable) before match",
-			          callsFound, callsReadable);
-			DumpBytes("FMemory::Free", target, 64);
-			return target;
-		}
-	}
-
-	LOG_WARN("[FindFree] No call target in ParseSettings references GMalloc 0x%llX",
-	         static_cast<unsigned long long>(gmallocAddr));
-	LOG_WARN("[FindFree]   Scanned %d E8 candidates (%d readable), none matched",
-	         callsFound, callsReadable);
-	return 0;
-}
-
-// ---------------------------------------------------------------------------
-// Find FMemory::Free via the known ParseSettings offset (fallback).
-static uintptr_t FindFreeViaOffset(uintptr_t mallocAddr)
-{
-	if (g_parseSettingsAddress == 0)
-		return 0;
-
-	uintptr_t freeCallSite = g_parseSettingsAddress + PARSESETTINGS_FREE_CALL_OFFSET;
-
-	// Check the call site itself is readable
-	if (!IsReadableMemory(freeCallSite, 5))
-	{
-		LOG_WARN("[FindFree:Offset] ParseSettings+0x%zX is not readable", PARSESETTINGS_FREE_CALL_OFFSET);
-		return 0;
-	}
-
-	const auto* callByte = reinterpret_cast<const uint8_t*>(freeCallSite);
-	if (*callByte != 0xE8)
-	{
-		LOG_WARN("[FindFree:Offset] Byte at ParseSettings+0x%zX is 0x%02X, not 0xE8",
-		         PARSESETTINGS_FREE_CALL_OFFSET, *callByte);
-		return 0;
-	}
-
-	uintptr_t freeAddr = ResolveE8Call(freeCallSite);
-	if (freeAddr == 0)
-		return 0;
-
-	// Validate target is readable
-	if (!IsReadableMemory(freeAddr, 64))
-	{
-		LOG_WARN("[FindFree:Offset] Resolved target 0x%llX is not readable",
-		         static_cast<unsigned long long>(freeAddr));
-		return 0;
-	}
-
-	LOG_INFO("[FindFree:Offset] Candidate FMemory::Free = 0x%llX (from ParseSettings+0x%zX)",
-	         static_cast<unsigned long long>(freeAddr), PARSESETTINGS_FREE_CALL_OFFSET);
-	DumpBytes("FMemory::Free candidate", freeAddr, 64);
-
-	// Validate with smoke test
-	if (!SmokeTestAllocator(reinterpret_cast<FMemoryMalloc_t>(mallocAddr),
-	                        reinterpret_cast<FMemoryFree_t>(freeAddr)))
-	{
-		LOG_WARN("[FindFree:Offset] Smoke test FAILED for offset candidate");
-		return 0;
-	}
-
-	return freeAddr;
-}
-
-
-// ---------------------------------------------------------------------------
 // Public API: ParseSettingsHook namespace
 // ---------------------------------------------------------------------------
 void ParseSettingsHook::Install(uintptr_t targetAddress)
@@ -820,9 +475,6 @@ void ParseSettingsHook::Install(uintptr_t targetAddress)
 		LOG_WARN("[ParseSettingsHook::Install] Hook already installed - skipping");
 		return;
 	}
-
-	// Store the address for use by engine allocator resolution
-	g_parseSettingsAddress = targetAddress;
 
 	// Install the inline hook via the mod loader's hook interface
 	auto* hooks = GetHooks();
@@ -868,7 +520,6 @@ void ParseSettingsHook::Remove()
 
 	g_hookHandle = nullptr;
 	g_originalParseSettings = nullptr;
-	g_parseSettingsAddress = 0;
 
 	LOG_INFO("[ParseSettingsHook::Remove] Hook removed successfully");
 }

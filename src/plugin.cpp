@@ -1,6 +1,7 @@
 #include "plugin.h"
 #include "plugin_helpers.h"
 #include "plugin_config.h"
+#include "game_signatures.h"
 #include "hooks/parse_settings/parse_settings.h"
 #include "hooks/max_players/max_players.h"
 #include "hooks/auto_profession/auto_profession.h"
@@ -35,12 +36,6 @@ static PluginInfo s_pluginInfo = {
 	PLUGIN_INTERFACE_VERSION,
 	PLUGIN_TARGET_SERVER
 };
-
-// -----------------------------------------------------------------------
-// UCrDedicatedServerSettingsComp::ParseSettings pattern
-// "48 8B C4 55 41 54 48 8D 6C 24"
-// -----------------------------------------------------------------------
-static constexpr auto DEDSERVER_SETTINGS_COMP_PARSE_SETTINGS_PATTERN = "48 8B C4 55 41 54 48 8D 6C 24";
 
 // Resolved during OnPluginLoadHooks; 0 means the pattern missed on this build.
 static uintptr_t g_parseSettingsAddr = 0;
@@ -104,9 +99,8 @@ __declspec(dllexport) void OnPluginLoadHooks(IPluginSelf* self, IPluginHookScann
 	// RCON server and the rest of the plugin still work.
 	g_parseSettingsAddr = scanner->ResolveOptional(
 		self, "UCrDedicatedServerSettingsComp::ParseSettings",
-		DEDSERVER_SETTINGS_COMP_PARSE_SETTINGS_PATTERN);
+		GameSig::DEDSERVER_SETTINGS_COMP_PARSE_SETTINGS);
 
-	ParseSettingsHook::Resolve(self, scanner);
 	MaxPlayersHook::Resolve(self, scanner);
 	AutoProfessionHook::Resolve(self, scanner);
 	Cmd_Save::Resolve(self, scanner);

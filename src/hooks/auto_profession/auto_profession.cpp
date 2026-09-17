@@ -1,5 +1,6 @@
 #include "auto_profession.h"
 #include "plugin_helpers.h"
+#include "game_signatures.h"
 
 #include <Windows.h>
 #include <cstdint>
@@ -8,23 +9,15 @@
 // ---------------------------------------------------------------------------
 // ACrGameModeBase::GetProfessionForNewPlayer
 //
-// Pattern (from IDA):
-//   48 8B C4 48 89 50 ?? 55 53 48 8D 68 ?? 48 81 EC ?? ?? ?? ?? 48 89 70 ?? 48 8B F2 48 89 78 ?? 48 8B F9
-//
-// We patch the prologue to:
-//   mov eax, 1   ; B8 01 00 00 00   (return EProfessionType::Soldier)
-//   ret          ; C3
+// Pattern and patch bytes live in game_signatures.h.  We patch the prologue
+// to `mov eax, 1; ret` (return EProfessionType::Soldier).
 //
 // Total: 6 bytes.  The original prologue is at least 6 bytes long (starts
 // with `48 8B C4 48 89 50 xx` - 7 bytes), so this is safe.
 // ---------------------------------------------------------------------------
 
-static constexpr auto GET_PROFESSION_PATTERN =
-	"48 8B C4 48 89 50 ?? 55 53 48 8D 68 ?? 48 81 EC ?? ?? ?? ?? 48 89 70 ?? 48 8B F2 48 89 78 ?? 48 8B F9";
-
-// The 6-byte patch: mov eax, 1 ; ret
-static constexpr uint8_t PATCH_BYTES[] = {0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3};
-static constexpr size_t PATCH_SIZE = sizeof(PATCH_BYTES);
+static constexpr const uint8_t* PATCH_BYTES = GameSig::GET_PROFESSION_PATCH_BYTES;
+static constexpr size_t PATCH_SIZE = sizeof(GameSig::GET_PROFESSION_PATCH_BYTES);
 
 // ---------------------------------------------------------------------------
 // State
@@ -47,7 +40,7 @@ void AutoProfessionHook::Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
 	// Optional: the profession patch only matters alongside the MaxPlayers
 	// patch, and the plugin already carried on without it.
 	g_getProfessionAddr = scanner->ResolveOptional(
-		self, "ACrGameModeBase::GetProfessionForNewPlayer", GET_PROFESSION_PATTERN);
+		self, "ACrGameModeBase::GetProfessionForNewPlayer", GameSig::GAMEMODE_GET_PROFESSION_FOR_NEW_PLAYER);
 }
 
 void AutoProfessionHook::Install()

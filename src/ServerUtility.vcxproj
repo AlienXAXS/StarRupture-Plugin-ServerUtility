@@ -320,6 +320,7 @@
     <ClInclude Include="plugin.h" />
     <ClInclude Include="plugin_config.h" />
     <ClInclude Include="plugin_helpers.h" />
+    <ClInclude Include="game_signatures.h" />
     <ClInclude Include="plugin_interface.h" />
     <ClInclude Include="rcon\commands\cmd_save.h" />
     <ClInclude Include="rcon\rcon.h" />

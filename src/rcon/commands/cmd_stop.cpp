@@ -1,15 +1,15 @@
 #include "cmd_stop.h"
 #include "command_handler.h"
 #include "plugin_helpers.h"
+#include "game_signatures.h"
 
 #include <windows.h>
 
 namespace Cmd_Stop
 {
 	// FWindowsPlatformMisc::RequestExit(bool Force, const wchar_t* CallSite)
-	// Pattern: 48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 48 83 EC ?? 44 0F B6 05
-	static constexpr auto REQUEST_EXIT_PATTERN =
-		"48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 48 83 EC ?? 44 0F B6 05";
+	// Pattern lives in game_signatures.h.
+	static constexpr auto REQUEST_EXIT_PATTERN = GameSig::PLATFORM_MISC_REQUEST_EXIT;
 
 	using RequestExit_t = void(__fastcall*)(bool bForce, const wchar_t* CallSite);
 	static RequestExit_t g_requestExit = nullptr;

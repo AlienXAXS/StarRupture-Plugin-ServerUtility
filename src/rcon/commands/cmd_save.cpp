@@ -1,6 +1,7 @@
 #include "cmd_save.h"
 #include "command_handler.h"
 #include "plugin_helpers.h"
+#include "game_signatures.h"
 
 #include <windows.h>
 
@@ -21,10 +22,9 @@ namespace Cmd_Save
 	// This is the game's internal function that determines whether the
 	// server is dedicated or not and serialises the current world state
 	// to the appropriate save file.  We call it directly to force an
-	// immediate save on demand.
+	// immediate save on demand.  Pattern lives in game_signatures.h.
 	// -----------------------------------------------------------------------
-	static constexpr auto SAVE_PATTERN =
-		"48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 48 83 EC ?? 48 8B F9 E8 ?? ?? ?? ?? 33 ED 48 8B D8 48 85 C0 74 ?? E8 ?? ?? ?? ?? 48 8B 53 ?? 4C 8D 40 ?? 48 63 40 ?? 3B 42 ?? 7F ?? 48 8B C8 48 8B 42 ?? ?? ?? ?? ?? 74 ?? 48 8B DD 48 8D 54 24 ?? 48 8B CB E8 ?? ?? ?? ?? 48 63 5C 24";
+	static constexpr auto SAVE_PATTERN = GameSig::SAVE_SUBSYSTEM_SAVE_NEXT_SAVE_GAME;
 
 	using SaveNextSaveGame_t = void(__fastcall*)(void* thisPtr);
 	static SaveNextSaveGame_t g_saveFunc = nullptr;

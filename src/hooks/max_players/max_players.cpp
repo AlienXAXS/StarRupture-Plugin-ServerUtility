@@ -1,5 +1,6 @@
 #include "max_players.h"
 #include "plugin_helpers.h"
+#include "game_signatures.h"
 
 #include <Windows.h>
 #include <cstdint>
@@ -16,21 +17,14 @@
 //
 // We scan forward from the pattern match to find this `cmp ebx, imm8`
 // instruction and patch the immediate byte (04) to the desired value.
+//
+// The pattern, scan window and instruction encodings live in
+// game_signatures.h.
 // ---------------------------------------------------------------------------
-static constexpr auto PRELOGIN_PATTERN =
-	"48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 41 56 41 57 48 83 EC ?? 80 3D ?? ?? ?? ?? ?? 49 8B E9";
-
-// Maximum number of bytes to scan forward from the pattern match to find
-// the `cmp ebx, imm8` instruction.  PreLogin is not a huge function.
-static constexpr size_t SCAN_WINDOW = 0x200;
-
-// The instruction sequence we're looking for:
-//   83 FB xx   cmp  ebx, imm8
-//   7C xx      jl   short rel8
-// We match on the opcode + ModRM byte (83 FB) and verify the JL follows.
-static constexpr uint8_t CMP_EBX_OPCODE = 0x83;
-static constexpr uint8_t CMP_EBX_MODRM = 0xFB; // /7 ebx
-static constexpr uint8_t JL_OPCODE = 0x7C;
+static constexpr size_t SCAN_WINDOW = GameSig::PRELOGIN_SCAN_WINDOW;
+static constexpr uint8_t CMP_EBX_OPCODE = GameSig::PRELOGIN_CMP_EBX_OPCODE;
+static constexpr uint8_t CMP_EBX_MODRM = GameSig::PRELOGIN_CMP_EBX_MODRM;
+static constexpr uint8_t JL_OPCODE = GameSig::PRELOGIN_JL_OPCODE;
 
 // ---------------------------------------------------------------------------
 // State
@@ -50,7 +44,7 @@ void MaxPlayersHook::Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
 	// Optional: a miss leaves the server on the stock 4-player limit rather than
 	// refusing the whole plugin, which is what the old scan-at-init path did.
 	g_preLoginAddr = scanner->ResolveOptional(
-		self, "ACrGameModeBase::PreLogin", PRELOGIN_PATTERN);
+		self, "ACrGameModeBase::PreLogin", GameSig::GAMEMODE_PRELOGIN);
 }
 
 // ---------------------------------------------------------------------------
