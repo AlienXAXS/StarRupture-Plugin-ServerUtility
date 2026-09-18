@@ -30,6 +30,13 @@ namespace ServerUtilityConfig
 		},
 		{
 			"PluginSettings",
+			"GatherableSeedResync",
+			ConfigValueType::Boolean,
+			"true",
+			"After a save loads, copy the PCG seed the server generated gatherables with onto the replication actor. Without it clients joining an older save generate gatherables from the default seed and see a different layout than the server. Requires GatherableRespawnFix."
+		},
+		{
+			"PluginSettings",
 			"RemoteVulnerabilityPatch",
 			ConfigValueType::Boolean,
 			"true",
@@ -98,6 +105,14 @@ namespace ServerUtilityConfig
 		{
 			return s_self
 				       ? s_self->config->ReadBool(s_self, "PluginSettings", "GatherableRespawnFix", true)
+				       : true;
+		}
+
+		// Returns true if the post-load gatherable seed resync is enabled (default: true).
+		static bool GetGatherableSeedResync()
+		{
+			return s_self
+				       ? s_self->config->ReadBool(s_self, "PluginSettings", "GatherableSeedResync", true)
 				       : true;
 		}
 

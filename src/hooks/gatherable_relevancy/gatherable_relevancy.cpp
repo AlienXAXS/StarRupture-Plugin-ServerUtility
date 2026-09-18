@@ -5,6 +5,7 @@
 #include <Windows.h>
 #include <cstdint>
 #include <cstring>
+#include <map>
 #include <vector>
 
 #if defined(MODLOADER_SERVER_BUILD) || defined(MODLOADER_CLIENT_BUILD)
@@ -26,6 +27,8 @@ static RepGraphActorFn g_removeNetworkActor = nullptr;
 static bool g_installed   = false;
 static bool g_livePending = false;   // a world came up; the live-graph half still has to run
 static int  g_liveTicks   = 0;       // ticks spent waiting for the rep actor to appear
+static bool g_seedResync  = true;    // config: push the loaded seed onto the rep actor
+static int  g_resyncTicks = -1;      // countdown to the seed resync; -1 = none scheduled
 
 // The rep actor is spawned in UCrGatherableSpawnersSubsystem::OnWorldBeginPlay
 // and the graph adds it on spawn. Our world-begin-play hook is on a different
@@ -33,6 +36,12 @@ static int  g_liveTicks   = 0;       // ticks spent waiting for the rep actor to
 // is far more than it needs and bounds the retry if something is genuinely
 // missing (a world with no gatherable subsystem, say).
 static constexpr int kMaxLiveTicks = 600;
+
+// Ticks between the live re-route and the seed resync. The subsystem's own
+// TryLoading retries on a 3 s timer until the rep actor exists, and the
+// resync must run after it has restored the saved seed; a couple of seconds
+// of ticks after the actor showed up comfortably covers that.
+static constexpr int kResyncDelayTicks = 240;
 
 // ---------------------------------------------------------------------------
 // Resolve
@@ -267,6 +276,95 @@ static bool ApplyToLiveGraph()
 }
 
 // ---------------------------------------------------------------------------
+// Seed resync
+//
+// Relevancy gets the rep actor to the client; it does not get the right seed
+// onto it. The seed is only written to ACrGatherableSpawnersRepActor::
+// RepGlobalGatherablePCGSeed inside OnGlobalSeedChanged, i.e. when a wave
+// stage changes. TryLoading restores the saved seed into the *subsystem* and
+// never touches the actor, so after loading a save the actor still carries its
+// constructor default (777) until the next wave -- and a client joining in
+// between generates from 777 while the server runs the saved seed. A new save
+// has never rolled the seed, so 777 is right by accident; a long-lived save is
+// wrong on every join. That is the "old saves only" symptom.
+//
+// The seed the server generated with is read back from its own PCG actors:
+// every ACrPCGGatherableSpawnerVolume / ACrPCGVolume / ACrPCGActorBase stores
+// the seed it last generated from in LocalSeed (a UPROPERTY, unlike the
+// subsystem's copy). That is the number the client has to match -- whatever
+// order load and generation happened in on the server -- so it is preferred
+// over the subsystem's private field, which would also need a per-build
+// offset. The majority value wins; a split is logged, because it would mean
+// the server itself is not in one consistent state.
+//
+// The wave type/stage written alongside are Heat/Moving. A client's OnRep
+// hands them to OnGlobalSeedChanged with bIsDebugForced=false, so only
+// volumes whose SeedChangeEnviroWaveConditions contain that pair regenerate;
+// Heat/Moving is the stage the seed itself changes on, so it is the pair a
+// volume must list to ever pick up a new seed, and it is what the game's own
+// forced-generation path writes (EnviroWave 1, Stage 2 packed as 513).
+//
+// Deliberately NOT TriggerGenerationWithCurrentSeed: that path also clears
+// the depleted octree for the FireWaveMoving stage before regenerating, i.e.
+// plants due back at the next heat wave come back at every server restart.
+// Writing the actor directly changes nothing on the server; the client is
+// simply told the truth.
+// ---------------------------------------------------------------------------
+template <typename T>
+static void CollectLocalSeeds(const char* className, std::map<int32_t, int>& histogram, int& total)
+{
+	for (T* actor : FindInstances<T>(className))
+	{
+		++histogram[actor->LocalSeed];
+		++total;
+	}
+}
+
+static void ResyncSeed()
+{
+	auto actors = FindInstances<SDK::ACrGatherableSpawnersRepActor>("CrGatherableSpawnersRepActor");
+	if (actors.empty())
+	{
+		LOG_WARN("[GatherableFix] Rep actor gone before the seed resync ran - nothing to write");
+		return;
+	}
+
+	std::map<int32_t, int> histogram;
+	int total = 0;
+	CollectLocalSeeds<SDK::ACrPCGGatherableSpawnerVolume>("CrPCGGatherableSpawnerVolume", histogram, total);
+	CollectLocalSeeds<SDK::ACrPCGVolume>("CrPCGVolume", histogram, total);
+	CollectLocalSeeds<SDK::ACrPCGActorBase>("CrPCGActorBase", histogram, total);
+
+	if (total == 0)
+	{
+		LOG_WARN("[GatherableFix] No PCG spawner actors found - cannot determine the server's gatherable seed");
+		return;
+	}
+
+	int32_t seed  = 0;
+	int     votes = 0;
+	for (const auto& [value, count] : histogram)
+	{
+		LOG_DEBUG("[GatherableFix]   LocalSeed %d on %d of %d spawner actors", value, count, total);
+		if (count > votes) { seed = value; votes = count; }
+	}
+	if (histogram.size() > 1)
+		LOG_WARN("[GatherableFix] Spawner actors disagree on the seed (%zu distinct values) - using %d (%d/%d). "
+		         "The server generated some volumes before the save's seed was restored?",
+		         histogram.size(), seed, votes, total);
+
+	for (SDK::ACrGatherableSpawnersRepActor* actor : actors)
+	{
+		const int32_t before = actor->RepGlobalGatherablePCGSeed;
+		actor->RepGlobalGatherablePCGSeed = seed;
+		actor->RepEnviroWaveTypeChange    = SDK::EEnviroWave::Heat;
+		actor->RepEnviroWaveStageChange   = SDK::EEnviroWaveStage::Moving;
+		LOG_INFO("[GatherableFix] %s: RepGlobalGatherablePCGSeed %d -> %d (Heat/Moving) - clients will regenerate from it",
+		         actor->GetName().c_str(), before, seed);
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Callbacks
 // ---------------------------------------------------------------------------
 static void OnAnyWorldBeginPlay(SDK::UWorld* /*world*/, const char* worldName)
@@ -274,16 +372,22 @@ static void OnAnyWorldBeginPlay(SDK::UWorld* /*world*/, const char* worldName)
 	LOG_DEBUG("[GatherableFix] World '%s' began play - scheduling live graph check", worldName ? worldName : "?");
 	g_livePending = true;
 	g_liveTicks   = 0;
+	g_resyncTicks = -1;   // a new world: the old countdown is meaningless
 }
 
 static void OnTick(float /*deltaSeconds*/)
 {
+	if (g_resyncTicks >= 0 && g_resyncTicks-- == 0)
+		ResyncSeed();
+
 	if (!g_livePending)
 		return;
 
 	if (ApplyToLiveGraph())
 	{
 		g_livePending = false;
+		if (g_seedResync)
+			g_resyncTicks = kResyncDelayTicks;
 		return;
 	}
 
@@ -300,11 +404,13 @@ static void OnTick(float /*deltaSeconds*/)
 // ---------------------------------------------------------------------------
 // Install / Remove
 // ---------------------------------------------------------------------------
-void GatherableRelevancyFix::Install()
+void GatherableRelevancyFix::Install(bool seedResync)
 {
 #if GATHERABLE_FIX_HAS_SDK
 	if (g_installed)
 		return;
+
+	g_seedResync = seedResync;
 
 	auto* hooks = GetHooks();
 	if (!hooks || !hooks->Engine || !hooks->World)
@@ -342,6 +448,7 @@ void GatherableRelevancyFix::Remove()
 		if (hooks->Engine) hooks->Engine->UnregisterOnTick(OnTick);
 	}
 	g_livePending = false;
+	g_resyncTicks = -1;
 	g_installed   = false;
 #endif
 }

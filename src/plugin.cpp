@@ -172,7 +172,7 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 	// Gatherable regrowth never reaches remote clients without this; see the
 	// module header for why.
 	if (ServerUtilityConfig::Config::GetGatherableRespawnFix())
-		GatherableRelevancyFix::Install();
+		GatherableRelevancyFix::Install(ServerUtilityConfig::Config::GetGatherableSeedResync());
 	else
 		LOG_INFO("GatherableRespawnFix disabled in config");
 

@@ -39,6 +39,14 @@
 //      order relative to our own world-begin-play hook is not guaranteed, so
 //      it retries for a few seconds of ticks).
 //
+// And a third step, because a relevant actor carrying the wrong seed is no
+// better: after a save load the rep actor still holds its default seed (the
+// saved one only lands in the subsystem, and only a wave stage change copies
+// it across). The seed the server actually generated with is read back from
+// its PCG spawner actors' LocalSeed and written onto the rep actor together
+// with the Heat/Moving stage, which is what makes a client regenerate from
+// it. See ResyncSeed().
+//
 // Verify with the engine console: `CrRepGraph.PrintRouting` prints
 // `CrGatherableSpawnersRepActor --> RelevantAllConnections` once applied.
 // ---------------------------------------------------------------------------
@@ -53,8 +61,9 @@ namespace GatherableRelevancyFix
 	void Resolve(IPluginSelf* self, IPluginHookScanner* scanner);
 
 	// Apply the CDO half and register the world/tick callbacks for the live
-	// half. Call from PluginInit.
-	void Install();
+	// half. Call from PluginInit. seedResync additionally forces one generation
+	// pass per world so the loaded seed is pushed onto the rep actor.
+	void Install(bool seedResync);
 
 	// Unregister callbacks. Call from engine shutdown.
 	void Remove();
