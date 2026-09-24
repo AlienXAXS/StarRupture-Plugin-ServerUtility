@@ -13,10 +13,6 @@
 #include "state/server_state.h"
 #include "server/rcon_server.h"
 #include "server/query_server.h"
-#include "commands/command_handler.h"
-#include "commands/cmd_players.h"
-#include "commands/cmd_stop.h"
-#include "commands/cmd_save.h"
 
 // SDK access: only compile player-collection code when we have the engine SDK.
 // Server/Client configs get MODLOADER_SERVER_BUILD / MODLOADER_CLIENT_BUILD via
@@ -200,7 +196,7 @@ static void CollectPlayers()
 
 	RawPlayerData rawBuf[MAX_RAW_PLAYERS];
 	int rawCount = CollectPlayersRaw_SEH(world, rawBuf);
-	if (rawCount <= 0) return;
+	if (rawCount < 0) return;   // faulted: keep the last good list
 
 	std::vector<PlayerInfo> players;
 	players.reserve(static_cast<size_t>(rawCount));
@@ -260,10 +256,6 @@ void Rcon::Init()
 	const uint16_t port = ReadRconPort();
 	const std::string password = ReadRconPassword();
 
-	// always register the stop command so we can shut down even if no password/port is configured
-	auto& cmds = CommandHandler::Get();
-	Cmd_Stop::Register(cmds);
-
 	if (port == 0 || password.empty())
 	{
 		if (port == 0 || password.empty())
@@ -287,11 +279,6 @@ void Rcon::Init()
 	LOG_INFO("[Rcon] Query port : %d", port);
 	LOG_INFO("[Rcon] Server name: %s", servName.c_str());
 
-	// Register built-in commands
-	
-	Cmd_Players::Register(cmds);
-	Cmd_Save::Register(cmds);
-
 	// Start UDP query server (always)
 	g_queryServer.Start(port);
 
@@ -303,6 +290,11 @@ void Rcon::Init()
 	g_refreshThread = std::thread(RefreshLoop);
 
 	LOG_INFO("[Rcon] Subsystem ready");
+}
+
+void Rcon::RefreshPlayers()
+{
+	CollectPlayers();
 }
 
 void Rcon::Shutdown()

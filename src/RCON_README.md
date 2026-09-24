@@ -70,7 +70,7 @@ The empty `RESPONSE_VALUE` before the `AUTH_RESPONSE` follows the Source RCON sp
 ### Command Execution Flow
 
 1. Client sends a `SERVERDATA_EXECCOMMAND` (type `2`) packet with the command string in the body.
-2. Server dispatches the command handler to the **game thread** (UGameEngine::Tick) and blocks the network thread until the result is ready (30-second timeout).
+2. Server hands the line to the mod loader (`IPluginConsole::ExecuteWithEngine`), which runs it on the **game thread** exactly as if it had been typed into the server's `-console` window. The network thread blocks until the output is complete (30-second timeout).
 3. Server sends a `SERVERDATA_RESPONSE_VALUE` (type `0`) packet with the command output.
 
 ### Connection Behaviour
@@ -86,31 +86,27 @@ The empty `RESPONSE_VALUE` before the `AUTH_RESPONSE` follows the Source RCON sp
 
 ## Game-Thread Dispatch
 
-All RCON commands run on the **game thread** by default. This is critical because many commands interact with Unreal Engine subsystems that assert `IsInGameThread()`.
+RCON has no command table of its own. Every line is passed to the mod loader, which resolves it the same way its `-console` window does:
 
-The flow is:
+1. **Mod loader and plugin commands** -- `help`, `plugins`, `clients`, `stop`, ..., plus anything any plugin registered (including this plugin's `players` and `save`).
+2. **Engine commands** for anything else -- console variables (`CrRepGraph.SomeCVar 1`), `log <category> <verbosity>`, and the rest of what `UGameEngine::Exec` accepts.
+3. A leading `!` skips step 1 and goes straight to the engine.
 
-| Step | Thread | Action |
-|---|---|---|
-| 1 | RCON client thread | `CommandHandler::Execute()` is called with the command string |
-| 2 | RCON client thread | A task (lambda + future) is posted to the dispatch queue |
-| 3 | RCON client thread | Blocks waiting for the future to complete (30-second timeout) |
-| 4 | Game thread | `Rcon::OnTick()` fires on the next engine tick |
-| 5 | Game thread | `GameThreadDispatch::Drain()` picks up the queued task |
-| 6 | Game thread | The command handler runs and sets the result on the future |
-| 7 | RCON client thread | The future completes; the result string is sent back to the client |
+Every command, whichever step answers it, runs on the **game thread** during the next engine tick. The RCON client thread blocks until the loader reports the command complete, then sends back every line it wrote. If the game thread does not get to it within 30 seconds the reply ends with a timeout error (the command still runs when the tick arrives).
 
-Commands that don't touch engine state can opt out by registering with `gameThread = false`.
+Engine commands return whatever they write to their output device. A command that only writes to the engine log sends back `(no output)`.
 
 ---
 
 ## Available Commands
 
-Sending an empty command or an unrecognised command returns the help text.
+Sending an empty command runs `help`, which lists every mod loader and plugin command. An unrecognised command is passed to the engine; if the engine does not know it either, the reply says so.
 
-### `players` / `list` / `who`
+The commands below are the ones this plugin adds. They also work from the server's `-console` window. For everything else, run `help`.
 
-List all connected players with their ping.
+### `players`
+
+List all connected players with their ping. Reads the world when it runs, so it is accurate whether or not RCON is enabled.
 
 ```
 > players
@@ -120,6 +116,8 @@ Players (2 connected):
   [1] Alice        2h 15m 30s      N/A             42 ms
   [2] Bob          0m 45s          N/A             18 ms
 ```
+
+(`list` and `who` used to be aliases. They now belong to the mod loader's `plugins` and `clients` commands.)
 
 ### `save` / `savegame` / `forcesave`
 
@@ -131,21 +129,16 @@ World saved successfully.
 ```
 
 Possible errors:
-- `Error: save function not found (pattern not matched).` — The byte-pattern scan for `SaveNextSaveGame` failed (game update may have changed the binary).
-- `Error: save subsystem not available (world may not be loaded yet).` — No `UCrSaveSubsystem` instance found (too early in startup).
-- `Error: exception occurred during save.` — SEH exception caught during the save call.
-- `Error: command timed out waiting for game thread.` — The game thread didn't process the request within 30 seconds.
+- `Error: save function not found (pattern not matched).` -- The byte-pattern scan for `SaveNextSaveGame` failed (game update may have changed the binary).
+- `Error: save subsystem not available (world may not be loaded yet).` -- No `UCrSaveSubsystem` instance found (too early in startup).
+- `Error: exception occurred during save.` -- SEH exception caught during the save call.
+- `Error: command timed out waiting for the game thread.` -- The game thread didn't process the request within 30 seconds.
 
-### `stop` / `quit` / `exit` / `shutdown`
+### Shutting the server down
 
-Initiate a graceful server shutdown by calling `FWindowsPlatformMisc::RequestExit(false)`. This sets `GIsRequestingExit = true`, which the engine picks up on the next tick — identical to pressing Ctrl+C in the server console. The engine's normal save-and-shutdown path runs automatically.
+This plugin no longer ships its own `stop`: the mod loader's `stop` (alias `shutdown`) is used instead. Without a console attached it goes through the engine's `exit` command, which runs the normal graceful save-and-shutdown path. `stop force` exits immediately and may lose the save.
 
-```
-> stop
-Server is shutting down gracefully...
-```
-
-The response is sent back before the shutdown signal fires (300ms delay) so the client receives confirmation.
+The engine's own `exit` and `quit` commands also reach the engine over RCON and shut the server down.
 
 ---
 

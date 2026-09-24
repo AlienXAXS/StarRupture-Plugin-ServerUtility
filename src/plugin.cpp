@@ -9,10 +9,9 @@
 #include "hooks/http_connection/http_connection.h"
 #include "hooks/gatherable_relevancy/gatherable_relevancy.h"
 #include "rcon/rcon.h"
-#include "rcon/console_ctrl.h"
 #include "rcon/commands/command_handler.h"
+#include "rcon/commands/cmd_players.h"
 #include "rcon/commands/cmd_save.h"
-#include "rcon/commands/cmd_stop.h"
 #include "admin/admin_panel.h"
 
 // -----------------------------------------------------------------------
@@ -50,10 +49,6 @@ static void OnEngineInit()
 	// Start the RCON / Steam Query subsystem
 	Rcon::Init();
 
-	// Install console control handler (CTRL+C, CTRL+BREAK, window close, etc.)
-	// Skip installing this, it causes some weird issues
-	//ConsoleCtrl::Install();
-
 	// Install FHttpConnection::ProcessRequest hook
 	HttpConnectionHook::Install();
 
@@ -66,7 +61,6 @@ static void OnEngineShutdown()
 {
 	LOG_INFO("Engine shutting down - removing hooks...");
 	AdminPanel::Shutdown(g_self);
-	ConsoleCtrl::Remove();
 	ParseSettingsHook::Remove();
 	MaxPlayersHook::Remove();
 	AutoProfessionHook::Remove();
@@ -107,7 +101,6 @@ __declspec(dllexport) void OnPluginLoadHooks(IPluginSelf* self, IPluginHookScann
 	MaxPlayersHook::Resolve(self, scanner);
 	AutoProfessionHook::Resolve(self, scanner);
 	Cmd_Save::Resolve(self, scanner);
-	Cmd_Stop::Resolve(self, scanner);
 	GatherableRelevancyFix::Resolve(self, scanner);
 }
 
@@ -138,9 +131,11 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 		return false;
 	}
 
-	// Give the command handler access to the hooks so it can dispatch game-thread
-	// commands via hooks->Engine->PostToGameThread.
-	CommandHandler::Get().SetHooks(g_self->hooks);
+	// Console commands go into the mod loader's own registry, so they are
+	// listed by `help` and reachable from the -console window as well as RCON.
+	// `stop` is not among them: the loader already has one.
+	Cmd_Players::Register();
+	Cmd_Save::Register();
 
 	g_self->hooks->Engine->RegisterOnInit(OnEngineInit);
 	LOG_DEBUG("Registered for engine init callback");
@@ -187,6 +182,8 @@ __declspec(dllexport) void PluginShutdown()
 	// Hook removal and RCON shutdown are handled in OnEngineShutdown() which fires
 	// before UObject teardown.  By the time PluginShutdown is called (explicit
 	// FreeLibrary only) those resources have already been released.
+
+	PluginCommands::UnregisterAll();
 
 	g_self = nullptr;
 }

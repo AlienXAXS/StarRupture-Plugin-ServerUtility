@@ -21,12 +21,6 @@
     <ClCompile Include="rcon\commands\cmd_players.cpp">
       <Filter>rcon\commands</Filter>
     </ClCompile>
-    <ClCompile Include="rcon\commands\cmd_stop.cpp">
-      <Filter>rcon\commands</Filter>
-    </ClCompile>
-    <ClCompile Include="rcon\console_ctrl.cpp">
-      <Filter>rcon</Filter>
-    </ClCompile>
     <ClCompile Include="rcon\server\rcon_server.cpp">
       <Filter>rcon\server</Filter>
     </ClCompile>
@@ -112,12 +106,6 @@
     </ClInclude>
     <ClInclude Include="rcon\commands\cmd_players.h">
       <Filter>rcon\commands</Filter>
-    </ClInclude>
-    <ClInclude Include="rcon\commands\cmd_stop.h">
-      <Filter>rcon\commands</Filter>
-    </ClInclude>
-    <ClInclude Include="rcon\console_ctrl.h">
-      <Filter>rcon</Filter>
     </ClInclude>
     <ClInclude Include="rcon\server\rcon_server.h">
       <Filter>rcon\server</Filter>

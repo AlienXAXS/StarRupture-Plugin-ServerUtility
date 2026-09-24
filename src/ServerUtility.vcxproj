@@ -329,8 +329,6 @@
     <ClInclude Include="rcon\state\server_state.h" />
     <ClInclude Include="rcon\commands\command_handler.h" />
     <ClInclude Include="rcon\commands\cmd_players.h" />
-    <ClInclude Include="rcon\commands\cmd_stop.h" />
-    <ClInclude Include="rcon\console_ctrl.h" />
     <ClInclude Include="rcon\server\rcon_server.h" />
     <ClInclude Include="rcon\server\query_server.h" />
     <ClInclude Include="admin\admin_panel.h" />
@@ -376,8 +374,6 @@
     <ClCompile Include="rcon\state\server_state.cpp" />
     <ClCompile Include="rcon\commands\command_handler.cpp" />
     <ClCompile Include="rcon\commands\cmd_players.cpp" />
-    <ClCompile Include="rcon\commands\cmd_stop.cpp" />
-    <ClCompile Include="rcon\console_ctrl.cpp" />
     <ClCompile Include="rcon\server\rcon_server.cpp" />
     <ClCompile Include="rcon\server\query_server.cpp" />
     <ClCompile Include="admin\admin_panel.cpp" />

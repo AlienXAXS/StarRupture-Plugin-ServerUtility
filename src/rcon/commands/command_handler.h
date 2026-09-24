@@ -1,51 +1,39 @@
 #pragma once
 
 #include <string>
-#include <vector>
-#include <functional>
-#include <initializer_list>
-#include "plugin_interface.h"  // for IPluginHooks
 
-using CommandFunc = std::function<std::string(const std::string& args)>;
-
-struct CommandRegistration
+// ServerUtility's console commands, registered into the mod loader's own
+// command registry (IPluginConsole) instead of a table of our own.
+//
+// That makes them ordinary console commands: listed by `help` under this
+// plugin's name, typeable in the -console window, and reachable over RCON
+// alongside the loader's commands, other plugins' commands and the engine's.
+// RCON therefore no longer has a command set of its own -- it hands every
+// line to the loader (IPluginConsole::ExecuteWithEngine) exactly as if it had
+// been typed into the server console.
+namespace PluginCommands
 {
-	std::vector<std::string> aliases;
-	std::string description;
-	CommandFunc handler;
-	bool gameThread; // true = dispatch to game thread via PostToGameThread
-};
+	// A command's body. args is everything after the command name, joined
+	// with single spaces. The returned text is written back one line at a
+	// time; a line starting "Error:" is written as an error line.
+	using CommandFunc = std::string (*)(const std::string& args);
 
-// Command registry with alias support.
-// Commands are matched case-insensitively against all registered aliases.
-class CommandHandler
-{
-public:
-	static CommandHandler& Get();
+	// Add a command to the loader's registry. It always runs on the game
+	// thread. aliases is space-separated and may be null.
+	//
+	// Names are global across the loader and every plugin, so this fails (and
+	// logs) when the name or an alias is already taken.
+	bool Register(const char* name, const char* aliases, const char* usage,
+	              const char* help, CommandFunc fn);
 
-	// Set the hooks interface -- must be called before Execute is first used for
-	// game-thread commands.  Provided by PluginInit.
-	void SetHooks(IPluginHooks* hooks);
+	// Remove every command this plugin registered.
+	void UnregisterAll();
 
-	// Register a command with one or more aliases (first alias shown in help).
-	// gameThread: if true (default), the handler is automatically dispatched to
-	// the game thread.  Set to false only for commands that are safe to run on
-	// any thread and don't touch engine state.
-	void Register(std::initializer_list<std::string> aliases,
-	              std::string description,
-	              CommandFunc handler,
-	              bool gameThread = true);
-
-	// Execute a command line; splits on first space into verb + args.
-	// If the matched command was registered with gameThread=true, the handler
-	// is posted to the game thread via hooks->Engine->PostToGameThread and
-	// the calling thread blocks until it completes (30 s timeout).
-	std::string Execute(const std::string& cmdLine) const;
-
-	// Return a formatted help string listing all commands and aliases
-	std::string GetHelp() const;
-
-private:
-	std::vector<CommandRegistration> m_commands;
-	IPluginHooks* m_hooks = nullptr;
-};
+	// Run a command line through the loader -- registered commands first, the
+	// engine for anything else -- and block until its output is complete or
+	// 30 seconds pass. An empty line runs `help`.
+	//
+	// The command runs on the game thread, so this must NOT be called from
+	// the game thread: it would wait for a tick it is itself holding up.
+	std::string Execute(const std::string& line);
+}

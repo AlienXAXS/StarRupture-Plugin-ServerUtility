@@ -42,11 +42,6 @@ namespace GameSig
 	inline constexpr auto SAVE_SUBSYSTEM_SAVE_NEXT_SAVE_GAME =
 		"48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 48 83 EC ?? 48 8B F9 E8 ?? ?? ?? ?? 33 ED 48 8B D8 48 85 C0 74 ?? E8 ?? ?? ?? ?? 48 8B 53 ?? 4C 8D 40 ?? 48 63 40 ?? 3B 42 ?? 7F ?? 48 8B C8 48 8B 42 ?? ?? ?? ?? ?? 74 ?? 48 8B DD 48 8D 54 24 ?? 48 8B CB E8 ?? ?? ?? ?? 48 63 5C 24";
 
-	// FWindowsPlatformMisc::RequestExit(bool Force, const wchar_t* CallSite)
-	// Called directly by the RCON `stop` command.
-	inline constexpr auto PLATFORM_MISC_REQUEST_EXIT =
-		"48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 48 83 EC ?? 44 0F B6 05";
-
 	// UReplicationGraph::AddNetworkActor(AActor*) / RemoveNetworkActor(AActor*)
 	// Used by the gatherable respawn fix to re-route ACrGatherableSpawnersRepActor
 	// after its routing policy has been rewritten. Server binary 0x145ad8aa0 /

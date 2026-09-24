@@ -1,7 +1,5 @@
 #pragma once
 
-class CommandHandler;
-
 struct IPluginSelf;
 struct IPluginHookScanner;
 
@@ -11,7 +9,7 @@ namespace Cmd_Save
 	// OnPluginLoadHooks export -- the loader refuses scans made anywhere else.
 	void Resolve(IPluginSelf* self, IPluginHookScanner* scanner);
 
-	// Register the save command.
-	// Aliases: save, savegame, forcesave
-	void Register(CommandHandler& handler);
+	// Register the save command with the mod loader's console.
+	// Aliases: savegame, forcesave
+	void Register();
 }

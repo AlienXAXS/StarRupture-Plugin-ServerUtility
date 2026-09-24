@@ -1,5 +1,6 @@
 #include "cmd_players.h"
 #include "command_handler.h"
+#include "../rcon.h"
 #include "../state/server_state.h"
 
 #include <sstream>
@@ -31,6 +32,10 @@ namespace Cmd_Players
 
 	static std::string Handle(const std::string& /*args*/)
 	{
+		// We are on the game thread, so read the world now rather than
+		// trusting a cache that only the RCON refresh thread keeps warm.
+		Rcon::RefreshPlayers();
+
 		const auto players = ServerState::Get().GetPlayers();
 
 		if (players.empty())
@@ -63,11 +68,10 @@ namespace Cmd_Players
 		return oss.str();
 	}
 
-	void Register(CommandHandler& handler)
+	void Register()
 	{
-		handler.Register(
-			{"players", "list", "who"},
-			"List all connected players with their ping",
+		PluginCommands::Register("players", nullptr, "players",
+			"List connected players with time on server, IP and latency",
 			Handle);
 	}
 }

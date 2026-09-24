@@ -51,7 +51,7 @@ namespace Cmd_Save
 	}
 
 	// -----------------------------------------------------------------------
-	// Command handler — runs on the game thread (dispatched by CommandHandler)
+	// Command handler -- runs on the game thread (the loader dispatches it there)
 	// -----------------------------------------------------------------------
 	static std::string Handle(const std::string& /*args*/)
 	{
@@ -136,11 +136,9 @@ namespace Cmd_Save
 		}
 	}
 
-	void Register(CommandHandler& handler)
+	void Register()
 	{
-
-		handler.Register(
-			{"save", "savegame", "forcesave"},
+		PluginCommands::Register("save", "savegame forcesave", "save",
 			"Force an immediate save of the current world state",
 			Handle);
 	}

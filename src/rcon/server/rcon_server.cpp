@@ -219,7 +219,7 @@ void RconServer::HandleClient(SOCKET clientSock)
 		{
 			if (type == TYPE_EXECCOMMAND)
 			{
-				std::string response = CommandHandler::Get().Execute(body);
+				std::string response = PluginCommands::Execute(body);
 				SendPacket(clientSock, id, TYPE_RESPONSE_VALUE, response);
 			}
 			else if (type == TYPE_AUTH)

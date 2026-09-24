@@ -15,4 +15,9 @@ namespace Rcon
 
 	// Stops all servers and the refresh thread; cleans up Winsock.
 	void Shutdown();
+
+	// Re-read the connected players into ServerState now. Safe on any
+	// thread; the `players` command calls it from the game thread so its
+	// answer does not depend on the RCON refresh thread running.
+	void RefreshPlayers();
 }
