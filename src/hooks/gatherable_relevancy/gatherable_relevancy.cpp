@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstring>
 #include <map>
+#include <string>
 #include <vector>
 
 #if defined(MODLOADER_SERVER_BUILD) || defined(MODLOADER_CLIENT_BUILD)
@@ -30,6 +31,8 @@ static bool g_livePending = false;   // a world came up; the live-graph half sti
 static int  g_liveTicks   = 0;       // ticks spent waiting for the rep actor to appear
 static bool g_seedResync  = true;    // config: push the loaded seed onto the rep actor
 static int  g_resyncTicks = -1;      // countdown to the seed resync; -1 = none scheduled
+static int  g_resyncTries = 0;       // seed resync attempts made for this world
+static std::string g_worldName;      // world the pending work belongs to, for the completion line
 
 // The rep actor is spawned in UCrGatherableSpawnersSubsystem::OnWorldBeginPlay
 // and the graph adds it on spawn. Our world-begin-play hook is on a different
@@ -43,6 +46,11 @@ static constexpr int kMaxLiveTicks = 600;
 // resync must run after it has restored the saved seed; a couple of seconds
 // of ticks after the actor showed up comfortably covers that.
 static constexpr int kResyncDelayTicks = 240;
+
+// The PCG spawner actors are not guaranteed to be loaded by the time the rep
+// actor exists, so an empty scan is retried every kResyncDelayTicks. This many
+// attempts (~a minute or more of ticks) before concluding they never will be.
+static constexpr int kMaxResyncTries = 15;
 
 // ---------------------------------------------------------------------------
 // Resolve
@@ -104,6 +112,28 @@ static std::vector<T*> FindInstances(const char* className)
 		if (!obj || !obj->Class || obj->IsDefaultObject())
 			continue;
 		if (obj->Class->GetName() == className)
+			out.push_back(static_cast<T*>(obj));
+	}
+	return out;
+}
+
+// Live (non-CDO) instances of a class or any subclass of it -- Blueprint
+// children included, which an exact class-name match would miss.
+template <typename T>
+static std::vector<T*> FindInstancesOf(SDK::UClass* cls)
+{
+	std::vector<T*> out;
+	auto& gobjects = SDK::UObject::GObjects;
+	if (!gobjects || !cls)
+		return out;
+
+	const int32_t count = gobjects->Num();
+	for (int32_t i = 0; i < count; ++i)
+	{
+		SDK::UObject* obj = gobjects->GetByIndex(i);
+		if (!obj || !obj->Class || obj->IsDefaultObject())
+			continue;
+		if (obj->IsA(cls))
 			out.push_back(static_cast<T*>(obj));
 	}
 	return out;
@@ -312,34 +342,42 @@ static bool ApplyToLiveGraph()
 // simply told the truth.
 // ---------------------------------------------------------------------------
 template <typename T>
-static void CollectLocalSeeds(const char* className, std::map<int32_t, int>& histogram, int& total)
+static void CollectLocalSeeds(std::map<int32_t, int>& histogram, int& total)
 {
-	for (T* actor : FindInstances<T>(className))
+	for (T* actor : FindInstancesOf<T>(T::StaticClass()))
 	{
 		++histogram[actor->LocalSeed];
 		++total;
 	}
 }
 
-static void ResyncSeed()
+// Returns true when done (written, or nothing can be written); false to retry.
+static bool ResyncSeed()
 {
 	auto actors = FindInstances<SDK::ACrGatherableSpawnersRepActor>("CrGatherableSpawnersRepActor");
 	if (actors.empty())
 	{
 		LOG_WARN("[GatherableFix] Rep actor gone before the seed resync ran - nothing to write");
-		return;
+		return true;
 	}
 
 	std::map<int32_t, int> histogram;
 	int total = 0;
-	CollectLocalSeeds<SDK::ACrPCGGatherableSpawnerVolume>("CrPCGGatherableSpawnerVolume", histogram, total);
-	CollectLocalSeeds<SDK::ACrPCGVolume>("CrPCGVolume", histogram, total);
-	CollectLocalSeeds<SDK::ACrPCGActorBase>("CrPCGActorBase", histogram, total);
+	CollectLocalSeeds<SDK::ACrPCGGatherableSpawnerVolume>(histogram, total);
+	CollectLocalSeeds<SDK::ACrPCGVolume>(histogram, total);
+	CollectLocalSeeds<SDK::ACrPCGActorBase>(histogram, total);
 
 	if (total == 0)
 	{
-		LOG_WARN("[GatherableFix] No PCG spawner actors found - cannot determine the server's gatherable seed");
-		return;
+		if (++g_resyncTries < kMaxResyncTries)
+		{
+			LOG_DEBUG("[GatherableFix] No PCG spawner actors loaded yet (attempt %d/%d) - retrying",
+			          g_resyncTries, kMaxResyncTries);
+			return false;
+		}
+		LOG_WARN("[GatherableFix] No PCG spawner actors found after %d attempts - cannot determine the "
+		         "server's gatherable seed; clients keep the rep actor's current seed", g_resyncTries);
+		return true;
 	}
 
 	int32_t seed  = 0;
@@ -363,6 +401,16 @@ static void ResyncSeed()
 		LOG_INFO("[GatherableFix] %s: RepGlobalGatherablePCGSeed %d -> %d (Heat/Moving) - clients will regenerate from it",
 		         actor->GetName().c_str(), before, seed);
 	}
+	return true;
+}
+
+// The per-world work is over, however it ended. Logged unconditionally so a
+// warning from a step above is never the last thing in the log for a healthy
+// server.
+static void FinishWorld()
+{
+	LOG_INFO("Plugin ServerUtility finished loading on world '%s'",
+	         g_worldName.empty() ? "?" : g_worldName.c_str());
 }
 
 // ---------------------------------------------------------------------------
@@ -371,15 +419,22 @@ static void ResyncSeed()
 static void OnAnyWorldBeginPlay(SDK::UWorld* /*world*/, const char* worldName)
 {
 	LOG_DEBUG("[GatherableFix] World '%s' began play - scheduling live graph check", worldName ? worldName : "?");
+	g_worldName   = worldName ? worldName : "";
 	g_livePending = true;
 	g_liveTicks   = 0;
 	g_resyncTicks = -1;   // a new world: the old countdown is meaningless
+	g_resyncTries = 0;
 }
 
 static void OnTick(float /*deltaSeconds*/)
 {
 	if (g_resyncTicks >= 0 && g_resyncTicks-- == 0)
-		ResyncSeed();
+	{
+		if (ResyncSeed())
+			FinishWorld();
+		else
+			g_resyncTicks = kResyncDelayTicks;
+	}
 
 	if (!g_livePending)
 		return;
@@ -389,6 +444,8 @@ static void OnTick(float /*deltaSeconds*/)
 		g_livePending = false;
 		if (g_seedResync)
 			g_resyncTicks = kResyncDelayTicks;
+		else
+			FinishWorld();
 		return;
 	}
 
@@ -397,6 +454,7 @@ static void OnTick(float /*deltaSeconds*/)
 		LOG_WARN("[GatherableFix] ACrGatherableSpawnersRepActor never appeared after %d ticks - giving up "
 		         "until the next world (the CDO half still applies)", g_liveTicks);
 		g_livePending = false;
+		FinishWorld();
 	}
 }
 
@@ -429,6 +487,7 @@ void GatherableRelevancyFix::Install(bool seedResync)
 	// map); treat it exactly like one that just began play.
 	g_livePending = true;
 	g_liveTicks   = 0;
+	g_resyncTries = 0;
 	g_installed   = true;
 
 	LOG_INFO("[GatherableFix] Installed");
