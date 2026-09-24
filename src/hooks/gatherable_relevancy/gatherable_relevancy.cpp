@@ -1,4 +1,5 @@
 #include "gatherable_relevancy.h"
+#include "scan_helpers.h"
 #include "plugin_helpers.h"
 #include "game_signatures.h"
 
@@ -51,10 +52,10 @@ void GatherableRelevancyFix::Resolve(IPluginSelf* self, IPluginHookScanner* scan
 	if (!self || !scanner)
 		return;
 
-	g_addNetworkActor = reinterpret_cast<RepGraphActorFn>(scanner->ResolveOptional(
-		self, "UReplicationGraph::AddNetworkActor", GameSig::REPGRAPH_ADD_NETWORK_ACTOR));
-	g_removeNetworkActor = reinterpret_cast<RepGraphActorFn>(scanner->ResolveOptional(
-		self, "UReplicationGraph::RemoveNetworkActor", GameSig::REPGRAPH_REMOVE_NETWORK_ACTOR));
+	g_addNetworkActor = reinterpret_cast<RepGraphActorFn>(ScanUtil::ResolveFunction(self, scanner,
+		"UReplicationGraph::AddNetworkActor", GameSig::REPGRAPH_ADD_NETWORK_ACTOR));
+	g_removeNetworkActor = reinterpret_cast<RepGraphActorFn>(ScanUtil::ResolveFunction(self, scanner,
+		"UReplicationGraph::RemoveNetworkActor", GameSig::REPGRAPH_REMOVE_NETWORK_ACTOR));
 }
 
 #if GATHERABLE_FIX_HAS_SDK

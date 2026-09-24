@@ -93,6 +93,7 @@
     <ClInclude Include="plugin.h" />
     <ClInclude Include="plugin_helpers.h" />
     <ClInclude Include="game_signatures.h" />
+    <ClInclude Include="scan_helpers.h" />
     <ClInclude Include="plugin_interface.h" />
     <ClInclude Include="hooks\set_password\set_password.h">
       <Filter>hooks\set_password</Filter>

@@ -1,4 +1,5 @@
 #include "cmd_save.h"
+#include "scan_helpers.h"
 #include "command_handler.h"
 #include "plugin_helpers.h"
 #include "game_signatures.h"
@@ -120,8 +121,8 @@ namespace Cmd_Save
 
 		// Optional: a miss disables one RCON command, not the whole server
 		// utility, which is what the old scan-at-register path did.
-		uintptr_t addr = scanner->ResolveOptional(
-			self, "UCrSaveSubsystem::SaveNextSaveGame", SAVE_PATTERN);
+		uintptr_t addr = ScanUtil::ResolveFunction(self, scanner,
+			"UCrSaveSubsystem::SaveNextSaveGame", SAVE_PATTERN);
 		if (addr)
 		{
 			g_saveFunc = reinterpret_cast<SaveNextSaveGame_t>(addr);

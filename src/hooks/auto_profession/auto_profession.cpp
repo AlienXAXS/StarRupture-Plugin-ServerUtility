@@ -1,4 +1,5 @@
 #include "auto_profession.h"
+#include "scan_helpers.h"
 #include "plugin_helpers.h"
 #include "game_signatures.h"
 
@@ -39,8 +40,8 @@ void AutoProfessionHook::Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
 
 	// Optional: the profession patch only matters alongside the MaxPlayers
 	// patch, and the plugin already carried on without it.
-	g_getProfessionAddr = scanner->ResolveOptional(
-		self, "ACrGameModeBase::GetProfessionForNewPlayer", GameSig::GAMEMODE_GET_PROFESSION_FOR_NEW_PLAYER);
+	g_getProfessionAddr = ScanUtil::ResolveFunction(self, scanner,
+		"ACrGameModeBase::GetProfessionForNewPlayer", GameSig::GAMEMODE_GET_PROFESSION_FOR_NEW_PLAYER);
 }
 
 void AutoProfessionHook::Install()

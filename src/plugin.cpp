@@ -2,6 +2,7 @@
 #include "plugin_helpers.h"
 #include "plugin_config.h"
 #include "game_signatures.h"
+#include "scan_helpers.h"
 #include "hooks/parse_settings/parse_settings.h"
 #include "hooks/max_players/max_players.h"
 #include "hooks/auto_profession/auto_profession.h"
@@ -99,8 +100,8 @@ __declspec(dllexport) void OnPluginLoadHooks(IPluginSelf* self, IPluginHookScann
 
 	// Optional: without it the DSSettings command-line bypass is skipped, but the
 	// RCON server and the rest of the plugin still work.
-	g_parseSettingsAddr = scanner->ResolveOptional(
-		self, "UCrDedicatedServerSettingsComp::ParseSettings",
+	g_parseSettingsAddr = ScanUtil::ResolveFunction(self, scanner,
+		"UCrDedicatedServerSettingsComp::ParseSettings",
 		GameSig::DEDSERVER_SETTINGS_COMP_PARSE_SETTINGS);
 
 	MaxPlayersHook::Resolve(self, scanner);
