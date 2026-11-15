@@ -254,7 +254,7 @@ git clone --recursive https://github.com/AlienXAXS/StarRupture-Plugin-ServerUtil
 └── StarRupture-Plugin-ServerUtility/
 ```
 
-The game SDK comes from this plugin's own `StarRupture SDK` submodule when it has one, otherwise from the Plugin SDK's. To build against other folders, pass `/p:PluginSDKInclude=...` and `/p:GameSDKRoot=...` to msbuild.
+The game SDK comes from the Plugin SDK's `StarRupture SDK` submodule (hence the recursive clone of `StarRupture-Plugin-SDK`). To build against other folders, pass `/p:PluginSDKInclude=...` and `/p:GameSDKRoot=...` to msbuild.
 
 Then open `ServerUtility.sln`, and build the `Server Release|x64` configuration. The output DLL will be placed in `build\Server Release\Plugins\`.
 
