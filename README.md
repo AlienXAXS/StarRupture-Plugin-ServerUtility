@@ -239,9 +239,24 @@ All endpoints return `{"ok": false, "error": "<reason>"}` on failure, with an ap
 
 ## Building from Source
 
-Requires Visual Studio 2022 and the [StarRupture-Plugin-SDK](https://github.com/AlienXAXS/StarRupture-Plugin-SDK).
+Requires Visual Studio 2022.
 
-Clone the repo, open `ServerUtility.sln`, and build the `Server Release|x64` configuration. The output DLL will be placed in `build\Server Release\Plugins\`.
+Put the plugin next to `StarRupture-Plugin-SDK` and clone both with `--recursive`, so the game SDK submodules come along:
+
+```
+git clone --recursive https://github.com/AlienXAXS/StarRupture-Plugin-SDK.git
+git clone --recursive https://github.com/AlienXAXS/StarRupture-Plugin-ServerUtility.git
+```
+
+```
+<parent folder>/
+├── StarRupture-Plugin-SDK/
+└── StarRupture-Plugin-ServerUtility/
+```
+
+The game SDK comes from this plugin's own `StarRupture SDK` submodule when it has one, otherwise from the Plugin SDK's. To build against other folders, pass `/p:PluginSDKInclude=...` and `/p:GameSDKRoot=...` to msbuild.
+
+Then open `ServerUtility.sln`, and build the `Server Release|x64` configuration. The output DLL will be placed in `build\Server Release\Plugins\`.
 
 ---
 
