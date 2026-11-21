@@ -48,8 +48,10 @@ static void KickPlayerController(SDK::APlayerController* pc)
 }
 
 // No C++ objects with destructors in this frame — SEH is legal.
-// ip and playerName are passed as const char* to avoid std::string dtors in scope.
-static const char* BanPlayer_SEH(int playerIndex, const char* ip, const char* playerName)
+// Kicks the player at playerIndex and copies that same player's name into
+// nameOut, so the ban record is about the player who was removed.
+// Returns nullptr on success, or an error JSON string.
+static const char* BanPlayer_SEH(int playerIndex, wchar_t* nameOut, int nameCap)
 {
 	__try
 	{
@@ -68,17 +70,27 @@ static const char* BanPlayer_SEH(int playerIndex, const char* ip, const char* pl
 		SDK::APlayerController* pc = static_cast<SDK::APlayerController*>(ps->GetOwner());
 		if (!pc) return R"({"ok":false,"error":"player controller unavailable"})";
 
+		const wchar_t* name = ps->PlayerNamePrivate.CStr();
+		if (name)
+			wcsncpy_s(nameOut, nameCap, name, _TRUNCATE);
+
 		KickPlayerController(pc);
-
-		if (ip && ip[0] != '\0')
-			AppendBan(ip, playerName);
-
-		return R"({"ok":true})";
+		return nullptr;
 	}
 	__except (EXCEPTION_EXECUTE_HANDLER)
 	{
 		return R"({"ok":false,"error":"exception during ban"})";
 	}
+}
+
+static std::string ToUtf8(const wchar_t* wide)
+{
+	const int len = WideCharToMultiByte(CP_UTF8, 0, wide, -1, nullptr, 0, nullptr, nullptr);
+	if (len <= 1) return {};
+
+	std::string out(static_cast<size_t>(len - 1), '\0');
+	WideCharToMultiByte(CP_UTF8, 0, wide, -1, out.data(), len, nullptr, nullptr);
+	return out;
 }
 #endif
 
@@ -104,22 +116,24 @@ namespace Ep_PlayersBan
 			return;
 		}
 
-		// Grab player info from cached state (thread-safe, no game thread needed)
-		std::string playerIp;
-		std::string playerName;
-		{
-			const auto players = ServerState::Get().GetPlayers();
-			if (playerIndex < static_cast<int>(players.size()))
-			{
-				playerIp   = players[playerIndex].ipAddress;
-				playerName = players[playerIndex].name;
-			}
-		}
-
-		const std::string result = AdminGT::Dispatch([playerIndex, playerIp, playerName]() -> std::string
+		const std::string result = AdminGT::Dispatch([playerIndex]() -> std::string
 		{
 #if BAN_HAS_SDK
-			return BanPlayer_SEH(playerIndex, playerIp.c_str(), playerName.c_str());
+			wchar_t name[64] = {};
+			if (const char* error = BanPlayer_SEH(playerIndex, name, static_cast<int>(std::size(name))))
+				return error;
+
+			// The IP comes from the cached list, matched by the name of the player just kicked.
+			const std::string playerName = ToUtf8(name);
+			for (const auto& player : ServerState::Get().GetPlayers())
+			{
+				if (player.name == playerName && !player.ipAddress.empty())
+				{
+					AppendBan(player.ipAddress.c_str(), playerName.c_str());
+					break;
+				}
+			}
+			return R"({"ok":true})";
 #else
 			return R"({"ok":false,"error":"SDK not available in this build"})";
 #endif
