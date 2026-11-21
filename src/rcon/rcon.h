@@ -5,19 +5,20 @@
 // Call Init()     from OnEngineInit (after Winsock is available).
 // Call Shutdown() from OnEngineShutdown (before UObject teardown).
 //
-// Player state is refreshed every 5 seconds by the background thread using
-// PluginSdkRuntime::GetWorld() -- no world-event callbacks required.
+// Player state is refreshed every 5 seconds from the loader's engine tick
+// (game thread) using PluginSdkRuntime::GetWorld(), and copied into plain
+// values in ServerState. The RCON and query threads only read that copy.
 namespace Rcon
 {
 	// Reads -QueryPort= and -RconPassword=, starts TCP + UDP servers,
-	// registers commands, and launches the background player-refresh thread.
+	// registers commands, and registers the player-refresh tick.
 	void Init();
 
-	// Stops all servers and the refresh thread; cleans up Winsock.
+	// Stops all servers and the refresh tick; cleans up Winsock.
 	void Shutdown();
 
-	// Re-read the connected players into ServerState now. Safe on any
-	// thread; the `players` command calls it from the game thread so its
-	// answer does not depend on the RCON refresh thread running.
+	// Re-read the connected players into ServerState now. Game thread only
+	// (it reads the world); the `players` command runs there, so its answer
+	// is fresh instead of up to 5 seconds old.
 	void RefreshPlayers();
 }

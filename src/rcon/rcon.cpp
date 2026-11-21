@@ -29,8 +29,6 @@
 #endif
 
 #include <string>
-#include <thread>
-#include <atomic>
 #include <cwchar>
 #include <cstdlib>
 
@@ -42,8 +40,7 @@
 static RconServer g_rconServer;
 static QueryServer g_queryServer;
 
-static std::thread g_refreshThread;
-static std::atomic<bool> g_refreshRunning{false};
+static bool g_tickRegistered = false;
 
 // ---------------------------------------------------------------------------
 // Command-line helpers (wchar_t variant, mirrors parse_settings.cpp)
@@ -125,7 +122,7 @@ static std::string ReadSessionName()
 }
 
 // ---------------------------------------------------------------------------
-// Player state collection (runs on the refresh thread)
+// Player state collection (game thread only)
 // ---------------------------------------------------------------------------
 
 // Inner SEH filter that catches access violations when reading stale engine
@@ -233,18 +230,19 @@ static void CollectPlayers()
 }
 
 // ---------------------------------------------------------------------------
-// Background refresh thread – wakes every 5 seconds to update player cache
+// Engine tick (game thread) - refreshes the player cache every 5 seconds.
+// The RCON and query threads only read the copy held in ServerState.
 // ---------------------------------------------------------------------------
-static void RefreshLoop()
-{
-	while (g_refreshRunning)
-	{
-		CollectPlayers();
+static constexpr ULONGLONG kRefreshIntervalMs = 5000;
 
-		// Sleep in 500 ms chunks so shutdown is responsive
-		for (int i = 0; i < 10 && g_refreshRunning; ++i)
-			Sleep(500);
-	}
+static void OnTick(float /*deltaSeconds*/)
+{
+	static ULONGLONG s_lastRefresh = 0;
+	const ULONGLONG now = GetTickCount64();
+	if (s_lastRefresh != 0 && now - s_lastRefresh < kRefreshIntervalMs)
+		return;
+	s_lastRefresh = now;
+	CollectPlayers();
 }
 
 // ---------------------------------------------------------------------------
@@ -286,9 +284,17 @@ void Rcon::Init()
 	// Start TCP RCON server
 	g_rconServer.Start(port, password);
 
-	// Launch background player-refresh thread
-	g_refreshRunning = true;
-	g_refreshThread = std::thread(RefreshLoop);
+	// Refresh the player cache from the game thread's tick
+	auto* hooks = GetHooks();
+	if (hooks && hooks->Engine)
+	{
+		hooks->Engine->RegisterOnTick(OnTick);
+		g_tickRegistered = true;
+	}
+	else
+	{
+		LOG_WARN("[Rcon] Engine events unavailable - player list refreshes only on the players command");
+	}
 
 	LOG_INFO("[Rcon] Subsystem ready");
 }
@@ -302,10 +308,13 @@ void Rcon::Shutdown()
 {
 	LOG_INFO("[Rcon] Shutting down...");
 
-	// Stop refresh thread
-	g_refreshRunning = false;
-	if (g_refreshThread.joinable())
-		g_refreshThread.join();
+	// Stop the player refresh tick
+	if (g_tickRegistered)
+	{
+		if (auto* hooks = GetHooks())
+			if (hooks->Engine) hooks->Engine->UnregisterOnTick(OnTick);
+		g_tickRegistered = false;
+	}
 
 	// Stop network servers
 	g_rconServer.Stop();

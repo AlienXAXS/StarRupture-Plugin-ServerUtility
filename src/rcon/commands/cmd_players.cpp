@@ -32,8 +32,8 @@ namespace Cmd_Players
 
 	static std::string Handle(const std::string& /*args*/)
 	{
-		// We are on the game thread, so read the world now rather than
-		// trusting a cache that only the RCON refresh thread keeps warm.
+		// Commands are registered with gameThread = true, so we are on the
+		// game thread: read the world now rather than use a cache up to 5 s old.
 		Rcon::RefreshPlayers();
 
 		const auto players = ServerState::Get().GetPlayers();
