@@ -36,11 +36,13 @@ Blocks a known exploit in the game's built-in HTTP server that allows unauthenti
 
 See the [vulnerability announcement](https://wiki.starrupture-utilities.com/en/dedicated-server/Vulnerability-Announcement) for details.
 
-### Removing players on an old mod loader (not active yet)
+### Removing players on an old mod loader
 
-The groundwork is in place for removing a player whose mod loader is older than a version you choose, and telling them why. A player without the mod loader is never affected. **Nothing is removed yet.** You can already set the versions (`hostrules minversion` for the mod loader, `hostrules modmin <plugin> <version>` for one mod) and they are saved in `HostRules.ini`, but no mod loader reports a player's version to this plugin yet, so nothing acts on them. Until it does, the log shows `[HostRules] This mod loader has no host rules support - minimum version removal is off`.
+The host can set a minimum mod loader version (`hostrules minversion`) and a minimum version for one mod (`hostrules modmin <plugin> <version>`). A player whose mod loader or mod is older is removed: they go to the main menu with a short written reason, for example "This server needs ModLoader ... or newer". Each player is removed at most once per join. **Nothing is removed while both minimums are off**, which is the default.
 
-When it is active, the removal sends the player to the main menu with a short written reason (whether the game displays that text has not been confirmed yet), removes each player at most once per join, and skips players the host marks as exempt in the player list (see below).
+Exempt: a player with `ExemptVersion` or `Admin` in the player list (below) is kept, and the log says `Player 'X' is below a minimum version but exempt - kept`. Never removed: a player without the mod loader (vanilla), a player on a development build, and a player who does not have the named mod, because the mod loader reports none of them. A removal is logged as `[HostRules] Player 'X' removed: <reason>`.
+
+The minimums are sent to the server's mod loader when the server starts and after every `hostrules` change. `hostrules` shows `version minimums: sent`, or `not sent` with the reason (an old mod loader without host rules support, or a minimum the loader refused). `loader` cannot be used as a mod name in `hostrules modmin`; use `hostrules minversion` for the mod loader itself.
 
 ### Player list (admins and exemptions)
 
@@ -65,7 +67,7 @@ The server reads each player's ID from the game; the client does not send it. Wh
 
 Easiest is RCON. `player ids` shows who is connected and the exact ID to use; `admin add 1 Alice` makes the first player in that list an admin. See [RCON_README.md](src/RCON_README.md) for the `player` and `admin` commands.
 
-The admin panel has matching endpoints (`/rules/players`, below), but the panel is off in this build, so RCON is the way to manage the list for now. Nothing is removed yet; the list only decides who will be skipped when removal arrives.
+The admin panel has matching endpoints (`/rules/players`, below), but the panel is off in this build, so RCON is the way to manage the list for now. `Admin` and `ExemptVersion` players are skipped by the version removal.
 
 ### Host rules: switch mod features off for players
 
@@ -103,8 +105,8 @@ After editing the file by hand, run `hostrules reload`. A line the plugin does n
 What works today and what does not:
 
 - **Rules (`allow`, `deny`, `default`, `message`)** are saved and sent to the mod loader. This is the part that takes effect, on a mod loader that supports it.
-- **`minversion` and `modmin`** are saved only. Nothing enforces them yet (see "Removing players on an old mod loader" above).
-- **`who <id|number>`** shows what the plugin knows about one connected player: the player's ID, how many times their mod loader reported its feature list, and when it last did. The list of mods and features itself is not available to this plugin from the mod loader yet, so `who` cannot show it.
+- **`minversion` and `modmin`** are saved, sent to the mod loader and enforced: a player below a minimum is removed (see "Removing players on an old mod loader" above).
+- **`who <id|number>`** shows one connected player: the player's ID, how many times their mod loader reported its features and when it last did, the mod loader version and the mods with each feature on or off. A player whose mod loader sent nothing shows `no report (vanilla or older loader)`.
 - **Admins and `ExemptRules` players** are exempt: the host's rules are replaced for them by a set with nothing denied (the server message still shows). A player with `Sections=` gets the host's rules with those keys set to allow. Each player is sent their own set, and a change to the rules or to the player list is applied to players already connected.
 
 ### Admin API

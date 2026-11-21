@@ -121,7 +121,7 @@ Players (2 connected):
 
 ### `player [list|ids|set|remove|reload]`
 
-Show and edit the host's player list, which is the `[Players]` section of `Plugins\config\HostRules.ini`. It marks admins and players exempt from the version removal (removal itself is not active yet).
+Show and edit the host's player list, which is the `[Players]` section of `Plugins\config\HostRules.ini`. It marks admins and players exempt from the version removal (`admin` and `exemptversion` players are never removed for an old mod loader or mod).
 
 | Command | What it does |
 |---|---|
@@ -174,12 +174,14 @@ Show and edit the host's rules for mod features: the `[Policy]`, `[Rules]` and `
 | `hostrules unset <Plugin.feature>` | Take that rule away, so the default applies |
 | `hostrules default allow\|deny` | What a feature with no rule gets |
 | `hostrules message [text\|off]` | The line players see when a feature is off; with no text, shows the rules. `off` clears it |
-| `hostrules minversion [version\|off]` | Minimum mod loader version. Saved only: nothing enforces it yet |
-| `hostrules modmin [<plugin> <version\|off>]` | Minimum version of one mod. Saved only: nothing enforces it yet |
+| `hostrules minversion [version\|off]` | Minimum mod loader version. A player below it is removed. With no argument, shows the current value; `off` clears it |
+| `hostrules modmin [<plugin> <version\|off>]` | Minimum version of one mod. A player whose copy is older is removed. With no argument, lists the minimums; `off` clears one. `loader` is refused: use `minversion` |
 | `hostrules reload` | Re-read the file after a hand edit |
-| `hostrules who <id\|number>` | What a connected player's mod loader reported. A 1-3 digit argument is the number from `player ids`; anything else is an ID |
+| `hostrules who <id\|number>` | What a connected player's mod loader reported: its version and each mod's features, on or off. A 1-3 digit argument is the number from `player ids`; anything else is an ID |
 
-A version is `0.11.0`, `v0.11.0` or `1.27.0-dev.1`: at least major.minor, up to four numbers. `who` shows the player's ID, how many times their mod loader reported its feature list and when it last did. Which mods and features it listed is not available to this plugin from the mod loader yet.
+A version is `0.11.0`, `v0.11.0` or `1.27.0-dev.1`: at least major.minor, up to four numbers. A player below a minimum is sent to the main menu with the mod loader's reason (for example "This server needs ModLoader ... or newer") and the log shows `[HostRules] Player 'X' removed: <reason>`. Nothing is removed while both minimums are off. Players with `ExemptVersion` or `Admin` in the player list are kept; players without the mod loader, on a development build, or without the named mod are never reported, so never removed. The minimums are sent to the mod loader after every change; the last line of `hostrules` is `version minimums: sent`, or `not sent: <why>`.
+
+`who` shows the player's ID, how many times their mod loader reported its features and when it last did, then the mod loader version and each mod's features. For a player whose mod loader sent nothing it shows `no report (vanilla or older loader)`; for a player who is not connected, `not connected`.
 
 ```
 > hostrules deny BetterCheats.movement
@@ -190,14 +192,25 @@ Host rules (sent):
   BetterCheats.movement = deny
   minimum loader version: off
   minimum mod versions: none
-  Version minimums are saved only: no mod loader enforces them yet.
+  version minimums: sent
 > hostrules message Some mods are off here
 > hostrules default deny
 > hostrules unset BetterCheats.movement
+> hostrules minversion 1.27.0
+Saved.
+(then the list above, with "minimum loader version: v1.27.0" and "version minimums: sent")
 > hostrules modmin RuptureTimer 0.11.0
+Saved.
+(the list shows "minimum RuptureTimer: 0.11.0")
+> hostrules modmin RuptureTimer off
 > hostrules who 1
-Player 76561198000000001: the mod loader reported its features 1 time(s), last 12 s ago.
-Which mods and features it listed is not available to this plugin from the mod loader yet.
+Player 76561198000000001(Alice): the mod loader reported its features 2 time(s), last 41 s ago.
+  mod loader: loader=v1.26.1 interface=79
+  mods:
+    BetterCheats.movement=on
+    RuptureTimer.panel=off
+> hostrules who 2
+Player 76561198000000002(Bob): no report (vanilla or older loader)
 ```
 
 ### `save` / `savegame` / `forcesave`
