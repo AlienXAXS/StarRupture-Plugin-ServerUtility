@@ -223,7 +223,9 @@ All endpoints return `{"ok": false, "error": "<reason>"}` on failure, with an ap
 
 3. After the first launch, edit `Plugins\config\ServerUtility.ini` and set `Enabled=1`.
 
-> **Requires [StarRupture-ModLoader](https://github.com/AlienXAXS/StarRupture-ModLoader)** to be installed first.
+> **Requires [StarRupture-ModLoader](https://github.com/AlienXAXS/StarRupture-ModLoader) {LOADER_VERSION} or newer** to be installed first.
+
+ServerUtility takes its game addresses and member offsets from the mod loader's version object map (the version map), so the same DLL runs on every server build the version map covers. After a game update, update the mod loader to get the new entries.
 
 ---
 
@@ -234,6 +236,8 @@ All endpoints return `{"ok": false, "error": "<reason>"}` on failure, with an ap
 | RCON won't start | Both `-RconPort=` and `-RconPassword=` must be provided on the command line. |
 | Server settings not applying | Ensure `-SessionName=` is present — this is what activates command-line mode. |
 | Plugin not loading | Check `modloader.log` in `Binaries\Win64\` for errors. |
+| Plugin refused after a game update | If the loader's version map has no entry for your server build, the plugin is refused and the log says why. Update the mod loader. |
+| Auto-profession patch is off | Only applies when `MaxPlayers` is set in `ServerUtility.ini`. The log has an `[AutoProfession]` line; if it says `EProfessionType::Soldier` was not found, this game build has no such entry and the patch stays off. |
 
 ---
 
@@ -243,8 +247,18 @@ Requires Visual Studio 2022 and the [StarRupture-Plugin-SDK](https://github.com/
 
 Clone the repo, open `ServerUtility.sln`, and build the `Server Release|x64` configuration. The output DLL will be placed in `build\Server Release\Plugins\`.
 
+Only the Server configurations build. The plain `Debug` and `Release` configurations stop with an error that names the Server ones.
+
 ---
 
 ## Disclaimer
 
 Use at your own risk. The authors are not responsible for any damage caused by using this software.
+
+---
+
+## Credits
+
+Original mod by [@AlienXAXS](https://github.com/AlienXAXS).
+
+Maintained by [@msantoro12](https://github.com/msantoro12), creator of [StarRupture Planner](https://starrupture.goodstuff.software).
