@@ -14,9 +14,11 @@
 #include "rcon/commands/cmd_players.h"
 #include "rcon/commands/cmd_save.h"
 #include "rcon/commands/cmd_player.h"
+#include "rcon/commands/cmd_hostrules.h"
 #include "admin/admin_panel.h"
 #include "host_rules/removal.h"
 #include "host_rules/player_list.h"
+#include "host_rules/host_rules.h"
 
 // -----------------------------------------------------------------------
 // Global plugin self pointer
@@ -65,6 +67,9 @@ static void OnEngineInit()
 	// Install FHttpConnection::ProcessRequest hook
 	HttpConnectionHook::Install();
 
+	// The rules are sent from the game thread, which runs once the plugins are loaded.
+	HostRules::PushWhenGameThreadRuns();
+
 	// Initialise admin web panel (HTTP routes)
 	// This isnt ready yet.
 	//AdminPanel::Init(g_self);
@@ -74,6 +79,7 @@ static void OnEngineShutdown()
 {
 	LOG_INFO("Engine shutting down - removing hooks...");
 	AdminPanel::Shutdown(g_self);
+	HostRules::Shutdown();
 	ParseSettingsHook::Remove();
 	MaxPlayersHook::Remove();
 	AutoProfessionHook::Remove();
@@ -160,6 +166,8 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 
 	PlayerList::Init();
 	Cmd_Player::Register();
+	HostRules::Init();
+	Cmd_HostRules::Register();
 	Removal::Init();
 
 	g_self->hooks->Engine->RegisterOnInit(OnEngineInit);

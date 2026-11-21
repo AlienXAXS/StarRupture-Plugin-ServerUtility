@@ -353,6 +353,9 @@
     <ClInclude Include="host_rules\rules_model.h" />
     <ClInclude Include="host_rules\player_list.h" />
     <ClInclude Include="host_rules\ini_file.h" />
+    <ClInclude Include="host_rules\host_rules.h" />
+    <ClInclude Include="rcon\commands\cmd_hostrules.h" />
+    <ClInclude Include="rcon\commands\cmd_args.h" />
     <ClInclude Include="host_rules\player_ids.h" />
     <ClInclude Include="rcon\commands\cmd_player.h" />
     <ClInclude Include="admin\endpoints\ep_rules_players.h" />
@@ -402,6 +405,8 @@
     <ClCompile Include="host_rules\rules_model.cpp" />
     <ClCompile Include="host_rules\player_list.cpp" />
     <ClCompile Include="host_rules\ini_file.cpp" />
+    <ClCompile Include="host_rules\host_rules.cpp" />
+    <ClCompile Include="rcon\commands\cmd_hostrules.cpp" />
     <ClCompile Include="host_rules\player_ids.cpp" />
     <ClCompile Include="rcon\commands\cmd_player.cpp" />
     <ClCompile Include="admin\endpoints\ep_rules_players.cpp" />

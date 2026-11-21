@@ -94,10 +94,16 @@
     <ClCompile Include="host_rules\ini_file.cpp">
       <Filter>host_rules</Filter>
     </ClCompile>
+    <ClCompile Include="host_rules\host_rules.cpp">
+      <Filter>host_rules</Filter>
+    </ClCompile>
     <ClCompile Include="host_rules\player_ids.cpp">
       <Filter>host_rules</Filter>
     </ClCompile>
     <ClCompile Include="rcon\commands\cmd_player.cpp">
+      <Filter>rcon\commands</Filter>
+    </ClCompile>
+    <ClCompile Include="rcon\commands\cmd_hostrules.cpp">
       <Filter>rcon\commands</Filter>
     </ClCompile>
     <ClCompile Include="admin\endpoints\ep_rules_players.cpp">
@@ -214,10 +220,19 @@
     <ClInclude Include="host_rules\ini_file.h">
       <Filter>host_rules</Filter>
     </ClInclude>
+    <ClInclude Include="host_rules\host_rules.h">
+      <Filter>host_rules</Filter>
+    </ClInclude>
     <ClInclude Include="host_rules\player_ids.h">
       <Filter>host_rules</Filter>
     </ClInclude>
     <ClInclude Include="rcon\commands\cmd_player.h">
+      <Filter>rcon\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="rcon\commands\cmd_hostrules.h">
+      <Filter>rcon\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="rcon\commands\cmd_args.h">
       <Filter>rcon\commands</Filter>
     </ClInclude>
     <ClInclude Include="admin\endpoints\ep_rules_players.h">
