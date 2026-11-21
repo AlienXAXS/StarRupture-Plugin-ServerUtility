@@ -1,10 +1,13 @@
 // Unit tests of the rules parser and the text it makes for the mod loader.
 // No project file: from a Visual Studio developer prompt, in the repo root:
-//   cl /nologo /EHsc /std:c++17 /Isrc tests\rules_model_tests.cpp src\host_rules\rules_model.cpp /Fe:rules_model_tests.exe
+//   cl /nologo /EHsc /std:c++17 /Isrc tests\rules_model_tests.cpp src\host_rules\rules_model.cpp src\host_rules\claim_model.cpp /Fe:rules_model_tests.exe
 //   rules_model_tests.exe
 #include "host_rules/rules_model.h"
+#include "host_rules/claim_model.h"
 
 #include <cstdio>
+#include <cstring>
+#include <set>
 
 static int g_checks = 0, g_failed = 0;
 
@@ -132,6 +135,114 @@ int main()
 	Model open = m; open.defaultDeny = false;
 	sec.sections = { "Fresh.thing" };
 	CHECK(PlayerRulesText(open, sec).find("Fresh.thing=allow\n") != std::string::npos);   // still stands alone with default allow
+
+	// Claim code: making one.
+	{
+		unsigned state = 12345;   // a plain generator is enough here: the test checks the mapping, not the randomness
+		ClaimModel::RandomFill ramp = [&](unsigned char* b, size_t n) { for (size_t i = 0; i < n; ++i) { state = state * 1103515245u + 12345u; b[i] = static_cast<unsigned char>(state >> 16); } return true; };
+		std::string code;
+		CHECK(ClaimModel::GenerateCode(ramp, code) && code.size() == ClaimModel::kCodeLength);
+		bool allInAlphabet = true;
+		std::set<char> seen;
+		for (int n = 0; n < 200; ++n)
+		{
+			CHECK(ClaimModel::GenerateCode(ramp, code) && code.size() == 8);
+			for (char c : code)
+			{
+				seen.insert(c);
+				if (!std::strchr(ClaimModel::kAlphabet, c)) allInAlphabet = false;
+				if (std::strchr("01OIL", c)) allInAlphabet = false;
+			}
+		}
+		CHECK(allInAlphabet);
+		CHECK(seen.size() == ClaimModel::kAlphabetSize);   // every symbol turns up
+		CHECK(std::strlen(ClaimModel::kAlphabet) == ClaimModel::kAlphabetSize);
+
+		// Bytes at 248 and up are skipped (no bias): 0 -> '2', 30 -> 'Z', 31 -> '2', 247 -> 'Z' (247 % 31 = 30).
+		const unsigned char fixed[16] = { 0, 30, 31, 247, 248, 255, 250, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+		ClaimModel::RandomFill fx = [&](unsigned char* b, size_t n) { std::memcpy(b, fixed, n < 16 ? n : 16); return true; };
+		CHECK(ClaimModel::GenerateCode(fx, code) && code == "2Z2Z3456");
+		ClaimModel::RandomFill bad = [](unsigned char*, size_t) { return false; };
+		code = "KEEP";
+		CHECK(!ClaimModel::GenerateCode(bad, code) && code.empty());
+		ClaimModel::RandomFill high = [](unsigned char* b, size_t n) { std::memset(b, 255, n); return true; };
+		CHECK(!ClaimModel::GenerateCode(high, code) && code.empty());   // a source that never gives a usable byte ends
+		CHECK(!ClaimModel::GenerateCode(ClaimModel::RandomFill(), code));
+	}
+
+	// Claim code: what a player typed.
+	{
+		std::string out;
+		CHECK(ClaimModel::NormalizeCode("  k7m2qxzr \r\n", out) && out == "K7M2QXZR");
+		CHECK(ClaimModel::NormalizeCode("23456789", out) && out == "23456789");
+		CHECK(ClaimModel::NormalizeCode("ABCDEFGHJKMNPQRSTUVWXYZ", out) && out == "ABCDEFGHJKMNPQRSTUVWXYZ");
+		for (const char* bad : { "", "   ", "K7M2 QXZR", "K7M20XZR", "K7M2OXZR", "K7M21XZR", "K7M2IXZR", "K7M2LXZR", "K7M2-XZR", "K7M2\tXZR" })
+		{
+			out = "stale";
+			CHECK(!ClaimModel::NormalizeCode(bad, out) && out.empty());
+		}
+		CHECK(!ClaimModel::NormalizeCode(std::string(65, 'A'), out));
+		CHECK(ClaimModel::NormalizeCode(std::string(64, 'a'), out) && out.size() == 64);
+		CHECK(!ClaimModel::NormalizeCode(std::string("AB\0CD", 5), out));
+	}
+
+	// Claim code: compare, wipe, prompt switch.
+	{
+		CHECK(ClaimModel::ConstantTimeEquals("K7M2QXZR", "K7M2QXZR"));
+		CHECK(!ClaimModel::ConstantTimeEquals("K7M2QXZS", "K7M2QXZR"));
+		CHECK(!ClaimModel::ConstantTimeEquals("A7M2QXZR", "K7M2QXZR"));
+		CHECK(!ClaimModel::ConstantTimeEquals("K7M2QXZ", "K7M2QXZR"));
+		CHECK(!ClaimModel::ConstantTimeEquals("K7M2QXZRR", "K7M2QXZR"));
+		CHECK(!ClaimModel::ConstantTimeEquals("", "K7M2QXZR"));
+		CHECK(!ClaimModel::ConstantTimeEquals(std::string("\0\0\0\0\0\0\0\0", 8), "K7M2QXZR"));
+
+		std::string s = "K7M2QXZR";
+		ClaimModel::Wipe(s);
+		CHECK(s.empty());
+		std::string e;
+		ClaimModel::Wipe(e);
+		CHECK(e.empty());
+
+		CHECK(ClaimModel::AdminPromptOn({}));
+		CHECK(ClaimModel::AdminPromptOn({ "AdminPrompt=1" }));
+		CHECK(!ClaimModel::AdminPromptOn({ "Other=1", "adminprompt = 0 " }));
+		CHECK(!ClaimModel::AdminPromptOn({ "AdminPrompt=off" }));
+		CHECK(ClaimModel::AdminPromptOn({ "Other=0", "AdminPromptX=0", "no equals" }));
+	}
+
+	// Claim code: counting wrong tries.
+	{
+		ClaimModel::Attempts a;
+		CHECK(!a.Locked("p1"));
+		for (int i = 1; i <= 4; ++i)
+		{
+			const auto o = a.RecordWrong("p1");
+			CHECK(o.left == 5 - i && !o.playerLocked && !o.codeReplaced);
+			CHECK(!a.Locked("p1"));
+		}
+		const auto last = a.RecordWrong("p1");   // 5th for p1, 5th overall
+		CHECK(last.left == 0 && last.playerLocked && last.codeReplaced);
+		CHECK(a.Locked("p1") && !a.Locked("p2"));
+
+		// The overall count restarted with the new code: four more from others do not replace it.
+		for (int i = 0; i < 4; ++i)
+		{
+			const auto o = a.RecordWrong("p2");
+			CHECK(!o.codeReplaced && !o.playerLocked);
+		}
+		const auto o2 = a.RecordWrong("p3");   // 5th since the replace
+		CHECK(o2.codeReplaced && o2.left == 4 && !o2.playerLocked);
+		CHECK(!a.Locked("p2") && !a.Locked("p3"));
+		CHECK(a.Locked("p1"));   // stays locked
+
+		// Two players sharing the overall limit.
+		ClaimModel::Attempts b;
+		int replaced = 0;
+		for (int i = 0; i < 10; ++i)
+			if (b.RecordWrong(i % 2 ? "x" : "y").codeReplaced) ++replaced;
+		CHECK(replaced == 2 && b.Locked("x") && b.Locked("y"));
+	}
+
 	std::printf("%d checks, %d failed\n", g_checks, g_failed);
 	return g_failed ? 1 : 0;
 }
