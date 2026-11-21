@@ -37,6 +37,13 @@ namespace RulesModel
 			       && s.find_first_of(" =") == std::string::npos;
 		}
 
+		// A mod name for a minimum row. "loader" is the loader's own row in the
+		// text the loader takes, so no mod can use it.
+		bool ValidModMinName(const std::string& s)
+		{
+			return ValidName(s) && !SamePlugin(s, "loader");
+		}
+
 		std::vector<Rule>::iterator FindRule(Model& m, const std::string& plugin, const std::string& id)
 		{
 			return std::find_if(m.rules.begin(), m.rules.end(),
@@ -151,7 +158,7 @@ namespace RulesModel
 			}
 			else
 			{
-				if (!ValidName(key) || !ValidVersion(value)) { reject("expected Plugin=version"); continue; }
+				if (!ValidModMinName(key) || !ValidVersion(value)) { reject("expected Plugin=version"); continue; }
 				auto it = std::find_if(out.modMins.begin(), out.modMins.end(), [&](const ModMin& m) { return SamePlugin(m.plugin, key); });
 				if (it != out.modMins.end()) it->version = value; else out.modMins.push_back({ key, value });
 			}
@@ -246,7 +253,7 @@ namespace RulesModel
 	std::string VersionMinimumsText(const Model& m)
 	{
 		std::string t;
-		if (!m.minLoaderVersion.empty()) t += "$loader=" + m.minLoaderVersion + "\n";
+		if (!m.minLoaderVersion.empty()) t += "loader=" + m.minLoaderVersion + "\n";
 		for (const ModMin& r : m.modMins) t += r.plugin + "=" + r.version + "\n";
 		return t;
 	}
@@ -292,7 +299,7 @@ namespace RulesModel
 
 	bool SetModMin(Model& m, const std::string& plugin, const std::string& v, std::string& error)
 	{
-		if (!ValidName(plugin)) { error = "'" + plugin + "' is not a usable mod name"; return false; }
+		if (!ValidModMinName(plugin)) { error = "'" + plugin + "' is not a usable mod name"; return false; }
 		if (!v.empty() && !ValidVersion(v)) { error = "'" + v + "' is not a version (for example 0.11.0)"; return false; }
 		auto it = std::find_if(m.modMins.begin(), m.modMins.end(), [&](const ModMin& e) { return SamePlugin(e.plugin, plugin); });
 		if (v.empty())

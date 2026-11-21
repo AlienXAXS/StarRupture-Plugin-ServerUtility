@@ -38,7 +38,7 @@ int main()
 	CHECK(m.policyKept.size() == 1 && m.policyKept[0] == "AdminPrompt=1");
 	const std::string text = RulesText(m);
 	CHECK(text == "default=deny\nmessage=Some mods are off here #rules = ok\nBetterCheats.*=allow\nBetterCheats.movement=deny\nBetterDrone.drone-limits=deny\n");
-	CHECK(VersionMinimumsText(m) == "$loader=v1.27.0\nRuptureTimer=0.11.0\nproductionviewer=0.19.0\n");
+	CHECK(VersionMinimumsText(m) == "loader=v1.27.0\nRuptureTimer=0.11.0\nproductionviewer=0.19.0\n");
 
 	// Unmatched keys and bad values are warned about and kept.
 	w.clear();
@@ -59,6 +59,12 @@ int main()
 	m = ParseText({ "# nothing", "" }, w);
 	CHECK(RulesText(m) == "default=allow\n" && VersionMinimumsText(m).empty() && w.empty());
 
+	// "loader" is the loader's own row, so a mod cannot take that name.
+	w.clear();
+	const Model withLoaderRow = ParseText({ "[MinVersions]", "Loader=1.0.0", "Mod=1.0.0" }, w);
+	CHECK(w.size() == 1 && withLoaderRow.modMins.size() == 1 && withLoaderRow.modMinKept.size() == 1 && VersionMinimumsText(withLoaderRow) == "Mod=1.0.0\n");
+	w.clear();
+
 	// Changes.
 	std::string e;
 	CHECK(SetRule(m, "BetterCheats.movement", true, e));
@@ -78,6 +84,10 @@ int main()
 	CHECK(!SetModMin(m, "RuptureTimer", "x", e) && m.modMins[0].version == "v0.12.0");
 	CHECK(SetModMin(m, "RuptureTimer", "", e) && m.modMins.empty());
 	CHECK(!SetModMin(m, "RuptureTimer", "", e));
+	CHECK(!SetModMin(m, "Loader", "1.0.0", e) && m.modMins.empty());
+	CHECK(SetMinLoader(m, "v1.27.0", e) && SetModMin(m, "A", "1.2", e) && VersionMinimumsText(m) == "loader=v1.27.0\nA=1.2\n");
+	CHECK(SetMinLoader(m, "", e) && VersionMinimumsText(m) == "A=1.2\n");
+	CHECK(SetModMin(m, "A", "", e) && VersionMinimumsText(m).empty());
 
 	// Rule limit.
 	m = Model{};

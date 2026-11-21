@@ -48,8 +48,8 @@ namespace RulesModel
 	// keys are allowed, ahead of any global rule for the same mod.
 	std::string PlayerRulesText(const Model& m, const PlayerFlags& f);
 
-	// What SetVersionMinimums will take: one Plugin=version per line, the loader
-	// minimum first as $loader=version. Not read by any loader yet.
+	// What SetVersionMinimums takes: loader=version first (when set), then one
+	// Plugin=version line per mod minimum. Empty when every minimum is off.
 	std::string VersionMinimumsText(const Model& m);
 
 	// "Plugin.feature" or "Plugin.*": split and checked.
