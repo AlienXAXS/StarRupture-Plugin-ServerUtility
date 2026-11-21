@@ -35,24 +35,24 @@ namespace
 	std::vector<Known>        g_known;            // players whose loader reported, by ID
 	std::map<std::string, std::string> g_ownRules; // player ID -> own rules text last sent (g_mutex)
 
-	// A controller whose ID is not readable yet is kept as a weak reference and
-	// tried again each tick, until it resolves, dies or waits too long. Game
-	// thread only.
-	struct Waiting
-	{
-		ObjectRef<SDK::APlayerController> pc;
-		ULONGLONG                         sinceMs;
-	};
-	constexpr ULONGLONG       kWaitMs = 60000;
-	std::vector<Waiting>      g_waiting;
-	bool                      g_tickRegistered = false;
-
 	std::string PushText(const std::string& text);
 
 	std::string IdOf(void* playerController)
 	{
 		return PlayerIds::OfController(playerController);
 	}
+
+#if PLUGIN_INTERFACE_VERSION >= 79
+	// A controller whose ID is not readable yet is kept as a weak reference and
+	// tried again each tick, until it resolves, dies or waits too long (RulesModel::kLateIdGraceMs). Game
+	// thread only.
+	struct Waiting
+	{
+		ObjectRef<SDK::APlayerController> pc;
+		ULONGLONG                         sinceMs;
+	};
+	std::vector<Waiting>      g_waiting;
+	bool                      g_tickRegistered = false;
 
 	// Note a player whose loader reported its feature list.
 	void RecordReported(const std::string& id)
@@ -70,7 +70,6 @@ namespace
 		return hooks && hooks->Engine && hooks->Engine->IsGameThread();
 	}
 
-#if PLUGIN_INTERFACE_VERSION >= 79
 	// A player's own rules are sent when a flag in the player list changes what
 	// they get. The loader keeps that set until the player leaves or it is cleared.
 	//
@@ -123,8 +122,9 @@ namespace
 		const bool ok = api->SetRulesForConnection(playerController, text.c_str(), err, sizeof(err));
 		{
 			std::lock_guard<std::mutex> lk(g_mutex);
-			if (ok) g_ownRules[id] = text;
-			else    g_ownRules.erase(id);
+			// A refused text leaves the loader's earlier set for this player as it was, so
+			// the record stays, marked as unknown (it never equals a real text).
+			g_ownRules[id] = ok ? text : std::string();
 		}
 		if (ok)
 			LOG_INFO("[HostRules] Player %s has rules of their own", id.c_str());
@@ -141,30 +141,24 @@ namespace
 		for (size_t i = 0; i < g_waiting.size();)
 		{
 			SDK::APlayerController* pc = g_waiting[i].pc.Get();
-			if (!pc)
+			const std::string id = pc ? IdOf(pc) : std::string();
+			const RulesModel::HeldStep step = RulesModel::NextHeldStep(pc != nullptr, !id.empty(), now - g_waiting[i].sinceMs);
+			if (step == RulesModel::HeldStep::Wait)
 			{
-				g_waiting.erase(g_waiting.begin() + i);
+				++i;
 				continue;
 			}
 
-			const std::string id = IdOf(pc);
-			if (!id.empty())
-			{
-				g_waiting.erase(g_waiting.begin() + i);
-				RecordReported(id);
-				ApplyRules(pc, id, true);
-				AdminClaim::AskPlayer(pc, id);
-				continue;
-			}
-
-			if (now - g_waiting[i].sinceMs > kWaitMs)
-			{
+			g_waiting.erase(g_waiting.begin() + i);
+			if (step == RulesModel::HeldStep::ActNoId)
 				LOG_WARN("[HostRules] A player's ID was not readable after %d seconds - the server rules apply to them",
-				         static_cast<int>(kWaitMs / 1000));
-				g_waiting.erase(g_waiting.begin() + i);
+				         static_cast<int>(RulesModel::kLateIdGraceMs / 1000));
+			if (step != RulesModel::HeldStep::Act)
 				continue;
-			}
-			++i;
+
+			RecordReported(id);
+			ApplyRules(pc, id, true);
+			AdminClaim::AskPlayer(pc, id);
 		}
 	}
 
@@ -221,7 +215,6 @@ namespace
 				ApplyRules(controllers[i], id, false);
 		}
 	}
-#endif
 
 	void OnClientFeatures(void* playerController)
 	{
@@ -242,19 +235,18 @@ namespace
 		}
 
 		RecordReported(id);
-#if PLUGIN_INTERFACE_VERSION >= 79
 		ApplyRules(playerController, id, true);
 		AdminClaim::AskPlayer(playerController, id);
-#endif
 	}
+#endif
 
 	void OnPlayerLeft(void* exitingController)
 	{
-		if (OnGameThread())
-		{
-			auto* pc = static_cast<SDK::APlayerController*>(exitingController);
-			g_waiting.erase(std::remove_if(g_waiting.begin(), g_waiting.end(), [&](const Waiting& w) { return w.pc.Get() == pc; }), g_waiting.end());
-		}
+		// Called from the game's Logout, on the game thread, before the controller is torn down.
+#if PLUGIN_INTERFACE_VERSION >= 79
+		auto* pc = static_cast<SDK::APlayerController*>(exitingController);
+		g_waiting.erase(std::remove_if(g_waiting.begin(), g_waiting.end(), [&](const Waiting& w) { return w.pc.Get() == pc; }), g_waiting.end());
+#endif
 
 		const std::string id = IdOf(exitingController);
 		if (id.empty())
@@ -294,10 +286,10 @@ namespace
 		status = "not sent: this build has no host rules support";
 #endif
 		static bool s_logged = false;
-		if (status != "sent" && !s_logged)
+		if (!s_logged && status.find("no host rules support") != std::string::npos)
 		{
 			s_logged = true;
-			LOG_INFO("[HostRules] This mod loader has no host rules support - rules are saved but not sent");
+			LOG_INFO("[HostRules] Rules are saved but %s", status.c_str());
 		}
 		std::lock_guard<std::mutex> lk(g_mutex);
 		g_pushStatus = status;
@@ -443,8 +435,8 @@ namespace HostRules
 		if (g_tickRegistered && hooks->Engine)
 			hooks->Engine->UnregisterOnTick(OnTick);
 		g_tickRegistered = false;
-#endif
 		g_waiting.clear();
+#endif
 		if (hooks->Players)
 			hooks->Players->UnregisterOnPlayerLeft(OnPlayerLeft);
 	}
