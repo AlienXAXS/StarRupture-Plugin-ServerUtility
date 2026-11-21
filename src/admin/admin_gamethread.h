@@ -6,6 +6,7 @@
 //   std::string result = AdminGT::Dispatch([]() -> std::string { return R"({"ok":true})"; });
 //
 // The lambda runs on the game thread; this call blocks (up to 5 s).
+// Called from the game thread itself, the lambda runs inline.
 // On timeout, returns an error JSON string and the lambda is dropped if it
 // has not started yet.
 
@@ -38,6 +39,11 @@ namespace AdminGT
 		auto* hooks = GetHooks();
 		if (!hooks || !hooks->Engine)
 			return R"({"ok":false,"error":"engine unavailable"})";
+
+		// Waiting on the game thread for the game thread would block it for
+		// the whole timeout.
+		if (hooks->Engine->IsGameThread())
+			return fn();
 
 		auto p = std::make_shared<GtPayload>();
 		p->fn = std::move(fn);
