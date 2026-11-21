@@ -36,6 +36,12 @@ Blocks a known exploit in the game's built-in HTTP server that allows unauthenti
 
 See the [vulnerability announcement](https://wiki.starrupture-utilities.com/en/dedicated-server/Vulnerability-Announcement) for details.
 
+### Removing players on an old mod loader (not active yet)
+
+The groundwork is in place for a server setting that removes a player whose mod loader is older than a version you choose, and tells them why. A player without the mod loader is never affected. Nothing is removed yet: the setting, and the mod loader version that reports the player's version, come in a later release. Until then the log shows `[HostRules] This mod loader has no host rules support - minimum version removal is off`.
+
+The removal shows the player a short reason on the main menu, removes each player at most once per join, and skips players on the server's admin list.
+
 ### Admin API
 
 An HTTP JSON API for remote server administration.

@@ -4,4 +4,5 @@
 - Building the plain `Debug` or `Release` configuration now stops with a clear error that names the Server configurations, instead of quietly building against the wrong game files.
 - Docs now match the code: the admin panel keys are `Enabled`, `ApiKey` and `SessionExpiry` in `[AdminPanel]`, `RemoteVulnerabilityPatch` is in `[PluginSettings]`, `-RconPort` has no default, and `-SessionName` is only needed for command-line server settings.
 - The README now says the admin panel is disabled in this build, and that a ban only kicks the player and logs them in `bans.txt`: nothing reads that file, so they can rejoin.
+- Groundwork for removing a player whose mod loader is older than a version the host sets: the removal can now show the player a written reason, removes each player at most once per join, and skips players on the admin list. Nothing is removed yet. The setting arrives in a later release, together with a mod loader version that reports the player's version; until then the log says the mod loader has no host rules support.
 - Needs mod loader v1.25.0 or newer.
