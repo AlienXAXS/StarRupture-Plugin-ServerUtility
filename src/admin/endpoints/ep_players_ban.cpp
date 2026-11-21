@@ -98,11 +98,14 @@ namespace Ep_PlayersBan
 			return;
 		}
 
-		const std::string result = AdminGT::Dispatch([playerIndex]() -> std::string
+		// Optional: the name the list showed at player_index; see rcon/listed_players.h.
+		const std::string listedName = AdminJson::ExtractString(req->body, req->bodyLen, "player_name");
+
+		const std::string result = AdminGT::Dispatch([playerIndex, listedName]() -> std::string
 		{
 #if BAN_HAS_SDK
 			PlayerInfo listed;
-			if (!ListedPlayers::Cached(playerIndex, listed))
+			if (!ListedPlayers::Cached(playerIndex, listedName, listed))
 				return R"({"ok":false,"error":"player not found"})";
 
 			const std::wstring expectedName = ListedPlayers::ToWide(listed.name);

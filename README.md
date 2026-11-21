@@ -90,7 +90,7 @@ Response:
 
 ##### `POST /players/kick`
 
-Kick a player by their index from `/players/list`.
+Kick a player by their index from `/players/list`. Send `player_name` (the name the list showed) as well, and the request fails with "player not found" if that index no longer names that player. `/players/ban` and `/inventory/give` take `player_name` the same way.
 
 ```bash
 curl -s -X POST http://localhost:7777/ServerUtility/api/players/kick \

@@ -204,7 +204,7 @@ static void CollectPlayers()
 
 	for (int i = 0; i < rawCount; ++i)
 	{
-		if (!rawBuf[i].namePtr || rawBuf[i].nameLen <= 0)
+		if (!rawBuf[i].namePtr)
 			continue;
 
 		PlayerInfo info;

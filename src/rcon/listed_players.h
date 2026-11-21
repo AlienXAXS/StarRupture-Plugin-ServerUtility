@@ -7,7 +7,8 @@
 // kick, ban and give take that list index back, so they must count players the
 // same way, and must also confirm the player is still the one the list showed:
 // the list is a cache refreshed every few seconds, and a player leaving shifts
-// every later index.
+// every later index. Callers can send the listed name as "player_name" to make the
+// request fail when the index no longer names that player.
 
 #if defined(MODLOADER_SERVER_BUILD) || defined(MODLOADER_CLIENT_BUILD)
 
@@ -58,12 +59,18 @@ namespace ListedPlayers
 	}
 
 	// The cached list entry at listIndex, or false when the list has no such entry.
-	inline bool Cached(int listIndex, PlayerInfo& out)
+	// expectedName is the name the caller saw in the list: when it is not empty, the
+	// entry must still carry that name, so an index that shifted after a refresh fails
+	// instead of naming someone else.
+	inline bool Cached(int listIndex, const std::string& expectedName, PlayerInfo& out)
 	{
 		const std::vector<PlayerInfo> players = ServerState::Get().GetPlayers();
 		if (listIndex < 0 || static_cast<size_t>(listIndex) >= players.size()) return false;
 
-		out = players[static_cast<size_t>(listIndex)];
+		const PlayerInfo& entry = players[static_cast<size_t>(listIndex)];
+		if (!expectedName.empty() && entry.name != expectedName) return false;
+
+		out = entry;
 		return true;
 	}
 

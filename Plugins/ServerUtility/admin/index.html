@@ -53,6 +53,7 @@
     <tr><th>Field</th><th>Type</th><th>Description</th></tr>
     <tr><td><code>session_token</code></td><td>string</td><td>Active session token</td></tr>
     <tr><td><code>player_index</code></td><td>int</td><td>Zero-based index from <code>/players/list</code></td></tr>
+    <tr><td><code>player_name</code></td><td>string</td><td>Optional. The name the list showed at that index; the request fails if the index no longer names that player. Also accepted by <code>/players/ban</code> and <code>/inventory/give</code>.</td></tr>
   </table>
   <pre>{ "session_token": "...", "player_index": 0 }
 // → { "ok": true }</pre>
