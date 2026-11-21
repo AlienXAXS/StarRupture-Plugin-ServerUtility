@@ -350,6 +350,7 @@
     <ClInclude Include="admin\endpoints\wave_common.h" />
     <ClInclude Include="host_rules\host_rules_pending.h" />
     <ClInclude Include="host_rules\removal.h" />
+    <ClInclude Include="host_rules\rules_model.h" />
     <ClInclude Include="host_rules\player_list.h" />
     <ClInclude Include="host_rules\player_ids.h" />
     <ClInclude Include="rcon\commands\cmd_player.h" />
@@ -397,6 +398,7 @@
     <ClCompile Include="admin\endpoints\ep_wave_resume.cpp" />
     <ClCompile Include="admin\endpoints\ep_inventory_give.cpp" />
     <ClCompile Include="host_rules\removal.cpp" />
+    <ClCompile Include="host_rules\rules_model.cpp" />
     <ClCompile Include="host_rules\player_list.cpp" />
     <ClCompile Include="host_rules\player_ids.cpp" />
     <ClCompile Include="rcon\commands\cmd_player.cpp" />

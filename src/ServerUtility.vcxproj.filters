@@ -82,6 +82,9 @@
     <ClCompile Include="admin\endpoints\ep_inventory_give.cpp">
       <Filter>admin\endpoints</Filter>
     </ClCompile>
+    <ClCompile Include="host_rules\rules_model.cpp">
+      <Filter>host_rules</Filter>
+    </ClCompile>
     <ClCompile Include="host_rules\removal.cpp">
       <Filter>host_rules</Filter>
     </ClCompile>
@@ -194,6 +197,9 @@
       <Filter>admin\endpoints</Filter>
     </ClInclude>
     <ClInclude Include="host_rules\host_rules_pending.h">
+      <Filter>host_rules</Filter>
+    </ClInclude>
+    <ClInclude Include="host_rules\rules_model.h">
       <Filter>host_rules</Filter>
     </ClInclude>
     <ClInclude Include="host_rules\removal.h">
