@@ -75,9 +75,11 @@ namespace ServerUtilityFields
 	// The item catalogue the admin give-item endpoint searches.
 	inline auto ItemDataBaseArray = SERVER_UTILITY_FIELD(UAuItemDataBaseSubsystem, ItemDataBaseArray);
 
-	// The game build the compiled offsets above were verified on: the plugin's
-	// own row for a member the loader's map has no row for yet.
-	inline constexpr uint32_t kVerifiedCL = 127004;
+	// The game build the compiled offsets above were taken from: the plugin's
+	// own row for a member the loader's map has no row for yet. It is the CL the
+	// Game-SDK dump is built for, so the row follows the dump.
+	static_assert(PLUGIN_GAME_BUILT_CL != 0, "PLUGIN_GAME_BUILT_CL is not set: the Game SDK has no build_cl.txt");
+	inline constexpr uint32_t kVerifiedCL = PLUGIN_GAME_BUILT_CL;
 
 	// Asks the loader for one native member, with this plugin's own row as the
 	// fallback for a loader or build whose map has none.
