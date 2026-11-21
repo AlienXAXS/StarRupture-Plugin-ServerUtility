@@ -3,6 +3,7 @@
 #include "plugin_interface.h"
 #include <string>
 #include <cstring>
+#include <climits>
 
 // Minimal JSON helpers for admin panel endpoints.
 // No external library — only used by admin endpoint .cpp files.
@@ -53,7 +54,7 @@ namespace AdminJson
 	}
 
 	// Extract an integer value for "key" from a JSON body.
-	// Returns defaultVal if not found or not a valid integer.
+	// Returns defaultVal if not found or not a valid integer. Values beyond int range saturate.
 	inline int ExtractInt(const char* body, size_t len, const char* key, int defaultVal = -1)
 	{
 		if (!body || len == 0 || !key) return defaultVal;
@@ -72,10 +73,12 @@ namespace AdminJson
 		if (haystack[pos] == '-') { negative = true; ++pos; }
 		if (pos >= haystack.size() || haystack[pos] < '0' || haystack[pos] > '9') return defaultVal;
 
+		// Saturate at INT_MAX instead of overflowing; callers' range checks then reject it.
 		int value = 0;
 		while (pos < haystack.size() && haystack[pos] >= '0' && haystack[pos] <= '9')
 		{
-			value = value * 10 + (haystack[pos] - '0');
+			const int digit = haystack[pos] - '0';
+			value = (value > (INT_MAX - digit) / 10) ? INT_MAX : value * 10 + digit;
 			++pos;
 		}
 		return negative ? -value : value;

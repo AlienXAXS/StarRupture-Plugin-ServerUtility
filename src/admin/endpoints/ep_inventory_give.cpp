@@ -13,15 +13,28 @@
 #  define INV_HAS_SDK 0
 #endif
 
+#include <cstdio>
 #include <string>
+
+// Most items one give request may add.
+static constexpr int kMaxGiveCount = 9999;
 
 #if INV_HAS_SDK
 // Separated from the SEH helper so std::string objects don't live in the __try frame.
-static SDK::UAuItemDataBase* FindItemByPath(SDK::UAuItemDataBaseSubsystem* itemSubsys, const char* assetPath)
+// An exact asset_path match wins. Otherwise a substring match is used only when it
+// names exactly one item. On failure nullptr is returned and err holds the error JSON.
+static SDK::UAuItemDataBase* FindItemByPath(SDK::UAuItemDataBaseSubsystem* itemSubsys, const char* assetPath,
+                                            char* err, int errCap)
 {
 	const auto* items = ServerUtilityFields::ItemDataBaseArray.In(itemSubsys);
 	if (!items)
+	{
+		snprintf(err, errCap, R"({"ok":false,"error":"item not found"})");
 		return nullptr;
+	}
+
+	SDK::UAuItemDataBase* single = nullptr;
+	int hits = 0;
 
 	const int32_t itemCount = items->Num();
 	for (int32_t i = 0; i < itemCount; ++i)
@@ -29,15 +42,36 @@ static SDK::UAuItemDataBase* FindItemByPath(SDK::UAuItemDataBaseSubsystem* itemS
 		SDK::UAuItemDataBase* item = (*items)[i];
 		if (!item) continue;
 
-		std::string fullName = item->GetFullName();
-		if (fullName.find(assetPath) != std::string::npos)
+		const std::string fullName = item->GetFullName(); // "<Class> <path>.<name>"
+
+		// The path without the class prefix, and the bare name after its last '.' or ':'.
+		const size_t space = fullName.find(' ');
+		const std::string path = (space == std::string::npos) ? fullName : fullName.substr(space + 1);
+		const size_t sep = path.find_last_of(".:");
+		const std::string shortName = (sep == std::string::npos) ? path : path.substr(sep + 1);
+		if (path == assetPath || shortName == assetPath)
 			return item;
+
+		if (fullName.find(assetPath) != std::string::npos)
+		{
+			++hits;
+			single = item;
+		}
 	}
+
+	if (hits == 1)
+		return single;
+
+	if (hits == 0)
+		snprintf(err, errCap, R"({"ok":false,"error":"item not found"})");
+	else
+		snprintf(err, errCap, R"({"ok":false,"error":"%d items match, use the full asset_path"})", hits);
 	return nullptr;
 }
 
 // No C++ objects with destructors in this frame — SEH is legal.
-static const char* GiveItem_SEH(int playerIndex, int count, const char* assetPath)
+// err is caller-owned storage for the error JSON FindItemByPath may produce.
+static const char* GiveItem_SEH(int playerIndex, int count, const char* assetPath, char* err, int errCap)
 {
 	__try
 	{
@@ -57,6 +91,9 @@ static const char* GiveItem_SEH(int playerIndex, int count, const char* assetPat
 		SDK::APawn* pawn = pc->K2_GetPawn();
 		if (!pawn) return R"({"ok":false,"error":"player has no pawn"})";
 
+		if (!pawn->IsA(SDK::ACrCharacterPlayerBase::StaticClass()))
+			return R"({"ok":false,"error":"player pawn is not a player character"})";
+
 		auto* character = static_cast<SDK::ACrCharacterPlayerBase*>(pawn);
 
 		auto* itemSubsys = static_cast<SDK::UAuItemDataBaseSubsystem*>(
@@ -64,8 +101,8 @@ static const char* GiveItem_SEH(int playerIndex, int count, const char* assetPat
 				world, SDK::UAuItemDataBaseSubsystem::StaticClass()));
 		if (!itemSubsys) return R"({"ok":false,"error":"item subsystem unavailable"})";
 
-		SDK::UAuItemDataBase* foundItem = FindItemByPath(itemSubsys, assetPath);
-		if (!foundItem) return R"({"ok":false,"error":"item not found"})";
+		SDK::UAuItemDataBase* foundItem = FindItemByPath(itemSubsys, assetPath, err, errCap);
+		if (!foundItem) return err;
 
 		character->ServerAddItem(foundItem, static_cast<int32_t>(count));
 		return R"({"ok":true})";
@@ -100,9 +137,9 @@ namespace Ep_InventoryGive
 		}
 
 		const int count = AdminJson::ExtractInt(req->body, req->bodyLen, "count", 1);
-		if (count <= 0)
+		if (count <= 0 || count > kMaxGiveCount)
 		{
-			AdminJson::SetError(resp, 400, "count must be > 0", body);
+			AdminJson::SetError(resp, 400, "count must be 1 to 9999", body);
 			return;
 		}
 
@@ -116,7 +153,8 @@ namespace Ep_InventoryGive
 		const std::string result = AdminGT::Dispatch([playerIndex, count, assetPath]() -> std::string
 		{
 #if INV_HAS_SDK
-			return GiveItem_SEH(playerIndex, count, assetPath.c_str());
+			char err[160] = {};
+			return GiveItem_SEH(playerIndex, count, assetPath.c_str(), err, static_cast<int>(sizeof(err)));
 #else
 			return R"({"ok":false,"error":"SDK not available in this build"})";
 #endif

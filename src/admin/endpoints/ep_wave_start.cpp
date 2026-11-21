@@ -10,6 +10,9 @@ static const char* WaveStart_SEH(int waveType)
 {
 	__try
 	{
+		if (waveType >= static_cast<int>(SDK::EEnviroWave::EEnviroWave_MAX))
+			return R"({"ok":false,"error":"wave_type out of range"})";
+
 		SDK::UCrEnviroWaveSubsystem* ws = GetWaveSubsystem();
 		if (!ws) return R"({"ok":false,"error":"wave subsystem unavailable"})";
 
