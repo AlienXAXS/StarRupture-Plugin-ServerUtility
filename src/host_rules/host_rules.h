@@ -25,6 +25,10 @@ namespace HostRules
 	void PushWhenGameThreadRuns();
 	void Shutdown();
 
+	// Re-send each connected player's own rules after the rules or the player
+	// list changed. Runs on the game thread (posted when called from another).
+	void RefreshPlayers();
+
 	bool Reload(std::string& error);
 	RulesModel::Model Get();
 

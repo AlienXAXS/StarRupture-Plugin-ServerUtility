@@ -3,6 +3,7 @@
 #include "cmd_args.h"
 #include "../rcon.h"
 #include "../state/server_state.h"
+#include "../../host_rules/host_rules.h"
 #include "../../host_rules/player_list.h"
 
 #include <cctype>
@@ -87,6 +88,7 @@ namespace Cmd_Player
 			if (sub == "reload")
 			{
 				if (!PlayerList::Reload(error)) return Error(error);
+				HostRules::RefreshPlayers();
 				return "Player list reloaded: " + std::to_string(PlayerList::All().size()) + " entries.\n";
 			}
 
@@ -101,9 +103,11 @@ namespace Cmd_Player
 				if (sub == "set")
 				{
 					if (!PlayerList::Set(id, rest, error)) return Error(error);
+					HostRules::RefreshPlayers();
 					return Saved(id);
 				}
 				if (!PlayerList::Remove(id, error)) return Error(error);
+				HostRules::RefreshPlayers();
 				return "Removed the entry for " + id + ".\n";
 			}
 
@@ -120,6 +124,7 @@ namespace Cmd_Player
 			{
 				int changed = 0;
 				if (!PlayerList::ClearAdmins(changed, error)) return Error(error);
+				HostRules::RefreshPlayers();
 				return "Took Admin off " + std::to_string(changed) + " entries.\n";
 			}
 
@@ -135,12 +140,14 @@ namespace Cmd_Player
 				{
 					const std::string flags = rest.empty() ? "admin" : "admin label=" + rest;
 					if (!PlayerList::Set(id, flags, error)) return Error(error);
+					HostRules::RefreshPlayers();
 					return Saved(id);
 				}
 
 				PlayerList::Entry existing;
 				if (!PlayerList::Find(id, existing)) return Error("no entry with that ID");
 				if (!PlayerList::Set(id, "-admin", error)) return Error(error);
+				HostRules::RefreshPlayers();
 				return Saved(id);
 			}
 

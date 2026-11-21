@@ -1,6 +1,7 @@
 #include "ep_rules_players.h"
 #include "../admin_json.h"
 #include "../session/session_store.h"
+#include "../../host_rules/host_rules.h"
 #include "../../host_rules/player_list.h"
 
 #include <sstream>
@@ -75,6 +76,7 @@ namespace Ep_RulesPlayers
 				AdminJson::SetError(resp, 400, error.c_str(), body);
 				return;
 			}
+			HostRules::RefreshPlayers();
 		}
 		else if (action != "get")
 		{
