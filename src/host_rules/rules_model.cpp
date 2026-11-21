@@ -192,6 +192,57 @@ namespace RulesModel
 		return t;
 	}
 
+	bool NeedsOwnRules(const PlayerFlags& f)
+	{
+		return f.exemptRules || !f.sections.empty();
+	}
+
+	std::string PlayerRulesText(const Model& m, const PlayerFlags& f)
+	{
+		if (!NeedsOwnRules(f))
+			return RulesText(m);
+
+		// Nothing denied: the default, the message and no rows.
+		if (f.exemptRules)
+		{
+			std::string t = "default=allow\n";
+			if (!m.message.empty()) t += "message=" + m.message + "\n";
+			return t;
+		}
+
+		std::vector<Rule> rules = m.rules;
+		std::vector<Rule> own;   // the player's keys, checked and split
+		for (const std::string& key : f.sections)
+		{
+			Rule r;
+			std::string error;
+			if (ParseKey(key, r.plugin, r.id, error)) own.push_back(r);
+		}
+
+		// A whole-mod key opens every row of that mod first.
+		for (const Rule& o : own)
+		{
+			if (o.id != "*") continue;
+			rules.erase(std::remove_if(rules.begin(), rules.end(),
+				[&](const Rule& r) { return SamePlugin(r.plugin, o.plugin); }), rules.end());
+			rules.push_back({ o.plugin, "*", false });
+		}
+		for (const Rule& o : own)
+		{
+			if (o.id == "*") continue;
+			const bool covered = std::any_of(rules.begin(), rules.end(),
+				[&](const Rule& r) { return SamePlugin(r.plugin, o.plugin) && r.id == "*" && !r.deny; });
+			auto it = std::find_if(rules.begin(), rules.end(),
+				[&](const Rule& r) { return SamePlugin(r.plugin, o.plugin) && r.id == o.id; });
+			if (it != rules.end()) it->deny = false;
+			else if (!covered || m.defaultDeny) rules.push_back({ o.plugin, o.id, false });
+		}
+
+		Model own2 = m;
+		own2.rules = rules;
+		return RulesText(own2);
+	}
+
 	std::string VersionMinimumsText(const Model& m)
 	{
 		std::string t;

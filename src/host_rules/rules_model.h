@@ -34,6 +34,20 @@ namespace RulesModel
 
 	// What SetRules takes: default=, message=, one Plugin.feature=allow|deny per rule.
 	std::string RulesText(const Model& m);
+	// What one player's entry changes in the rules that player is sent.
+	struct PlayerFlags
+	{
+		bool exemptRules = false;               // Admin counts as this
+		std::vector<std::string> sections;      // Plugin.feature or Plugin.* keys allowed for this player
+	};
+	// True when the player needs a rules set of their own (a flag changes the result).
+	bool NeedsOwnRules(const PlayerFlags& f);
+	// The rules text for one player: the global rules with the flags applied.
+	// It stands alone (default and message too) because the loader's per-player
+	// set replaces the global one. ExemptRules: nothing denied. Sections: those
+	// keys are allowed, ahead of any global rule for the same mod.
+	std::string PlayerRulesText(const Model& m, const PlayerFlags& f);
+
 	// What SetVersionMinimums will take: one Plugin=version per line, the loader
 	// minimum first as $loader=version. Not read by any loader yet.
 	std::string VersionMinimumsText(const Model& m);

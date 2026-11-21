@@ -102,6 +102,26 @@ int main()
 	Model back = ParseText(file, w);
 	CHECK(w.empty() && RulesText(back) == RulesText(m) && VersionMinimumsText(back) == VersionMinimumsText(m));
 
+	// The rules one player is sent.
+	w.clear();
+	m = ParseText({ "[Policy]", "Default=deny", "Message=Off here", "[Rules]", "BetterCheats.*=allow", "BetterCheats.movement=deny",
+	                "BetterDrone.drone-limits=deny", "Other.x=deny" }, w);
+	PlayerFlags none;
+	CHECK(!NeedsOwnRules(none) && PlayerRulesText(m, none) == RulesText(m));
+	PlayerFlags exempt; exempt.exemptRules = true;
+	CHECK(NeedsOwnRules(exempt) && PlayerRulesText(m, exempt) == "default=allow\nmessage=Off here\n");
+	exempt.sections = { "BetterDrone.drone-limits" };   // exempt wins over sections
+	CHECK(PlayerRulesText(m, exempt) == "default=allow\nmessage=Off here\n");
+	PlayerFlags sec; sec.sections = { "betterdrone.drone-limits" };
+	CHECK(NeedsOwnRules(sec));
+	CHECK(PlayerRulesText(m, sec) == "default=deny\nmessage=Off here\nBetterCheats.*=allow\nBetterCheats.movement=deny\nBetterDrone.drone-limits=allow\nOther.x=deny\n");
+	sec.sections = { "BetterCheats.*", "Other.*" };   // a whole-mod key opens its specific rows
+	CHECK(PlayerRulesText(m, sec) == "default=deny\nmessage=Off here\nBetterDrone.drone-limits=deny\nBetterCheats.*=allow\nOther.*=allow\n");
+	sec.sections = { "New.thing", "bad key", "nodot" };   // a key with no rule is added; unusable keys are skipped
+	CHECK(PlayerRulesText(m, sec).find("New.thing=allow\n") != std::string::npos && PlayerRulesText(m, sec).find("bad") == std::string::npos);
+	Model open = m; open.defaultDeny = false;
+	sec.sections = { "Fresh.thing" };
+	CHECK(PlayerRulesText(open, sec).find("Fresh.thing=allow\n") != std::string::npos);   // still stands alone with default allow
 	std::printf("%d checks, %d failed\n", g_checks, g_failed);
 	return g_failed ? 1 : 0;
 }
