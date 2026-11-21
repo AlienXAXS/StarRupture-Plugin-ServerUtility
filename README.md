@@ -223,9 +223,11 @@ All endpoints return `{"ok": false, "error": "<reason>"}` on failure, with an ap
 
 3. After the first launch, edit `Plugins\config\ServerUtility.ini` and set `Enabled=1`.
 
-> **Requires [StarRupture-ModLoader](https://github.com/AlienXAXS/StarRupture-ModLoader) {LOADER_VERSION} or newer** to be installed first.
+> **Requires [StarRupture-ModLoader](https://github.com/AlienXAXS/StarRupture-ModLoader) v1.25.0 or newer** to be installed first.
 
 ServerUtility takes its game addresses and member offsets from the mod loader's version object map (the version map), so the same DLL runs on every server build the version map covers. After a game update, update the mod loader to get the new entries.
+
+On a dedicated server, keep the mod loader up to date. It carries the version map rows for each server build.
 
 ---
 
