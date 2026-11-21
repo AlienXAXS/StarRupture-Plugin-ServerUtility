@@ -6,10 +6,12 @@
 //   std::string result = AdminGT::Dispatch([]() -> std::string { return R"({"ok":true})"; });
 //
 // The lambda runs on the game thread; this call blocks (up to 5 s).
-// On timeout, returns an error JSON string.
+// On timeout, returns an error JSON string and the lambda is dropped if it
+// has not started yet.
 
 #include <string>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <condition_variable>
 #include <chrono>
@@ -19,11 +21,14 @@
 
 namespace AdminGT
 {
+	// Shared by the waiting thread and the queued task, so whichever finishes
+	// last frees it. All fields after fn are guarded by mu.
 	struct GtPayload
 	{
 		std::function<std::string()> fn;
 		std::string                  result;
 		bool                         done = false;
+		bool                         abandoned = false;
 		std::mutex                   mu;
 		std::condition_variable      cv;
 	};
@@ -34,27 +39,33 @@ namespace AdminGT
 		if (!hooks || !hooks->Engine)
 			return R"({"ok":false,"error":"engine unavailable"})";
 
-		GtPayload* p = new GtPayload();
+		auto p = std::make_shared<GtPayload>();
 		p->fn = std::move(fn);
 
 		hooks->Engine->PostToGameThread([](void* ctx)
 		{
-			GtPayload* payload = static_cast<GtPayload*>(ctx);
-			payload->result = payload->fn();
+			std::unique_ptr<std::shared_ptr<GtPayload>> owner(static_cast<std::shared_ptr<GtPayload>*>(ctx));
+			GtPayload& payload = **owner;
 			{
-				std::lock_guard<std::mutex> lk(payload->mu);
-				payload->done = true;
+				std::lock_guard<std::mutex> lk(payload.mu);
+				if (payload.abandoned) return; // the caller already gave up
 			}
-			payload->cv.notify_one();
-		}, p);
+			std::string result = payload.fn();
+			{
+				std::lock_guard<std::mutex> lk(payload.mu);
+				payload.result = std::move(result);
+				payload.done = true;
+			}
+			payload.cv.notify_one();
+		}, new std::shared_ptr<GtPayload>(p));
 
 		std::unique_lock<std::mutex> lk(p->mu);
 		p->cv.wait_for(lk, std::chrono::seconds(5), [&]{ return p->done; });
 
-		std::string result = p->done
-			? p->result
-			: R"({"ok":false,"error":"game thread timeout"})";
-		delete p;
-		return result;
+		if (p->done)
+			return p->result;
+
+		p->abandoned = true;
+		return R"({"ok":false,"error":"game thread timeout"})";
 	}
 }
