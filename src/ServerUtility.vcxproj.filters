@@ -105,6 +105,9 @@
     <ClInclude Include="rcon\state\server_state.h">
       <Filter>rcon\state</Filter>
     </ClInclude>
+    <ClInclude Include="rcon\listed_players.h">
+      <Filter>rcon</Filter>
+    </ClInclude>
     <ClInclude Include="rcon\commands\command_handler.h">
       <Filter>rcon\commands</Filter>
     </ClInclude>

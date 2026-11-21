@@ -7,6 +7,7 @@
 #if defined(MODLOADER_SERVER_BUILD) || defined(MODLOADER_CLIENT_BUILD)
 #  include "SDK/Engine_classes.hpp"
 #  include "plugin_map.h"
+#  include "../../rcon/listed_players.h"
 #  define KICK_HAS_SDK 1
 #else
 #  define KICK_HAS_SDK 0
@@ -18,7 +19,8 @@ static void KickPlayerController(SDK::APlayerController* pc)
 	Removal::Kick(pc, std::string());
 }
 
-static const char* KickPlayer_SEH(int playerIndex)
+// playerIndex is a players/list index; expectedName is the name the list showed at it.
+static const char* KickPlayer_SEH(int playerIndex, const wchar_t* expectedName)
 {
 	__try
 	{
@@ -28,10 +30,7 @@ static const char* KickPlayer_SEH(int playerIndex)
 		SDK::AGameStateBase* gs = world->GameState;
 		if (!gs) return R"({"ok":false,"error":"game state unavailable"})";
 
-		if (playerIndex >= gs->PlayerArray.Num())
-			return R"({"ok":false,"error":"player not found"})";
-
-		SDK::APlayerState* ps = gs->PlayerArray[playerIndex];
+		SDK::APlayerState* ps = ListedPlayers::Find(gs, playerIndex, expectedName);
 		if (!ps) return R"({"ok":false,"error":"player not found"})";
 
 		SDK::APlayerController* pc = static_cast<SDK::APlayerController*>(ps->GetOwner());
@@ -72,7 +71,12 @@ namespace Ep_PlayersKick
 		const std::string result = AdminGT::Dispatch([playerIndex]() -> std::string
 		{
 #if KICK_HAS_SDK
-			return KickPlayer_SEH(playerIndex);
+			PlayerInfo listed;
+			if (!ListedPlayers::Cached(playerIndex, listed))
+				return R"({"ok":false,"error":"player not found"})";
+
+			const std::wstring expectedName = ListedPlayers::ToWide(listed.name);
+			return KickPlayer_SEH(playerIndex, expectedName.c_str());
 #else
 			return R"({"ok":false,"error":"SDK not available in this build"})";
 #endif

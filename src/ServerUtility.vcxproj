@@ -328,6 +328,7 @@
     <ClInclude Include="rcon\commands\cmd_save.h" />
     <ClInclude Include="rcon\rcon.h" />
     <ClInclude Include="rcon\state\server_state.h" />
+    <ClInclude Include="rcon\listed_players.h" />
     <ClInclude Include="rcon\commands\command_handler.h" />
     <ClInclude Include="rcon\commands\cmd_players.h" />
     <ClInclude Include="rcon\server\rcon_server.h" />

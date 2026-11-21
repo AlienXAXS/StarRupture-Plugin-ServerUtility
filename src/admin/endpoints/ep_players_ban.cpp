@@ -2,7 +2,6 @@
 #include "../admin_json.h"
 #include "../session/session_store.h"
 #include "../admin_gamethread.h"
-#include "../../rcon/state/server_state.h"
 
 #include <fstream>
 #include <cstdio>
@@ -15,6 +14,7 @@
 #if defined(MODLOADER_SERVER_BUILD) || defined(MODLOADER_CLIENT_BUILD)
 #  include "SDK/Engine_classes.hpp"
 #  include "plugin_map.h"
+#  include "../../rcon/listed_players.h"
 #  define BAN_HAS_SDK 1
 #else
 #  define BAN_HAS_SDK 0
@@ -48,10 +48,9 @@ static void KickPlayerController(SDK::APlayerController* pc)
 }
 
 // No C++ objects with destructors in this frame — SEH is legal.
-// Kicks the player at playerIndex and copies that same player's name into
-// nameOut, so the ban record is about the player who was removed.
-// Returns nullptr on success, or an error JSON string.
-static const char* BanPlayer_SEH(int playerIndex, wchar_t* nameOut, int nameCap)
+// playerIndex is a players/list index; expectedName is the name the list showed at it.
+// Returns nullptr once that player is kicked, or an error JSON string.
+static const char* BanPlayer_SEH(int playerIndex, const wchar_t* expectedName)
 {
 	__try
 	{
@@ -61,18 +60,11 @@ static const char* BanPlayer_SEH(int playerIndex, wchar_t* nameOut, int nameCap)
 		SDK::AGameStateBase* gs = world->GameState;
 		if (!gs) return R"({"ok":false,"error":"game state unavailable"})";
 
-		if (playerIndex >= gs->PlayerArray.Num())
-			return R"({"ok":false,"error":"player not found"})";
-
-		SDK::APlayerState* ps = gs->PlayerArray[playerIndex];
+		SDK::APlayerState* ps = ListedPlayers::Find(gs, playerIndex, expectedName);
 		if (!ps) return R"({"ok":false,"error":"player not found"})";
 
 		SDK::APlayerController* pc = static_cast<SDK::APlayerController*>(ps->GetOwner());
 		if (!pc) return R"({"ok":false,"error":"player controller unavailable"})";
-
-		const wchar_t* name = ps->PlayerNamePrivate.CStr();
-		if (name)
-			wcsncpy_s(nameOut, nameCap, name, _TRUNCATE);
 
 		KickPlayerController(pc);
 		return nullptr;
@@ -81,16 +73,6 @@ static const char* BanPlayer_SEH(int playerIndex, wchar_t* nameOut, int nameCap)
 	{
 		return R"({"ok":false,"error":"exception during ban"})";
 	}
-}
-
-static std::string ToUtf8(const wchar_t* wide)
-{
-	const int len = WideCharToMultiByte(CP_UTF8, 0, wide, -1, nullptr, 0, nullptr, nullptr);
-	if (len <= 1) return {};
-
-	std::string out(static_cast<size_t>(len - 1), '\0');
-	WideCharToMultiByte(CP_UTF8, 0, wide, -1, out.data(), len, nullptr, nullptr);
-	return out;
 }
 #endif
 
@@ -119,20 +101,17 @@ namespace Ep_PlayersBan
 		const std::string result = AdminGT::Dispatch([playerIndex]() -> std::string
 		{
 #if BAN_HAS_SDK
-			wchar_t name[64] = {};
-			if (const char* error = BanPlayer_SEH(playerIndex, name, static_cast<int>(std::size(name))))
+			PlayerInfo listed;
+			if (!ListedPlayers::Cached(playerIndex, listed))
+				return R"({"ok":false,"error":"player not found"})";
+
+			const std::wstring expectedName = ListedPlayers::ToWide(listed.name);
+			if (const char* error = BanPlayer_SEH(playerIndex, expectedName.c_str()))
 				return error;
 
-			// The IP comes from the cached list, matched by the name of the player just kicked.
-			const std::string playerName = ToUtf8(name);
-			for (const auto& player : ServerState::Get().GetPlayers())
-			{
-				if (player.name == playerName && !player.ipAddress.empty())
-				{
-					AppendBan(player.ipAddress.c_str(), playerName.c_str());
-					break;
-				}
-			}
+			// The list entry is the player just kicked, so its IP is the one to ban.
+			if (!listed.ipAddress.empty())
+				AppendBan(listed.ipAddress.c_str(), listed.name.c_str());
 			return R"({"ok":true})";
 #else
 			return R"({"ok":false,"error":"SDK not available in this build"})";

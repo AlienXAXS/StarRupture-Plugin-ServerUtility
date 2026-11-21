@@ -8,6 +8,7 @@
 #  include "SDK/Chimera_classes.hpp"
 #  include "SDK/AuItems_classes.hpp"
 #  include "server_utility_fields.h"
+#  include "../../rcon/listed_players.h"
 #  define INV_HAS_SDK 1
 #else
 #  define INV_HAS_SDK 0
@@ -71,7 +72,9 @@ static SDK::UAuItemDataBase* FindItemByPath(SDK::UAuItemDataBaseSubsystem* itemS
 
 // No C++ objects with destructors in this frame — SEH is legal.
 // err is caller-owned storage for the error JSON FindItemByPath may produce.
-static const char* GiveItem_SEH(int playerIndex, int count, const char* assetPath, char* err, int errCap)
+// playerIndex is a players/list index; expectedName is the name the list showed at it.
+static const char* GiveItem_SEH(int playerIndex, const wchar_t* expectedName, int count, const char* assetPath,
+                                char* err, int errCap)
 {
 	__try
 	{
@@ -80,9 +83,7 @@ static const char* GiveItem_SEH(int playerIndex, int count, const char* assetPat
 
 		SDK::AGameStateBase* gs = world->GameState;
 		if (!gs) return R"({"ok":false,"error":"game state unavailable"})";
-		if (playerIndex >= gs->PlayerArray.Num()) return R"({"ok":false,"error":"player not found"})";
-
-		SDK::APlayerState* ps = gs->PlayerArray[playerIndex];
+		SDK::APlayerState* ps = ListedPlayers::Find(gs, playerIndex, expectedName);
 		if (!ps) return R"({"ok":false,"error":"player not found"})";
 
 		SDK::APlayerController* pc = static_cast<SDK::APlayerController*>(ps->GetOwner());
@@ -153,8 +154,14 @@ namespace Ep_InventoryGive
 		const std::string result = AdminGT::Dispatch([playerIndex, count, assetPath]() -> std::string
 		{
 #if INV_HAS_SDK
+			PlayerInfo listed;
+			if (!ListedPlayers::Cached(playerIndex, listed))
+				return R"({"ok":false,"error":"player not found"})";
+
+			const std::wstring expectedName = ListedPlayers::ToWide(listed.name);
 			char err[160] = {};
-			return GiveItem_SEH(playerIndex, count, assetPath.c_str(), err, static_cast<int>(sizeof(err)));
+			return GiveItem_SEH(playerIndex, expectedName.c_str(), count, assetPath.c_str(), err,
+			                    static_cast<int>(sizeof(err)));
 #else
 			return R"({"ok":false,"error":"SDK not available in this build"})";
 #endif

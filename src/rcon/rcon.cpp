@@ -23,6 +23,7 @@
 // which sets up the SDK namespace and UC container aliases.
 #  include "SDK/Engine_classes.hpp"
 #  include "plugin_map.h"
+#  include "listed_players.h"
 #  define RCON_HAS_SDK 1
 #else
 #  define RCON_HAS_SDK 0
@@ -137,7 +138,7 @@ struct RawPlayerData
 	uint8_t ping;
 };
 
-static constexpr int MAX_RAW_PLAYERS = 128;
+static constexpr int MAX_RAW_PLAYERS = ListedPlayers::kMax;
 
 // Returns the number of players written into outRaw, or -1 on SEH exception.
 static int CollectPlayersRaw_SEH(void* worldPtr, RawPlayerData* outRaw)
@@ -156,10 +157,7 @@ static int CollectPlayersRaw_SEH(void* worldPtr, RawPlayerData* outRaw)
 		for (int32_t i = 0; i < count && written < MAX_RAW_PLAYERS; ++i)
 		{
 			SDK::APlayerState* ps = gameState->PlayerArray[i];
-			if (!ps) continue;
-
-			if (ps->PlayerNamePrivate.Num() <= 0)
-				continue;
+			if (!ListedPlayers::IsListed(ps)) continue;
 
 			// Grab the raw TCHAR* – this is a wchar_t* internally.
 			// We'll do the conversion outside __try.
