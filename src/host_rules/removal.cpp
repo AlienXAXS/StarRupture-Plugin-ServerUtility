@@ -1,5 +1,6 @@
 #include "removal.h"
 #include "player_ids.h"
+#include "rules_model.h"
 #include "../plugin_helpers.h"
 
 #include "SDK/Engine_classes.hpp"
@@ -7,6 +8,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <chrono>
 #include <string>
 #include <unordered_map>
@@ -38,6 +40,7 @@ namespace
 		return &s_texts.emplace(reason, text).first->second;
 	}
 
+#if PLUGIN_INTERFACE_VERSION >= 79
 	// One removal per join. A join has its own player controller, so the
 	// controller is the key, kept as an ObjectRef and never as a raw pointer.
 	// A new controller can take a dead one's slot, so an entry also ends after
@@ -110,7 +113,45 @@ namespace
 		}
 	}
 
-#if PLUGIN_INTERFACE_VERSION >= 79
+	// A player below a minimum whose ID cannot be read yet is held, as a weak
+	// reference and a copy of the reason (the loader's text is valid only for the
+	// callback), and tried again each tick: the exemption can only be checked once
+	// the ID reads. A rejoin is a new controller, so it starts fresh. Game thread only.
+	struct Held
+	{
+		ObjectRef<SDK::APlayerController> pc;
+		std::string                       reason;
+		ULONGLONG                         sinceMs;
+	};
+	std::vector<Held> g_held;
+	bool              g_tickRegistered = false;
+
+	void OnTick(float)
+	{
+		const ULONGLONG now = GetTickCount64();
+		for (size_t i = 0; i < g_held.size();)
+		{
+			SDK::APlayerController* pc = g_held[i].pc.Get();
+			const bool idRead = pc && !PlayerIds::OfController(pc).empty();
+			const RulesModel::HeldStep step = RulesModel::NextHeldStep(pc != nullptr, idRead, now - g_held[i].sinceMs);
+			if (step == RulesModel::HeldStep::Wait)
+			{
+				++i;
+				continue;
+			}
+
+			const std::string reason = g_held[i].reason;
+			g_held.erase(g_held.begin() + i);
+			if (step == RulesModel::HeldStep::Drop)
+				continue;
+			if (step == RulesModel::HeldStep::ActNoId)
+				LOG_WARN("[HostRules] A player's ID was not readable after %d seconds - removed as not exempt",
+				         static_cast<int>(RulesModel::kLateIdGraceMs / 1000));
+			if (!RemoveGuarded(pc, reason.c_str()))
+				LOG_WARN("[HostRules] Exception while removing a player - skipped");
+		}
+	}
+
 	void OnBelowMinimum(void* playerController, const char* plainReason)
 	{
 		auto* hooks = GetHooks();
@@ -123,6 +164,14 @@ namespace
 		auto* pc = static_cast<SDK::APlayerController*>(playerController);
 		if (!pc || !plainReason)
 			return;
+
+		if (PlayerIds::OfController(pc).empty())
+		{
+			const bool held = std::any_of(g_held.begin(), g_held.end(), [&](const Held& h) { return h.pc.Get() == pc; });
+			if (!held)
+				g_held.push_back({ ObjectRef<SDK::APlayerController>(pc), plainReason, GetTickCount64() });
+			return;
+		}
 
 		if (!RemoveGuarded(pc, plainReason))
 			LOG_WARN("[HostRules] Exception while removing a player - skipped");
@@ -150,6 +199,11 @@ namespace Removal
 		}
 		hooks->HostRules->RegisterOnClientBelowMinimum(GetSelf(), OnBelowMinimum);
 		g_registered = true;
+		if (hooks->Engine)
+		{
+			hooks->Engine->RegisterOnTick(OnTick);
+			g_tickRegistered = true;
+		}
 #else
 		LOG_INFO("[HostRules] This build has no host rules support - minimum version removal is off");
 #endif
@@ -162,6 +216,10 @@ namespace Removal
 		if (g_registered && hooks && hooks->HostRules && GetSelf())
 			hooks->HostRules->UnregisterOnClientBelowMinimum(GetSelf(), OnBelowMinimum);
 		g_registered = false;
+		if (g_tickRegistered && hooks && hooks->Engine)
+			hooks->Engine->UnregisterOnTick(OnTick);
+		g_tickRegistered = false;
+		g_held.clear();
 #endif
 	}
 }

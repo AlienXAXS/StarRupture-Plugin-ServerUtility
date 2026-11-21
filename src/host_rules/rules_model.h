@@ -66,4 +66,20 @@ namespace RulesModel
 	bool SetMessage(Model& m, const std::string& text, std::string& error);
 	bool SetMinLoader(Model& m, const std::string& versionOrEmpty, std::string& error);
 	bool SetModMin(Model& m, const std::string& plugin, const std::string& versionOrEmpty, std::string& error);
+	// A player's ID is read from the player state, which can arrive a moment after
+	// the loader calls a plugin about that player. Work that needs the ID is held
+	// and tried again each tick for this long; after that the player is treated
+	// as having no entry in the player list.
+	constexpr unsigned long long kLateIdGraceMs = 10000;
+
+	enum class HeldStep
+	{
+		Drop,    // the controller is gone: forget it
+		Wait,    // the ID is still unread and the grace has not run out
+		Act,     // the ID reads: do the work
+		ActNoId  // the grace ran out with no ID: do the work without one
+	};
+	// The next step for one held controller, from whether it still exists, whether
+	// its ID reads now and how long it has been held.
+	HeldStep NextHeldStep(bool alive, bool idRead, unsigned long long heldMs);
 }

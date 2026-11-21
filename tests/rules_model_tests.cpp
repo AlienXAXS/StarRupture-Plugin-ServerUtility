@@ -109,6 +109,12 @@ int main()
 	CHECK(!ValidVersion("1.2.") && !ValidVersion("1.2.3.4.") && !ValidVersion("1..2") && !ValidVersion(".1.2") && !ValidVersion("1.2.-dev"));
 	CHECK(ValidVersion("999999999.0") && !ValidVersion("1234567890.0") && !ValidVersion("1.99999999999"));
 
+	// A controller held until its ID reads.
+	CHECK(NextHeldStep(false, false, 0) == HeldStep::Drop && NextHeldStep(false, true, 0) == HeldStep::Drop);
+	CHECK(NextHeldStep(true, false, 0) == HeldStep::Wait && NextHeldStep(true, false, kLateIdGraceMs) == HeldStep::Wait);
+	CHECK(NextHeldStep(true, false, kLateIdGraceMs + 1) == HeldStep::ActNoId);
+	CHECK(NextHeldStep(true, true, 0) == HeldStep::Act && NextHeldStep(true, true, kLateIdGraceMs + 1) == HeldStep::Act);
+
 	// What is written back reads back the same.
 	m = Model{};
 	SetDefault(m, true); SetMessage(m, "No cheats", e); SetMinLoader(m, "1.27.0", e);

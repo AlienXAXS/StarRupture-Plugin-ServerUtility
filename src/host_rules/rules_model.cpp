@@ -328,4 +328,11 @@ namespace RulesModel
 		if (it != m.modMins.end()) it->version = ModMinValue(v); else m.modMins.push_back({ plugin, ModMinValue(v) });
 		return true;
 	}
+
+	HeldStep NextHeldStep(bool alive, bool idRead, unsigned long long heldMs)
+	{
+		if (!alive) return HeldStep::Drop;
+		if (idRead) return HeldStep::Act;
+		return heldMs > kLateIdGraceMs ? HeldStep::ActNoId : HeldStep::Wait;
+	}
 }
