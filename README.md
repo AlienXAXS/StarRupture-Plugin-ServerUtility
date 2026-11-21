@@ -38,9 +38,9 @@ See the [vulnerability announcement](https://wiki.starrupture-utilities.com/en/d
 
 ### Removing players on an old mod loader (not active yet)
 
-The groundwork is in place for a server setting that removes a player whose mod loader is older than a version you choose, and tells them why. A player without the mod loader is never affected. Nothing is removed yet: the setting, and the mod loader version that reports the player's version, come in a later release. Until then the log shows `[HostRules] This mod loader has no host rules support - minimum version removal is off`.
+The groundwork is in place for removing a player whose mod loader is older than a version you choose, and telling them why. A player without the mod loader is never affected. **Nothing is removed yet.** You can already set the versions (`hostrules minversion` for the mod loader, `hostrules modmin <plugin> <version>` for one mod) and they are saved in `HostRules.ini`, but no mod loader reports a player's version to this plugin yet, so nothing acts on them. Until it does, the log shows `[HostRules] This mod loader has no host rules support - minimum version removal is off`.
 
-The removal sends the player to the main menu with a short written reason (whether the game displays that text has not been confirmed yet), removes each player at most once per join, and skips players the host marks as exempt in the player list (see below).
+When it is active, the removal sends the player to the main menu with a short written reason (whether the game displays that text has not been confirmed yet), removes each player at most once per join, and skips players the host marks as exempt in the player list (see below).
 
 ### Player list (admins and exemptions)
 
@@ -66,6 +66,46 @@ The server reads each player's ID from the game; the client does not send it. Wh
 Easiest is RCON. `player ids` shows who is connected and the exact ID to use; `admin add 1 Alice` makes the first player in that list an admin. See [RCON_README.md](src/RCON_README.md) for the `player` and `admin` commands.
 
 The admin panel has matching endpoints (`/rules/players`, below), but the panel is off in this build, so RCON is the way to manage the list for now. Nothing is removed yet; the list only decides who will be skipped when removal arrives.
+
+### Host rules: switch mod features off for players
+
+The host can tell players' mod loaders to switch a mod's feature off. ServerUtility keeps the rules in `Plugins\config\HostRules.ini` and sends them to the server's mod loader when the server starts and each time you change them. The mod loader passes them to the players' mod loaders, which switch off what a rule denies and show your message. A player without the mod loader is not affected.
+
+**Needs mod loader with plugin interface 79 or newer; older loaders refuse to load it and say a newer loader is needed.** On a mod loader that has no host rules support the rules are still saved, but they are not sent (the log says so, and `hostrules` shows "not sent").
+
+A feature is named `Plugin.feature`; `Plugin.*` means every feature of one mod. `Default` decides what a feature with no rule gets.
+
+```
+[Policy]
+Default=allow
+Message=Some mods are off here
+MinLoaderVersion=
+
+[Rules]
+BetterCheats.movement=deny
+BetterDrone.*=deny
+
+[MinVersions]
+RuptureTimer=0.11.0
+```
+
+Easiest is RCON (see [RCON_README.md](src/RCON_README.md) for every verb):
+
+```
+hostrules deny BetterCheats.movement
+hostrules message Some mods are off here
+hostrules default allow
+hostrules unset BetterCheats.movement
+```
+
+After editing the file by hand, run `hostrules reload`. A line the plugin does not understand is logged, left in the file and ignored.
+
+What works today and what does not:
+
+- **Rules (`allow`, `deny`, `default`, `message`)** are saved and sent to the mod loader. This is the part that takes effect, on a mod loader that supports it.
+- **`minversion` and `modmin`** are saved only. Nothing enforces them yet (see "Removing players on an old mod loader" above).
+- **`who <id|number>`** shows what the plugin knows about one connected player: the player's ID, how many times their mod loader reported its feature list, and when it last did. The list of mods and features itself is not available to this plugin from the mod loader yet, so `who` cannot show it.
+- **Admins and `ExemptRules` players** are not yet exempt: the rules go to every player for now.
 
 ### Admin API
 
@@ -278,6 +318,8 @@ All endpoints return `{"ok": false, "error": "<reason>"}` on failure, with an ap
 3. After the first launch, edit `Plugins\config\ServerUtility.ini` and set `Enabled=1` in the `[General]` section.
 
 > **Requires [StarRupture-ModLoader](https://github.com/AlienXAXS/StarRupture-ModLoader) v1.25.0 or newer** to be installed first.
+
+> **Host rules need a mod loader with plugin interface 79 or newer.** Older loaders refuse to load this build of ServerUtility and say a newer loader is needed.
 
 ServerUtility takes its game addresses and member offsets from the mod loader's version object map (the version map) first, so the same DLL runs on every server build the version map covers. It also carries its own values for CL 127004, the current 0.3.5 server, so it runs there even when the version map has no entries for that build. On a newer server build it needs the version map's entries for that build. After a game update, update the mod loader to get them.
 

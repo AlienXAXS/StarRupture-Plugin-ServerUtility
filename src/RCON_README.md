@@ -162,6 +162,44 @@ Took Admin off 0 entries.
 - `admin remove <id|number>` takes Admin off an existing entry; it errors if the ID has no entry.
 - `admin clear` takes Admin off every entry.
 
+### `hostrules [list|allow|deny|unset|default|message|minversion|modmin|reload|who]`
+
+Show and edit the host's rules for mod features: the `[Policy]`, `[Rules]` and `[MinVersions]` sections of `Plugins\config\HostRules.ini`. Each change is written to the file and sent to the mod loader straight away. The rules are sent only to a mod loader with plugin interface 79 or newer; on any other they are saved and `hostrules` says "not sent".
+
+| Verb | What it does |
+|---|---|
+| `hostrules` or `hostrules list` | Show the rules, whether the mod loader received them, and the version minimums |
+| `hostrules allow <Plugin.feature>` | Allow one feature (`Plugin.*` = every feature of that mod) |
+| `hostrules deny <Plugin.feature>` | Switch one feature off for players |
+| `hostrules unset <Plugin.feature>` | Take that rule away, so the default applies |
+| `hostrules default allow\|deny` | What a feature with no rule gets |
+| `hostrules message [text\|off]` | The line players see when a feature is off; with no text, shows the rules. `off` clears it |
+| `hostrules minversion [version\|off]` | Minimum mod loader version. Saved only: nothing enforces it yet |
+| `hostrules modmin [<plugin> <version\|off>]` | Minimum version of one mod. Saved only: nothing enforces it yet |
+| `hostrules reload` | Re-read the file after a hand edit |
+| `hostrules who <id\|number>` | What a connected player's mod loader reported. A 1-3 digit argument is the number from `player ids`; anything else is an ID |
+
+A version is `0.11.0`, `v0.11.0` or `1.27.0-dev.1`: at least major.minor, up to four numbers. `who` shows the player's ID, how many times their mod loader reported its feature list and when it last did. Which mods and features it listed is not available to this plugin from the mod loader yet.
+
+```
+> hostrules deny BetterCheats.movement
+Saved.
+Host rules (sent):
+  default: allow
+  message: (none)
+  BetterCheats.movement = deny
+  minimum loader version: off
+  minimum mod versions: none
+  Version minimums are saved only: no mod loader enforces them yet.
+> hostrules message Some mods are off here
+> hostrules default deny
+> hostrules unset BetterCheats.movement
+> hostrules modmin RuptureTimer 0.11.0
+> hostrules who 1
+Player 76561198000000001: the mod loader reported its features 1 time(s), last 12 s ago.
+Which mods and features it listed is not available to this plugin from the mod loader yet.
+```
+
 ### `save` / `savegame` / `forcesave`
 
 Force an immediate world save by calling `UCrSaveSubsystem::SaveNextSaveGame`. The save runs synchronously on the game thread; the RCON response is returned after it completes.
