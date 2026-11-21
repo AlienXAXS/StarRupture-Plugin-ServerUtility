@@ -73,8 +73,7 @@ static void OnEngineInit()
 	HostRules::PushWhenGameThreadRuns();
 
 	// Initialise admin web panel (HTTP routes)
-	// This isnt ready yet.
-	//AdminPanel::Init(g_self);
+	AdminPanel::Init(g_self);
 }
 
 static void OnEngineShutdown()
