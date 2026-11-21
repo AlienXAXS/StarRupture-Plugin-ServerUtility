@@ -146,9 +146,9 @@ Saved: 76561198000000002=Bob|ExemptVersion
 Removed the entry for 76561198000000002.
 ```
 
-### `admin add|remove|clear`
+### `admin add|remove|clear|code`
 
-Shortcuts for the Admin flag.
+Shortcuts for the Admin flag, and the claim code for the first admin.
 
 ```
 > admin add 1 Alice
@@ -161,6 +161,14 @@ Took Admin off 0 entries.
 - `admin add <id|number> [label]` adds the player as an admin, with an optional label.
 - `admin remove <id|number>` takes Admin off an existing entry; it errors if the ID has no entry.
 - `admin clear` takes Admin off every entry.
+- `admin code` shows the claim code while the player list has no admin. Players whose mod loader supports it (interface 79 or newer, server and player) are asked for this code when they join and become admin if they type it right. With an admin in the list it says the server already has one and there is no code. On a server loader without the prompt it says to use `admin add`.
+
+```
+> admin code
+No admins yet. Claim code: <code>
+```
+
+A player gets 5 wrong tries, then is not asked again until restart; 5 wrong tries in total replace the code. "Not me" also stops the asking until restart. `[Policy] AdminPrompt=0` in `HostRules.ini` turns the asking off (the code still shows here). See the README for the full flow.
 
 ### `hostrules [list|allow|deny|unset|default|message|minversion|modmin|reload|who]`
 

@@ -67,6 +67,32 @@ The server reads each player's ID from the game; the client does not send it. Wh
 
 Easiest is RCON. `player ids` shows who is connected and the exact ID to use; `admin add 1 Alice` makes the first player in that list an admin. See [RCON_README.md](src/RCON_README.md) for the `player` and `admin` commands.
 
+#### Claiming admin with a code
+
+A new server has no admin. While the player list has none, ServerUtility makes a one-time claim code of 8 letters and digits and shows it to the host only in the server log, once at start and again whenever a new code is made:
+
+```
+[Admin] No admins yet. Claim code: <code> (shown only while the list is empty; RCON: admin code)
+```
+
+RCON `admin code` prints the same code. The code is kept in memory only and is never written to a file. Nothing else shows it, and the typed code is never logged.
+
+What a player sees: when a player joins with the mod loader and the list has no admin, their mod loader asks them for the claim code. The host reads it from the log and tells them. They type it (upper or lower case, spaces around it are fine), or choose **Not me**.
+
+- **Right code:** the player is added to `[Players]` as `Admin` with their name as the label (the same as `admin add`), the rules are sent again, and any other open prompt closes with "Another player already claimed this server."
+- **Wrong code:** "That is not the code. N tries left." One player gets 5 wrong tries; after that they are not asked again until the server restarts. If 5 wrong tries pile up across all players, the code is replaced by a new one in the log and the old one stops working.
+- **Not me:** closes the prompt. That player is not asked again until the server restarts.
+- **When it ends:** the code is gone once the list has an admin, however that happened (claim, `admin add`, a hand edit and `player reload`). A restart makes a new code if the list is still empty.
+
+Every player with the mod loader is asked once per server run while there is no admin, so the host should be ready to tell the first player the code. A player without the mod loader, or with an older one, is never asked. **The prompt needs a mod loader with plugin interface 79 or newer on both the server and the player's side.** On an older server loader the claim is off and `admin code` says to use `admin add`.
+
+To turn asking off, set `AdminPrompt=0` in `[Policy]` (`off`, `false` and `no` also work). The code is still shown to the host and `admin add` still works.
+
+```
+[Policy]
+AdminPrompt=0
+```
+
 The admin panel has matching endpoints (`/rules/players`, below), but the panel is off in this build, so RCON is the way to manage the list for now. `Admin` and `ExemptVersion` players are skipped by the version removal.
 
 ### Host rules: switch mod features off for players
