@@ -47,14 +47,20 @@ void AutoProfessionHook::Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
 void AutoProfessionHook::Install()
 {
 	// The profession to return, by name. Looks at every loaded object, so it is
-	// asked once, here, on the game thread (OnEngineInit). A build without the
+	// asked once, here, from the engine init callback (OnEngineInit), which runs
+	// on the loader's init thread once the engine is up. A build without the
 	// enum or the entry leaves the patch off.
 	int64_t profession = 0;
 	if (PluginMap::EnumValue(GameSig::PROFESSION_ENUM_NAME, GameSig::PROFESSION_ENUM_ENTRY, profession)
-		!= PluginMap::EnumLookup::Found
-		|| profession < 0 || profession > UINT8_MAX)
+		!= PluginMap::EnumLookup::Found)
 	{
 		LOG_WARN("[AutoProfession] %s::%s not found on this build - auto-profession is off",
+		         GameSig::PROFESSION_ENUM_NAME, GameSig::PROFESSION_ENUM_ENTRY);
+		return;
+	}
+	if (profession < 0 || profession > UINT8_MAX)
+	{
+		LOG_WARN("[AutoProfession] %s::%s is out of range on this build - auto-profession is off",
 		         GameSig::PROFESSION_ENUM_NAME, GameSig::PROFESSION_ENUM_ENTRY);
 		return;
 	}

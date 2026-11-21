@@ -23,9 +23,10 @@ namespace AutoProfessionHook
 	// OnPluginLoadHooks export -- the loader refuses scans made anywhere else.
 	void Resolve(IPluginSelf* self, IPluginHookScanner* scanner);
 
-	// Patch the resolved prologue. Call once, on the game thread (the engine
-	// init callback), when MaxPlayers is enabled. Logs and does nothing when the
-	// EProfessionType enum or its Soldier entry is not on this build.
+	// Patch the resolved prologue. Call once, from the engine init callback
+	// (the loader's init thread, engine already up), when MaxPlayers is
+	// enabled. Logs and does nothing when the EProfessionType enum or its
+	// Soldier entry is not on this build.
 	void Install();
 
 	// Restore the original prologue bytes on shutdown.
