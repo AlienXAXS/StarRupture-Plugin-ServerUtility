@@ -77,7 +77,9 @@ namespace ServerUtilityFields
 
 	// The game build the compiled offsets above were taken from: the plugin's
 	// own row for a member the loader's map has no row for yet. It is the CL the
-	// Game-SDK dump is built for, so the row follows the dump.
+	// Game-SDK dump is built for. That holds for the SERVER_UTILITY_FIELD members,
+	// whose offsets come from the dump. The SERVER_UTILITY_NATIVE offsets are typed
+	// by hand and were checked on CL 127004: re-check them whenever the dump moves.
 	static_assert(PLUGIN_GAME_BUILT_CL != 0, "PLUGIN_GAME_BUILT_CL is not set: the Game SDK has no build_cl.txt");
 	inline constexpr uint32_t kVerifiedCL = PLUGIN_GAME_BUILT_CL;
 

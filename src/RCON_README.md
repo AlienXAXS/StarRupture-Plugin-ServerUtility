@@ -217,7 +217,7 @@ RemoteVulnerabilityPatch=true
 
 ### What gets logged
 
-When a request is blocked, two `WARN` lines are written to `modloader.log`:
+When a request is blocked, two `WARN` lines are written to `ModLoader.log` in `Binaries\Win64\ModLoader\Logs\`:
 
 ```
 [WARN] [RemoteVulnerabilityPatcher] Blocked unauthorized /remote/object/call

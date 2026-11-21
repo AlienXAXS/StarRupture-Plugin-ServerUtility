@@ -190,7 +190,12 @@ static void CollectPlayers()
 {
 #if RCON_HAS_SDK
 	auto* world = static_cast<SDK::UWorld*>(PluginSdkRuntime::GetWorld());
-	if (!world) return;
+	if (!world)
+	{
+		// No world (travel, shutdown): report no players rather than stale ones.
+		ServerState::Get().UpdatePlayers({});
+		return;
+	}
 
 	RawPlayerData rawBuf[MAX_RAW_PLAYERS];
 	int rawCount = CollectPlayersRaw_SEH(world, rawBuf);
@@ -290,10 +295,6 @@ void Rcon::Init()
 	{
 		hooks->Engine->RegisterOnTick(OnTick);
 		g_tickRegistered = true;
-	}
-	else
-	{
-		LOG_WARN("[Rcon] Engine events unavailable - player list refreshes only on the players command");
 	}
 
 	LOG_INFO("[Rcon] Subsystem ready");
