@@ -77,6 +77,8 @@ int main()
 	CHECK(SetRule(m, "bettercheats.movement", false, e) && m.rules.size() == 1 && !m.rules[0].deny);
 	CHECK(!SetRule(m, "nodot", true, e) && !e.empty());
 	CHECK(!SetRule(m, "A.b c", true, e));
+	CHECK(!SetRule(m, "My.Mod.feature", true, e) && e.find("more than one dot") != std::string::npos);
+	CHECK(!SetRule(m, "My.Mod.*", false, e) && !UnsetRule(m, "My.Mod.feature", e) && m.rules.size() == 1);
 	CHECK(!SetRule(m, "#A.b", true, e) && !SetRule(m, ";A.b", true, e) && !SetRule(m, "A.#b", true, e) && m.rules.size() == 1);
 	CHECK(UnsetRule(m, "BETTERCHEATS.movement", e) && m.rules.empty());
 	CHECK(!UnsetRule(m, "Nope.x", e));

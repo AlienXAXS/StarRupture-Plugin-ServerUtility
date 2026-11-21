@@ -81,6 +81,11 @@ namespace RulesModel
 		if (dot == std::string::npos) { error = "'" + key + "' is not Plugin.feature or Plugin.*"; return false; }
 		plugin = key.substr(0, dot);
 		id = key.substr(dot + 1);
+		if (id.find('.') != std::string::npos)
+		{
+			error = "'" + key + "' has more than one dot; a rule key splits at the first dot, so a mod name with a dot cannot be used";
+			return false;
+		}
 		if (!ValidName(plugin)) { error = "'" + plugin + "' is not a usable mod name"; return false; }
 		if (!ValidName(id))     { error = "'" + id + "' is not a usable feature name"; return false; }
 		return true;
