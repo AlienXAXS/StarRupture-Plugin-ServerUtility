@@ -2,4 +2,6 @@
 - The auto-profession patch that goes with Max Players now reads the Soldier value from the game's own data instead of a fixed number. If the game build has no such entry, the patch stays off and the log says so.
 - The RCON player list now uses the world the mod loader supplies, which stays right after a game update, and is refreshed on the game thread instead of a background thread.
 - Building the plain `Debug` or `Release` configuration now stops with a clear error that names the Server configurations, instead of quietly building against the wrong game files.
+- Docs now match the code: the admin panel keys are `Enabled`, `ApiKey` and `SessionExpiry` in `[AdminPanel]`, `RemoteVulnerabilityPatch` is in `[PluginSettings]`, `-RconPort` has no default, and `-SessionName` is only needed for command-line server settings.
+- The README now says the admin panel is disabled in this build, and that a ban only kicks the player and logs them in `bans.txt`: nothing reads that file, so they can rejoin.
 - Needs mod loader v1.25.0 or newer.

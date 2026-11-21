@@ -19,7 +19,7 @@ Both servers bind to the same port number (TCP and UDP respectively).
 |---|---|---|
 | `-RconPort=<port>` | Yes | TCP/UDP port for RCON and A2S query (1–65535) |
 | `-RconPassword=<password>` | Yes | Password for RCON authentication |
-| `-SessionName=<name>` | No | Server name shown in A2S info responses (default: `StarRupture Server`) |
+| `-SessionName=<name>` | No for RCON | Server name shown in A2S info responses (default: `StarRupture Server`). It is required for the plugin's command-line server settings, not for RCON |
 
 Both `-RconPort=` and `-RconPassword=` must be set for the RCON subsystem to start. If either is missing, the plugin logs an informational message and skips initialisation.
 
@@ -201,10 +201,10 @@ ServerUtility includes a patch that intercepts this endpoint and blocks any call
 
 ### Configuration
 
-The patch is controlled by `RemoteVulnerabilityPatch` in the `[Security]` section of `ServerUtility.ini`:
+The patch is controlled by `RemoteVulnerabilityPatch` in the `[PluginSettings]` section of `ServerUtility.ini`:
 
 ```ini
-[Security]
+[PluginSettings]
 RemoteVulnerabilityPatch=true
 ```
 

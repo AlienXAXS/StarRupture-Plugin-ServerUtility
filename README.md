@@ -13,10 +13,10 @@ Pass server configuration directly on the command line, bypassing `DSSettings.tx
 
 | Parameter | Required | Description |
 |---|---|---|
-| `-SessionName=<name>` | Yes | Session/server name |
+| `-SessionName=<name>` | Yes, for command-line settings | Session/server name. Without it the game reads `DSSettings.txt` as usual |
 | `-SaveGameInterval=<seconds>` | No | Autosave interval (default: `300`) |
-| `-RconPort=<port>` | No | TCP/UDP port for RCON and Steam Query (default: `27015`) |
-| `-RconPassword=<password>` | No | Password for RCON authentication |
+| `-RconPort=<port>` | Only for RCON | TCP/UDP port for RCON and Steam Query. No default: RCON does not start without it |
+| `-RconPassword=<password>` | Only for RCON | Password for RCON authentication |
 
 **Example:**
 ```
@@ -24,7 +24,7 @@ StarRuptureGameSteam-Win64-Shipping.exe -SessionName="My Server" -SaveGameInterv
 ```
 
 ### Source RCON
-Authenticated remote command execution over TCP, compatible with any standard RCON client. RCON is disabled if `-RconPassword=` is not provided.
+Authenticated remote command execution over TCP, compatible with any standard RCON client. RCON is disabled unless both `-RconPort=` and `-RconPassword=` are provided.
 
 See [RCON_README.md](src/RCON_README.md) for supported commands and client compatibility.
 
@@ -38,7 +38,11 @@ See the [vulnerability announcement](https://wiki.starrupture-utilities.com/en/d
 
 ### Admin API
 
-An HTTP JSON API for remote server administration. Enabled by setting `AdminPanelEnabled=1` and `ApiKey=<your-key>` in `ServerUtility.ini`. All endpoints are `POST`, all bodies are JSON, and all protected endpoints require a `session_token` obtained from `/auth/login`.
+An HTTP JSON API for remote server administration.
+
+> **The admin panel is currently disabled in this build.** The code that starts it is commented out in `src/plugin.cpp`, so setting the keys below does nothing yet. The rest of this section describes how it is meant to work once it is switched on.
+
+To enable it, set `Enabled=1` and `ApiKey=<your-key>` in the `[AdminPanel]` section of `ServerUtility.ini`. `SessionExpiry` (seconds, default `3600`, between `60` and `86400`) sets how long a session token lasts. All endpoints are `POST`, all bodies are JSON, and all protected endpoints require a `session_token` obtained from `/auth/login`.
 
 Base URL: `http://<server-ip>:<game-http-port>/ServerUtility/api`
 
@@ -95,7 +99,7 @@ Response:
 
 ##### `POST /players/ban`
 
-Ban a player by index. Kicks them immediately and appends their IP to `Plugins\ServerUtility\bans.txt`.
+Ban a player by index. Kicks them immediately and appends their IP and name to `Plugins\ServerUtility\bans.txt`. **Nothing reads `bans.txt`, so a ban is only a kick plus a log line: the player can rejoin.** There is no unban.
 
 ```bash
 curl -s -X POST http://localhost:7777/ServerUtility/api/players/ban \
@@ -210,7 +214,7 @@ Response:
 
 #### Error responses
 
-All endpoints return `{"ok": false, "error": "<reason>"}` on failure, with an appropriate HTTP status code (`400` for bad input, `401` for missing/invalid session token, `404` for unknown route).
+All endpoints return `{"ok": false, "error": "<reason>"}` on failure, with an appropriate HTTP status code (`400` for bad input, `401` for missing/invalid session token, `404` for an unknown `players` or `wave` route, `403` for a non-`POST` request).
 
 ---
 
@@ -221,7 +225,7 @@ All endpoints return `{"ok": false, "error": "<reason>"}` on failure, with an ap
 
 2. Extract into your game's `Binaries\Win64\` folder. The ZIP contains a `Plugins\` folder — it will sit alongside your existing `dwmapi.dll`.
 
-3. After the first launch, edit `Plugins\config\ServerUtility.ini` and set `Enabled=1`.
+3. After the first launch, edit `Plugins\config\ServerUtility.ini` and set `Enabled=1` in the `[General]` section.
 
 > **Requires [StarRupture-ModLoader](https://github.com/AlienXAXS/StarRupture-ModLoader) v1.25.0 or newer** to be installed first.
 

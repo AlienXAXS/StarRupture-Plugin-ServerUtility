@@ -59,7 +59,7 @@
 </div>
 <div class="endpoint">
   <h3><span class="method">POST</span> <span class="url">/ServerUtility/api/players/ban</span></h3>
-  <p>Kick the player and record their IP in <code>Plugins/ServerUtility/bans.txt</code>.</p>
+  <p>Kick the player and record their IP in <code>Plugins/ServerUtility/bans.txt</code>. Nothing reads that file, so the player can rejoin.</p>
   <pre>{ "session_token": "...", "player_index": 0 }
 // → { "ok": true }</pre>
 </div>
