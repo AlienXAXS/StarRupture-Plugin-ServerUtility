@@ -225,7 +225,7 @@ All endpoints return `{"ok": false, "error": "<reason>"}` on failure, with an ap
 
 > **Requires [StarRupture-ModLoader](https://github.com/AlienXAXS/StarRupture-ModLoader) v1.25.0 or newer** to be installed first.
 
-ServerUtility takes its game addresses and member offsets from the mod loader's version object map (the version map), so the same DLL runs on every server build the version map covers. After a game update, update the mod loader to get the new entries.
+ServerUtility takes its game addresses and member offsets from the mod loader's version object map (the version map) first, so the same DLL runs on every server build the version map covers. It also carries its own values for CL 127004, the current 0.3.5 server, so it runs there even when the version map has no entries for that build. On a newer server build it needs the version map's entries for that build. After a game update, update the mod loader to get them.
 
 On a dedicated server, keep the mod loader up to date. It carries the version map rows for each server build.
 
@@ -238,7 +238,7 @@ On a dedicated server, keep the mod loader up to date. It carries the version ma
 | RCON won't start | Both `-RconPort=` and `-RconPassword=` must be provided on the command line. |
 | Server settings not applying | Ensure `-SessionName=` is present — this is what activates command-line mode. |
 | Plugin not loading | Check `ModLoader.log` in `Binaries\Win64\ModLoader\Logs\` for errors. |
-| Plugin refused after a game update | If the loader's version map has no entry for your server build, the plugin is refused and the log says why. Update the mod loader. |
+| Plugin refused after a game update | On a server build other than CL 127004, if the loader's version map has no entry for a game address or offset the plugin needs, the plugin is refused. `ModLoader.log` then has `[HookScan] 'ServerUtility' will NOT be loaded -- PluginInit will not be called.`, with the missing entry and the reason listed above it. Update the mod loader. |
 | Auto-profession patch is off | Only applies when `MaxPlayers` is set in `ServerUtility.ini`. The log has an `[AutoProfession]` line; if it says `EProfessionType::Soldier` was not found, this game build has no such entry and the patch stays off. |
 
 ---
