@@ -56,6 +56,8 @@ namespace RulesModel
 	bool ParseKey(const std::string& key, std::string& plugin, std::string& id, std::string& error);
 	// 0.11.0, v0.11.0, 1.27.0-dev.1: at least major.minor, up to four numbers.
 	bool ValidVersion(const std::string& version);
+	// A mod minimum: a version, or "wire" (the copy must be one the wire check accepts).
+	bool ValidModMinValue(const std::string& value);
 
 	// Changes. Each returns false with an error and leaves the model as it was.
 	bool SetRule(Model& m, const std::string& key, bool deny, std::string& error);

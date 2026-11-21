@@ -67,6 +67,9 @@ int main()
 	const Model withLoaderRow = ParseText({ "[MinVersions]", "Loader=1.0.0", "Mod=1.0.0" }, w);
 	CHECK(w.size() == 1 && withLoaderRow.modMins.size() == 1 && withLoaderRow.modMinKept.size() == 1 && VersionMinimumsText(withLoaderRow) == "Mod=1.0.0\n");
 	w.clear();
+	const Model withWire = ParseText({ "[MinVersions]", "ProductionViewer=Wire", "Other=wired" }, w);
+	CHECK(w.size() == 1 && withWire.modMins.size() == 1 && withWire.modMins[0].version == "wire" && withWire.modMinKept.size() == 1);
+	w.clear();
 
 	// Changes.
 	std::string e;
@@ -88,6 +91,8 @@ int main()
 	CHECK(SetModMin(m, "RuptureTimer", "", e) && m.modMins.empty());
 	CHECK(!SetModMin(m, "RuptureTimer", "", e));
 	CHECK(!SetModMin(m, "Loader", "1.0.0", e) && m.modMins.empty());
+	CHECK(SetModMin(m, "ProductionViewer", "WIRE", e) && m.modMins.size() == 1 && m.modMins[0].version == "wire" && VersionMinimumsText(m) == "ProductionViewer=wire\n");
+	CHECK(!SetModMin(m, "ProductionViewer", "wired", e) && !SetMinLoader(m, "wire", e) && SetModMin(m, "ProductionViewer", "", e) && m.modMins.empty());
 	CHECK(SetMinLoader(m, "v1.27.0", e) && SetModMin(m, "A", "1.2", e) && VersionMinimumsText(m) == "loader=v1.27.0\nA=1.2\n");
 	CHECK(SetMinLoader(m, "", e) && VersionMinimumsText(m) == "A=1.2\n");
 	CHECK(SetModMin(m, "A", "", e) && VersionMinimumsText(m).empty());

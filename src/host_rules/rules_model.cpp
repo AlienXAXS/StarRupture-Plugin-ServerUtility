@@ -45,6 +45,12 @@ namespace RulesModel
 			return ValidName(s) && !SamePlugin(s, "loader");
 		}
 
+		// "wire" is stored in lower case, as the loader's text spells it.
+		std::string ModMinValue(const std::string& v)
+		{
+			return Lower(v) == "wire" ? std::string("wire") : v;
+		}
+
 		std::vector<Rule>::iterator FindRule(Model& m, const std::string& plugin, const std::string& id)
 		{
 			return std::find_if(m.rules.begin(), m.rules.end(),
@@ -96,6 +102,11 @@ namespace RulesModel
 			if (*p == '.' && p[1] >= '0' && p[1] <= '9') ++p; else break;
 		}
 		return parts >= 2 && (*p == '\0' || *p == '-' || *p == '+') && !HasControl(version);
+	}
+
+	bool ValidModMinValue(const std::string& value)
+	{
+		return ValidVersion(value) || Lower(value) == "wire";
 	}
 
 	void Parse(const std::vector<std::string>& lines, Model& out, std::vector<std::string>& warnings)
@@ -163,9 +174,10 @@ namespace RulesModel
 			}
 			else
 			{
-				if (!ValidModMinName(key) || !ValidVersion(value)) { reject("expected Plugin=version"); continue; }
+				if (!ValidModMinName(key) || !ValidModMinValue(value)) { reject("expected Plugin=version or Plugin=wire"); continue; }
+				const std::string stored = ModMinValue(value);
 				auto it = std::find_if(out.modMins.begin(), out.modMins.end(), [&](const ModMin& m) { return SamePlugin(m.plugin, key); });
-				if (it != out.modMins.end()) it->version = value; else out.modMins.push_back({ key, value });
+				if (it != out.modMins.end()) it->version = stored; else out.modMins.push_back({ key, stored });
 			}
 		}
 	}
@@ -305,7 +317,7 @@ namespace RulesModel
 	bool SetModMin(Model& m, const std::string& plugin, const std::string& v, std::string& error)
 	{
 		if (!ValidModMinName(plugin)) { error = "'" + plugin + "' is not a usable mod name"; return false; }
-		if (!v.empty() && !ValidVersion(v)) { error = "'" + v + "' is not a version (for example 0.11.0)"; return false; }
+		if (!v.empty() && !ValidModMinValue(v)) { error = "'" + v + "' is not a version (for example 0.11.0) or wire"; return false; }
 		auto it = std::find_if(m.modMins.begin(), m.modMins.end(), [&](const ModMin& e) { return SamePlugin(e.plugin, plugin); });
 		if (v.empty())
 		{
@@ -313,7 +325,7 @@ namespace RulesModel
 			m.modMins.erase(it);
 			return true;
 		}
-		if (it != m.modMins.end()) it->version = v; else m.modMins.push_back({ plugin, v });
+		if (it != m.modMins.end()) it->version = ModMinValue(v); else m.modMins.push_back({ plugin, ModMinValue(v) });
 		return true;
 	}
 }
