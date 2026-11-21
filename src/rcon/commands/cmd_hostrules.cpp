@@ -2,6 +2,7 @@
 #include "command_handler.h"
 #include "cmd_args.h"
 #include "../../host_rules/host_rules.h"
+#include "../../host_rules/player_list.h"
 
 #include <sstream>
 
@@ -28,10 +29,10 @@ namespace Cmd_HostRules
 			"  hostrules unset <Plugin.feature>        take a rule away\n"
 			"  hostrules default allow|deny            what a feature with no rule gets\n"
 			"  hostrules message [text|off]            the line players see when a feature is off\n"
-			"  hostrules minversion [version|off]      minimum mod loader version (saved; not enforced yet)\n"
-			"  hostrules modmin [<plugin> <version|off>]  minimum version of one mod (saved; not enforced yet)\n"
+			"  hostrules minversion [version|off]      minimum mod loader version (players below it are removed)\n"
+			"  hostrules modmin [<plugin> <version|off>]  minimum version of one mod (players below it are removed)\n"
 			"  hostrules reload                        re-read HostRules.ini\n"
-			"  hostrules who <id|number>               what a player's mod loader reported\n";
+			"  hostrules who <id|number>               what a player's mod loader reported, and its mods\n";
 
 		std::string Error(const std::string& text) { return "Error: " + text + "\n"; }
 
@@ -49,7 +50,7 @@ namespace Cmd_HostRules
 			else for (const auto& r : m.modMins) oss << "  minimum " << r.plugin << ": " << r.version << "\n";
 			if (!HostRules::LoaderReceives())
 				oss << "  This mod loader has no host rules support, so the rules are saved but not sent.\n";
-			oss << "  Version minimums are saved only: no mod loader enforces them yet.\n";
+			oss << "  version minimums: " << HostRules::MinimumsStatus() << "\n";
 			return oss.str();
 		}
 
@@ -60,13 +61,47 @@ namespace Cmd_HostRules
 			std::string id, error;
 			if (!ResolveId(arg, id, error)) return Error(error);
 
+			std::string out = "Player " + id;
+			PlayerList::Entry entry;
+			if (PlayerList::Find(id, entry) && !entry.label.empty())
+				out += " (" + entry.label + ")";
+			out += ": ";
+
 			HostRules::Reported r;
 			if (!HostRules::WhoReported(id, r))
-				return "Player " + id + ": no mod loader feature list has reached the server (no mod loader, or it has not reported yet).\n";
+				out += "no mod loader feature list has reached the server.\n";
+			else
+				out += "the mod loader reported its features " + std::to_string(r.count) + " time(s), last " +
+				       std::to_string((GetTickCount64() - r.lastMs) / 1000) + " s ago.\n";
 
-			const unsigned long long secs = (GetTickCount64() - r.lastMs) / 1000;
-			return "Player " + id + ": the mod loader reported its features " + std::to_string(r.count) + " time(s), last " +
-			       std::to_string(secs) + " s ago.\nWhich mods and features it listed is not available to this plugin from the mod loader yet.\n";
+			std::string text;
+			switch (HostRules::ClientFeatures(id, text))
+			{
+			case HostRules::FeaturesState::Ok:
+			{
+				// First line: loader=<tag> interface=<n>; the rest, one mod feature per line.
+				std::istringstream lines(text);
+				std::string line;
+				bool first = true;
+				while (std::getline(lines, line))
+				{
+					if (first) out += "  mod loader: " + line + "\n  mods:\n";
+					else       out += "    " + line + "\n";
+					first = false;
+				}
+				break;
+			}
+			case HostRules::FeaturesState::NoReport:
+				out += "  no report (vanilla or older loader)\n";
+				break;
+			case HostRules::FeaturesState::NotConnected:
+				out += "  not connected\n";
+				break;
+			case HostRules::FeaturesState::NoLoaderSupport:
+				out += "  this mod loader cannot list a player's mods\n";
+				break;
+			}
+			return out;
 		}
 
 		std::string Handle(const std::string& args)

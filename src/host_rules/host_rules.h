@@ -49,6 +49,22 @@ namespace HostRules
 	// Last push: "sent", "not sent: <why>" or "not sent yet".
 	std::string PushStatus();
 
+	// Last push of the version minimums: "sent", "not sent: <why>" (the loader's
+	// own error text when it refused them) or "not sent yet".
+	std::string MinimumsStatus();
+
+	// What a player's mod loader listed, read from the loader on the spot.
+	enum class FeaturesState
+	{
+		Ok,               // text is filled
+		NoReport,         // connected, but no report (vanilla player or older loader)
+		NotConnected,     // no connected player has this ID
+		NoLoaderSupport,  // this mod loader (or build) cannot list a player's mods
+	};
+	// Game thread only. Text: "loader=<tag> interface=<n>", then one
+	// "<Plugin>.<id>=on|off" line per feature.
+	FeaturesState ClientFeatures(const std::string& playerId, std::string& text);
+
 	// A player's ID is "reported" while its loader's feature list is known.
 	bool WhoReported(const std::string& playerId, Reported& out);
 }

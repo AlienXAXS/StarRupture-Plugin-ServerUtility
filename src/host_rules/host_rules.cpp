@@ -28,6 +28,7 @@ namespace
 	RulesModel::Model         g_model;
 	bool                      g_loadOk = true;    // false: the file exists but was not readable, so it is never written
 	std::string               g_pushStatus = "not sent yet";
+	std::string               g_minStatus = "not sent yet";
 
 	struct Known { std::string id; HostRules::Reported info; };
 	std::vector<Known>        g_known;            // players whose loader reported, by ID
@@ -315,14 +316,46 @@ namespace
 		return status;
 	}
 
+	// Send the version minimums to the loader. Game thread only.
+	void PushMinimums(const std::string& text)
+	{
+		std::string status;
+#if PLUGIN_INTERFACE_VERSION >= 79
+		auto* hooks = GetHooks();
+		IPluginHostRules* api = hooks ? hooks->HostRules : nullptr;
+		if (!api)
+		{
+			status = "not sent: this mod loader has no host rules support";
+		}
+		else
+		{
+			char err[256] = {};
+			if (api->SetVersionMinimums(text.c_str(), err, sizeof(err)))
+				status = "sent";
+			else
+			{
+				status = std::string("not sent: the loader refused the minimums: ") + err;
+				LOG_WARN("[HostRules] The loader refused the version minimums: %s", err);
+			}
+		}
+#else
+		(void)text;
+		status = "not sent: this build has no host rules support";
+#endif
+		std::lock_guard<std::mutex> lk(g_mutex);
+		g_minStatus = status;
+	}
+
 	void PushNow(void*)
 	{
-		std::string text;
+		std::string text, minimums;
 		{
 			std::lock_guard<std::mutex> lk(g_mutex);
 			text = RulesModel::RulesText(g_model);
+			minimums = RulesModel::VersionMinimumsText(g_model);
 		}
 		PushText(text);
+		PushMinimums(minimums);
 		HostRules::RefreshPlayers();
 	}
 
@@ -475,6 +508,55 @@ namespace HostRules
 	{
 		std::lock_guard<std::mutex> lk(g_mutex);
 		return g_pushStatus;
+	}
+
+	std::string MinimumsStatus()
+	{
+		std::lock_guard<std::mutex> lk(g_mutex);
+		return g_minStatus;
+	}
+
+	FeaturesState ClientFeatures(const std::string& playerId, std::string& text)
+	{
+#if PLUGIN_INTERFACE_VERSION >= 79
+		auto* hooks = GetHooks();
+		IPluginHostRules* api = hooks ? hooks->HostRules : nullptr;
+		if (!api)
+			return FeaturesState::NoLoaderSupport;
+		if (!OnGameThread())
+			return FeaturesState::NotConnected;
+
+		SDK::APlayerController* controllers[ListedPlayers::kMax];
+		const int count = CollectControllers(PluginSdkRuntime::GetWorld(), controllers, ListedPlayers::kMax);
+		for (int i = 0; i < count; ++i)
+		{
+			if (IdOf(controllers[i]) != playerId)
+				continue;
+
+			// Measure, then fetch; a second pass covers a text that grew in between.
+			std::string buf;
+			int need = api->GetClientFeatures(controllers[i], nullptr, 0);
+			for (int pass = 0; pass < 3 && need >= 0; ++pass)
+			{
+				buf.assign(static_cast<size_t>(need) + 1, '\0');
+				const int got = api->GetClientFeatures(controllers[i], buf.data(), buf.size());
+				if (got < 0)
+					return FeaturesState::NoReport;
+				if (static_cast<size_t>(got) < buf.size())
+				{
+					buf.resize(static_cast<size_t>(got));
+					text = buf;
+					return FeaturesState::Ok;
+				}
+				need = got;
+			}
+			return FeaturesState::NoReport;
+		}
+		return FeaturesState::NotConnected;
+#else
+		(void)playerId; (void)text;
+		return FeaturesState::NoLoaderSupport;
+#endif
 	}
 
 	bool WhoReported(const std::string& playerId, Reported& out)
