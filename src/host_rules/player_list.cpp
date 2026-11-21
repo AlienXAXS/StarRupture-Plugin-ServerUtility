@@ -227,6 +227,7 @@ namespace PlayerList
 		const std::wstring& path = IniFile::Path();
 		if (path.empty()) { error = "the rules file path is unknown"; return false; }
 
+		std::lock_guard<std::mutex> fileLock(IniFile::FileMutex());   // same order as SaveFile
 		std::vector<std::string> lines;
 		bool exists = false, crlf = true;
 		if (!IniFile::ReadLines(path, lines, exists, crlf))
@@ -250,16 +251,18 @@ namespace PlayerList
 		return g_entries;
 	}
 
-	bool Find(const std::string& id, Entry& out)
+	bool Find(const std::string& rawId, Entry& out)
 	{
+		const std::string id = Trim(rawId);
 		std::lock_guard<std::mutex> lk(g_mutex);
 		for (const Entry& e : g_entries)
 			if (e.id == id) { out = e; return true; }
 		return false;
 	}
 
-	bool Set(const std::string& id, const std::string& flags, std::string& error)
+	bool Set(const std::string& rawId, const std::string& flags, std::string& error)
 	{
+		const std::string id = Trim(rawId);
 		if (!IsValidId(id)) { error = "not a usable player ID"; return false; }
 
 		return Change(error, [&](std::vector<Entry>& list)
@@ -273,8 +276,9 @@ namespace PlayerList
 		});
 	}
 
-	bool Remove(const std::string& id, std::string& error)
+	bool Remove(const std::string& rawId, std::string& error)
 	{
+		const std::string id = Trim(rawId);
 		return Change(error, [&](std::vector<Entry>& list)
 		{
 			auto it = std::find_if(list.begin(), list.end(), [&](const Entry& e) { return e.id == id; });

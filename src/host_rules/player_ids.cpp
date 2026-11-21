@@ -120,7 +120,7 @@ namespace PlayerIds
 		if (!pc)
 			return false;
 
-		const std::string id = Read(pc->PlayerState);
+		const std::string id = OfController(pc);
 		if (id.empty())
 			return false;
 

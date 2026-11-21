@@ -27,20 +27,21 @@ namespace
 		return diff == 0;
 	}
 
-	bool IsLockedOut()
+	// Reserve one attempt, or refuse when the limit is reached. The attempt counts
+	// as a failure until the key proves right, so requests that arrive together
+	// cannot all pass before the first failure is counted. The lockout is shared by
+	// every caller: the request carries no peer address to count by.
+	bool BeginAttempt(int& attempts)
 	{
 		std::lock_guard<std::mutex> lk(g_failMutex);
 		if (g_failures > 0 && std::chrono::steady_clock::now() - g_windowStart >= kFailureWindow)
 			g_failures = 0;
-		return g_failures >= kMaxFailures;
-	}
-
-	int RecordFailure()
-	{
-		std::lock_guard<std::mutex> lk(g_failMutex);
+		if (g_failures >= kMaxFailures)
+			return false;
 		if (g_failures == 0)
 			g_windowStart = std::chrono::steady_clock::now();
-		return ++g_failures;
+		attempts = ++g_failures;
+		return true;
 	}
 
 	void ClearFailures()
@@ -58,7 +59,8 @@ namespace Ep_AuthLogin
 
 		if (!AdminJson::RequirePost(req, resp, body)) return;
 
-		if (IsLockedOut())
+		int attempts = 0;
+		if (!BeginAttempt(attempts))
 		{
 			LOG_WARN("[AdminPanel] Login refused: too many failed attempts");
 			AdminJson::SetError(resp, 429, "too many failed attempts, try again later", body);
@@ -70,8 +72,7 @@ namespace Ep_AuthLogin
 
 		if (apiKey.empty() || !KeyMatches(apiKey, expected))
 		{
-			const int failures = RecordFailure();
-			LOG_WARN("[AdminPanel] Failed login (%d of %d before lockout)", failures, kMaxFailures);
+			LOG_WARN("[AdminPanel] Failed login (%d of %d before lockout)", attempts, kMaxFailures);
 			AdminJson::SetError(resp, 401, "invalid api key", body);
 			return;
 		}
