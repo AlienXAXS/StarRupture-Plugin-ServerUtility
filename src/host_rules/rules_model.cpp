@@ -104,6 +104,18 @@ namespace RulesModel
 		return parts >= 2 && (*p == '\0' || *p == '-' || *p == '+') && !HasControl(version);
 	}
 
+	bool ValidSectionKey(const std::string& key)
+	{
+		if (key.empty() || key[0] == '#') return false;
+		for (const char ch : key)
+		{
+			const unsigned char c = static_cast<unsigned char>(ch);
+			if (c < 0x20 || c == 0x7f || c == ' ' || c == '|' || c == '=' || c == ';' || c == '[' || c == ']')
+				return false;
+		}
+		return true;
+	}
+
 	bool ValidModMinValue(const std::string& value)
 	{
 		return ValidVersion(value) || Lower(value) == "wire";

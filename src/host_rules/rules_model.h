@@ -56,6 +56,10 @@ namespace RulesModel
 	bool ParseKey(const std::string& key, std::string& plugin, std::string& id, std::string& error);
 	// 0.11.0, v0.11.0, 1.27.0-dev.1: at least major.minor, up to four numbers.
 	bool ValidVersion(const std::string& version);
+	// A key in a player's Sections= list: no control character, space, "|", "=",
+	// ";", "[" or "]", and not starting with "#". Anything else could end the
+	// flag list or start a line of its own in the rules file.
+	bool ValidSectionKey(const std::string& key);
 	// A mod minimum: a version, or "wire" (the copy must be one the wire check accepts).
 	bool ValidModMinValue(const std::string& value);
 

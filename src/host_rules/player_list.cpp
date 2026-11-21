@@ -1,5 +1,6 @@
 #include "player_list.h"
 #include "ini_file.h"
+#include "rules_model.h"
 #include "../plugin_helpers.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -83,7 +84,12 @@ namespace
 					size_t sep = list.find(';', s);
 					if (sep == std::string::npos) sep = list.size();
 					const std::string key = Trim(list.substr(s, sep - s));
-					if (!key.empty()) e.sections.push_back(key);
+					if (key.empty()) { s = sep + 1; continue; }
+					if (!RulesModel::ValidSectionKey(key))
+					{
+						if (strict) { error = "a section key may not hold control characters, spaces, | = ; [ ], or start with #"; return false; }
+					}
+					else e.sections.push_back(key);
 					s = sep + 1;
 				}
 			}
@@ -192,8 +198,13 @@ namespace PlayerList
 		if (!e.sections.empty())
 		{
 			std::string list;
-			for (const std::string& s : e.sections) { if (!list.empty()) list += ';'; list += s; }
-			add("Sections=" + list);
+			for (const std::string& s : e.sections)
+			{
+				if (!RulesModel::ValidSectionKey(s)) continue;   // never write a key that could break the line
+				if (!list.empty()) list += ';';
+				list += s;
+			}
+			if (!list.empty()) add("Sections=" + list);
 		}
 		return e.id + "=" + e.label + (flags.empty() ? "" : "|" + flags);
 	}
