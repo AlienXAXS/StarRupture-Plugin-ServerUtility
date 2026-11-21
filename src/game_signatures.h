@@ -105,7 +105,13 @@ namespace GameSig
 	inline constexpr uint8_t PRELOGIN_JL_OPCODE      = 0x7C;
 
 	// GetProfessionForNewPlayer prologue patch:
-	//   B8 01 00 00 00   mov eax, 1   (EProfessionType::Soldier)
+	//   B8 xx xx xx xx   mov eax, imm32   (the profession, read by name at run time)
 	//   C3               ret
-	inline constexpr uint8_t GET_PROFESSION_PATCH_BYTES[] = {0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3};
+	inline constexpr uint8_t GET_PROFESSION_MOV_EAX_IMM32_OPCODE = 0xB8;
+	inline constexpr uint8_t GET_PROFESSION_RET_OPCODE           = 0xC3;
+	inline constexpr size_t  GET_PROFESSION_PATCH_SIZE           = 6;
+
+	// The profession the patch returns: looked up by name from the loaded enum.
+	inline constexpr const char* PROFESSION_ENUM_NAME  = "EProfessionType";
+	inline constexpr const char* PROFESSION_ENUM_ENTRY = "Soldier";
 }

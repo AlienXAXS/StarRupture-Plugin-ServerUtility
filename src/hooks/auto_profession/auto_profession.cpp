@@ -10,15 +10,15 @@
 // ---------------------------------------------------------------------------
 // ACrGameModeBase::GetProfessionForNewPlayer
 //
-// Pattern and patch bytes live in game_signatures.h.  We patch the prologue
-// to `mov eax, 1; ret` (return EProfessionType::Soldier).
+// Pattern and opcodes live in game_signatures.h.  We patch the prologue to
+// `mov eax, <Soldier>; ret`.  The value is read by name from the loaded
+// EProfessionType enum (PluginMap::EnumValue), so it follows the game build.
 //
 // Total: 6 bytes.  The original prologue is at least 6 bytes long (starts
 // with `48 8B C4 48 89 50 xx` - 7 bytes), so this is safe.
 // ---------------------------------------------------------------------------
 
-static constexpr const uint8_t* PATCH_BYTES = GameSig::GET_PROFESSION_PATCH_BYTES;
-static constexpr size_t PATCH_SIZE = sizeof(GameSig::GET_PROFESSION_PATCH_BYTES);
+static constexpr size_t PATCH_SIZE = GameSig::GET_PROFESSION_PATCH_SIZE;
 
 // ---------------------------------------------------------------------------
 // State
@@ -46,6 +46,19 @@ void AutoProfessionHook::Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
 
 void AutoProfessionHook::Install()
 {
+	// The profession to return, by name. Looks at every loaded object, so it is
+	// asked once, here, on the game thread (OnEngineInit). A build without the
+	// enum or the entry leaves the patch off.
+	int64_t profession = 0;
+	if (PluginMap::EnumValue(GameSig::PROFESSION_ENUM_NAME, GameSig::PROFESSION_ENUM_ENTRY, profession)
+		!= PluginMap::EnumLookup::Found
+		|| profession < 0 || profession > UINT8_MAX)
+	{
+		LOG_WARN("[AutoProfession] %s::%s not found on this build - auto-profession is off",
+		         GameSig::PROFESSION_ENUM_NAME, GameSig::PROFESSION_ENUM_ENTRY);
+		return;
+	}
+
 	auto* hooks = GetHooks();
 	if (!hooks)
 	{
@@ -79,8 +92,12 @@ void AutoProfessionHook::Install()
 	          g_originalBytes[0], g_originalBytes[1], g_originalBytes[2],
 	          g_originalBytes[3], g_originalBytes[4], g_originalBytes[5]);
 
-	// Apply the patch: mov eax, 1 ; ret
-	if (!hooks->Memory->Patch(addr, PATCH_BYTES, PATCH_SIZE))
+	// Apply the patch: mov eax, <Soldier> ; ret
+	const uint32_t value = static_cast<uint32_t>(profession);
+	uint8_t patch[PATCH_SIZE] = {GameSig::GET_PROFESSION_MOV_EAX_IMM32_OPCODE};
+	std::memcpy(patch + 1, &value, sizeof(value));
+	patch[PATCH_SIZE - 1] = GameSig::GET_PROFESSION_RET_OPCODE;
+	if (!hooks->Memory->Patch(addr, patch, PATCH_SIZE))
 	{
 		LOG_ERROR("[AutoProfession] PatchMemory failed at 0x%llX",
 		          static_cast<unsigned long long>(addr));
@@ -90,7 +107,8 @@ void AutoProfessionHook::Install()
 	g_patchAddress = addr;
 	g_patched = true;
 
-	LOG_INFO("[AutoProfession] SUCCESS - GetProfessionForNewPlayer patched to always return Soldier (1)");
+	LOG_INFO("[AutoProfession] SUCCESS - GetProfessionForNewPlayer patched to always return %s (%d)",
+	         GameSig::PROFESSION_ENUM_ENTRY, static_cast<int>(profession));
 }
 
 void AutoProfessionHook::Remove()

@@ -5,13 +5,13 @@
 //
 // When the MaxPlayers patch is active (>4 players), the game's profession
 // selection UI can break for extra players. This patches
-// ACrGameModeBase::GetProfessionForNewPlayer to always return 1 (Soldier),
+// ACrGameModeBase::GetProfessionForNewPlayer to always return Soldier,
 // forcing the server to assign a profession immediately so every player
 // gets a pawn without relying on the UI.
 //
 // The patch is a simple prologue overwrite:
-//   mov eax, 1   ; B8 01 00 00 00
-//   ret   ; C3
+//   mov eax, <Soldier>   ; B8 + the value, read by name from EProfessionType
+//   ret                  ; C3
 // ---------------------------------------------------------------------------
 
 struct IPluginSelf;
@@ -23,8 +23,9 @@ namespace AutoProfessionHook
 	// OnPluginLoadHooks export -- the loader refuses scans made anywhere else.
 	void Resolve(IPluginSelf* self, IPluginHookScanner* scanner);
 
-	// Patch the resolved prologue. Call once, from PluginInit, when MaxPlayers
-	// is enabled.
+	// Patch the resolved prologue. Call once, on the game thread (the engine
+	// init callback), when MaxPlayers is enabled. Logs and does nothing when the
+	// EProfessionType enum or its Soldier entry is not on this build.
 	void Install();
 
 	// Restore the original prologue bytes on shutdown.

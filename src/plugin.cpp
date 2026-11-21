@@ -52,6 +52,12 @@ static void OnEngineInit()
 	// Start the RCON / Steam Query subsystem
 	Rcon::Init();
 
+	// Auto-assign professions for players joining when MaxPlayers is patched.
+	// Here, not in PluginInit: it reads the profession by name from the loaded
+	// enum, which needs the game's objects and the game thread.
+	if (ServerUtilityConfig::Config::GetMaxPlayers() > 0)
+		AutoProfessionHook::Install();
+
 	// Install FHttpConnection::ProcessRequest hook
 	HttpConnectionHook::Install();
 
@@ -171,9 +177,6 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 	{
 		LOG_INFO("MaxPlayers configured to %d - applying patch...", maxPlayers);
 		MaxPlayersHook::Install(maxPlayers);
-
-		// Auto-assign professions for players joining when MaxPlayers is patched
-		AutoProfessionHook::Install();
 	}
 
 	// Gatherable regrowth never reaches remote clients without this; see the
