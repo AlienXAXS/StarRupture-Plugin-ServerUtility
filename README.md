@@ -40,7 +40,32 @@ See the [vulnerability announcement](https://wiki.starrupture-utilities.com/en/d
 
 The groundwork is in place for a server setting that removes a player whose mod loader is older than a version you choose, and tells them why. A player without the mod loader is never affected. Nothing is removed yet: the setting, and the mod loader version that reports the player's version, come in a later release. Until then the log shows `[HostRules] This mod loader has no host rules support - minimum version removal is off`.
 
-The removal sends the player to the main menu with a short written reason (whether the game displays that text has not been confirmed yet), removes each player at most once per join, and will skip players the host marks as exempt once the host's player list exists.
+The removal sends the player to the main menu with a short written reason (whether the game displays that text has not been confirmed yet), removes each player at most once per join, and skips players the host marks as exempt in the player list (see below).
+
+### Player list (admins and exemptions)
+
+The host keeps a list of players by their ID in the `[Players]` section of `Plugins\config\HostRules.ini`. One line per player:
+
+```
+[Players]
+76561198000000001=Alice|Admin
+76561198000000002=Bob|ExemptVersion Sections=wave;save
+```
+
+The text before `=` is the player's ID, the text after it is a label for you, and the flags follow `|`, separated by spaces:
+
+| Flag | Meaning |
+|---|---|
+| `Admin` | The player is an admin. Admin also exempts them from the version removal and from the rules. |
+| `ExemptVersion` | Never removed for an old mod loader. |
+| `ExemptRules` | Exempt from the host's rules. |
+| `Sections=<key>;<key>` | Rule sections that apply to this player. |
+
+The server reads each player's ID from the game; the client does not send it. Whether a client could change it has not been tested, so do not treat the list as a security guarantee. Other sections and comments in `HostRules.ini` are kept when the plugin saves the file. After editing the file by hand, run `player reload`.
+
+Easiest is RCON. `player ids` shows who is connected and the exact ID to use; `admin add 1 Alice` makes the first player in that list an admin. See [RCON_README.md](src/RCON_README.md) for the `player` and `admin` commands.
+
+The admin panel has matching endpoints (`/rules/players`, below), but the panel is off in this build, so RCON is the way to manage the list for now. Nothing is removed yet; the list only decides who will be skipped when removal arrives.
 
 ### Admin API
 
@@ -75,7 +100,7 @@ Response:
 
 ##### `POST /players/list`
 
-List all currently connected players with their index, name, ping, and IP.
+List all currently connected players with their index, name, ping, IP and player list status. `id` is the player's ID; `label`, `admin`, `exempt_version`, `exempt_rules` and `sections` come from the player list (see above) and are empty or `false` for a player who has no entry.
 
 ```bash
 curl -s -X POST http://localhost:7777/ServerUtility/api/players/list \
@@ -85,7 +110,7 @@ curl -s -X POST http://localhost:7777/ServerUtility/api/players/list \
 
 Response:
 ```json
-{"ok": true, "players": [{"index": 0, "name": "Alice", "ping": 42, "ip": "192.168.1.10"}]}
+{"ok": true, "players": [{"index": 0, "name": "Alice", "ping": 42, "ip": "192.168.1.10", "id": "76561198000000001", "label": "Alice", "admin": true, "exempt_version": true, "exempt_rules": true, "sections": []}]}
 ```
 
 ##### `POST /players/kick`
@@ -218,9 +243,28 @@ Response:
 
 ---
 
+#### Rules
+
+##### `POST /rules/players`
+
+Read or change the player list. `action` is `get`, `set` or `remove`. `set` and `remove` need `id`. `flags` (for `set`) is the same text as the `player set` flags, for example `admin label=Alice` or `-exemptversion`. The answer always lists every entry after the action.
+
+```bash
+curl -s -X POST http://localhost:7777/ServerUtility/api/rules/players \
+  -H "Content-Type: application/json" \
+  -d '{"session_token": "abc123...", "action": "set", "id": "76561198000000001", "flags": "admin label=Alice"}'
+```
+
+Response:
+```json
+{"ok": true, "entries": [{"id": "76561198000000001", "label": "Alice", "admin": true, "exempt_version": true, "exempt_rules": true, "sections": []}]}
+```
+
+---
+
 #### Error responses
 
-All endpoints return `{"ok": false, "error": "<reason>"}` on failure, with an appropriate HTTP status code (`400` for bad input, `401` for missing/invalid session token, `404` for an unknown `players` or `wave` route, `403` for a non-`POST` request).
+All endpoints return `{"ok": false, "error": "<reason>"}` on failure, with an appropriate HTTP status code (`400` for bad input, `401` for missing/invalid session token, `404` for an unknown `players`, `wave` or `rules` route, `403` for a non-`POST` request).
 
 ---
 

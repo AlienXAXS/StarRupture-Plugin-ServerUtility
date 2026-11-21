@@ -119,6 +119,49 @@ Players (2 connected):
 
 (`list` and `who` used to be aliases. They now belong to the mod loader's `plugins` and `clients` commands.)
 
+### `player [list|ids|set|remove|reload]`
+
+Show and edit the host's player list, which is the `[Players]` section of `Plugins\config\HostRules.ini`. It marks admins and players exempt from the version removal (removal itself is not active yet).
+
+| Command | What it does |
+|---|---|
+| `player` or `player list` | Entries in the list, and which are connected now |
+| `player ids` | Connected players with their numbers and exact IDs |
+| `player set <id\|number> <flag>...` | Add an entry or change one |
+| `player remove <id\|number>` | Delete an entry |
+| `player reload` | Re-read the file after a hand edit |
+
+Flags for `set`: `admin`, `exemptversion`, `exemptrules`, `sections=<key>;<key>`, `label=<text>` (the label runs to the end of the line). A leading `-` takes a flag off, for example `-admin`.
+
+A 1-3 digit argument is a list number, the number `player ids` shows. Anything else is an ID.
+
+```
+> player ids
+Players (2 connected):
+  [1] Alice  76561198000000001
+  [2] Bob    76561198000000002
+> player set 2 exemptversion label=Bob
+Saved: 76561198000000002=Bob|ExemptVersion
+> player remove 2
+Removed the entry for 76561198000000002.
+```
+
+### `admin add|remove|clear`
+
+Shortcuts for the Admin flag.
+
+```
+> admin add 1 Alice
+Saved: 76561198000000001=Alice|Admin
+> admin remove 76561198000000001
+> admin clear
+Took Admin off 0 entries.
+```
+
+- `admin add <id|number> [label]` adds the player as an admin, with an optional label.
+- `admin remove <id|number>` takes Admin off an existing entry; it errors if the ID has no entry.
+- `admin clear` takes Admin off every entry.
+
 ### `save` / `savegame` / `forcesave`
 
 Force an immediate world save by calling `UCrSaveSubsystem::SaveNextSaveGame`. The save runs synchronously on the game thread; the RCON response is returned after it completes.
