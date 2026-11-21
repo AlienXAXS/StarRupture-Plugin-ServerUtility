@@ -5,9 +5,9 @@
 #include "../state/server_state.h"
 #include "../../host_rules/admin_claim.h"
 #include "../../host_rules/host_rules.h"
+#include "../../host_rules/ini_file.h"
 #include "../../host_rules/player_list.h"
 
-#include <cctype>
 #include <sstream>
 
 namespace Cmd_Player
@@ -32,7 +32,7 @@ namespace Cmd_Player
 				"  admin code                             the claim code, while there is no admin\n";
 
 		using CmdArgs::NextWord;
-		using CmdArgs::Lower;
+		using IniFile::Lower;
 		using CmdArgs::ResolveId;
 
 		std::string Ids()
@@ -69,11 +69,12 @@ namespace Cmd_Player
 			return oss.str();
 		}
 
-		std::string Saved(const std::string& id)
+		// who is "Name (ID)" from ResolveId, so the host sees whom the change reached.
+		std::string Saved(const std::string& id, const std::string& who)
 		{
 			PlayerList::Entry e;
-			if (!PlayerList::Find(id, e)) return "Saved.\n";
-			return "Saved: " + PlayerList::FormatLine(e) + "\n";
+			if (!PlayerList::Find(id, e)) return "Saved for " + who + ".\n";
+			return "Saved for " + who + ": " + PlayerList::FormatLine(e) + "\n";
 		}
 
 		std::string Error(const std::string& text) { return "Error: " + text + "\n"; }
@@ -99,18 +100,18 @@ namespace Cmd_Player
 				const std::string who = NextWord(rest);
 				if (who.empty() || (sub == "set" && rest.empty())) return kPlayerUsage;
 
-				std::string id;
-				if (!ResolveId(who, id, error)) return Error(error);
+				std::string id, target;
+				if (!ResolveId(who, id, error, &target)) return Error(error);
 
 				if (sub == "set")
 				{
 					if (!PlayerList::Set(id, rest, error)) return Error(error);
 					HostRules::RefreshPlayers();
-					return Saved(id);
+					return Saved(id, target);
 				}
 				if (!PlayerList::Remove(id, error)) return Error(error);
 				HostRules::RefreshPlayers();
-				return "Removed the entry for " + id + ".\n";
+				return "Removed the entry for " + target + ".\n";
 			}
 
 			return kPlayerUsage;
@@ -138,22 +139,22 @@ namespace Cmd_Player
 				const std::string who = NextWord(rest);
 				if (who.empty()) return kAdminUsage;
 
-				std::string id;
-				if (!ResolveId(who, id, error)) return Error(error);
+				std::string id, target;
+				if (!ResolveId(who, id, error, &target)) return Error(error);
 
 				if (sub == "add")
 				{
 					const std::string flags = rest.empty() ? "admin" : "admin label=" + rest;
 					if (!PlayerList::Set(id, flags, error)) return Error(error);
 					HostRules::RefreshPlayers();
-					return Saved(id);
+					return Saved(id, target);
 				}
 
 				PlayerList::Entry existing;
 				if (!PlayerList::Find(id, existing)) return Error("no entry with that ID");
 				if (!PlayerList::Set(id, "-admin", error)) return Error(error);
 				HostRules::RefreshPlayers();
-				return Saved(id);
+				return Saved(id, target);
 			}
 
 			return kAdminUsage;

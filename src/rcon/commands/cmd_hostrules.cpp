@@ -2,6 +2,7 @@
 #include "command_handler.h"
 #include "cmd_args.h"
 #include "../../host_rules/host_rules.h"
+#include "../../host_rules/ini_file.h"
 #include "../../host_rules/player_list.h"
 
 #include <sstream>
@@ -19,7 +20,7 @@ namespace Cmd_HostRules
 	namespace
 	{
 		using CmdArgs::NextWord;
-		using CmdArgs::Lower;
+		using IniFile::Lower;
 		using CmdArgs::ResolveId;
 
 		const char* const kUsage =

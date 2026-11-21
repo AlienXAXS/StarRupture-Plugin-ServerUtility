@@ -3,7 +3,6 @@
 #include "../rcon.h"
 #include "../state/server_state.h"
 
-#include <cctype>
 #include <string>
 
 // Reading the arguments of a console command, shared by the player and
@@ -24,12 +23,6 @@ namespace CmdArgs
 		return word;
 	}
 
-	inline std::string Lower(std::string s)
-	{
-		for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-		return s;
-	}
-
 	// A purely numeric argument of up to 3 digits is the list number.
 	inline bool IsListNumber(const std::string& s)
 	{
@@ -38,17 +31,28 @@ namespace CmdArgs
 		return true;
 	}
 
-	// An ID, or the number of a connected player as `player ids` shows it.
-	inline bool ResolveId(const std::string& arg, std::string& id, std::string& error)
+	// An ID, or the number of a connected player as `player ids` shows it. who, when
+	// given, is set to "Name (ID)" (just the ID when that player is not connected),
+	// so the reply can show whom the command acted on.
+	inline bool ResolveId(const std::string& arg, std::string& id, std::string& error, std::string* who = nullptr)
 	{
-		if (!IsListNumber(arg)) { id = arg; return true; }
-
 		Rcon::RefreshPlayers();
 		const auto players = ServerState::Get().GetPlayers();
-		const size_t n = static_cast<size_t>(std::stoi(arg));
-		if (n < 1 || n > players.size()) { error = "no connected player with number " + arg; return false; }
-		id = players[n - 1].id;
-		if (id.empty()) { error = "that player's ID is not available yet"; return false; }
+
+		std::string name;
+		if (!IsListNumber(arg))
+			id = arg;
+		else
+		{
+			const size_t n = static_cast<size_t>(std::stoi(arg));
+			if (n < 1 || n > players.size()) { error = "no connected player with number " + arg; return false; }
+			id = players[n - 1].id;
+			if (id.empty()) { error = "that player's ID is not available yet"; return false; }
+		}
+
+		for (const auto& p : players)
+			if (p.id == id) { name = p.name; break; }
+		if (who) *who = name.empty() ? id : name + " (" + id + ")";
 		return true;
 	}
 }
