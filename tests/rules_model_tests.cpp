@@ -77,6 +77,7 @@ int main()
 	CHECK(SetRule(m, "bettercheats.movement", false, e) && m.rules.size() == 1 && !m.rules[0].deny);
 	CHECK(!SetRule(m, "nodot", true, e) && !e.empty());
 	CHECK(!SetRule(m, "A.b c", true, e));
+	CHECK(!SetRule(m, "#A.b", true, e) && !SetRule(m, ";A.b", true, e) && !SetRule(m, "A.#b", true, e) && m.rules.size() == 1);
 	CHECK(UnsetRule(m, "BETTERCHEATS.movement", e) && m.rules.empty());
 	CHECK(!UnsetRule(m, "Nope.x", e));
 	CHECK(SetDefault(m, true) && m.defaultDeny);
@@ -214,6 +215,7 @@ int main()
 		CHECK(ClaimModel::AdminPromptOn({ "AdminPrompt=1" }));
 		CHECK(!ClaimModel::AdminPromptOn({ "Other=1", "adminprompt = 0 " }));
 		CHECK(!ClaimModel::AdminPromptOn({ "AdminPrompt=off" }));
+		CHECK(!ClaimModel::AdminPromptOn({ "AdminPrompt=Off" }) && !ClaimModel::AdminPromptOn({ "adminprompt=FALSE" }) && !ClaimModel::AdminPromptOn({ "AdminPrompt = NO" }));
 		CHECK(ClaimModel::AdminPromptOn({ "Other=0", "AdminPromptX=0", "no equals" }));
 	}
 

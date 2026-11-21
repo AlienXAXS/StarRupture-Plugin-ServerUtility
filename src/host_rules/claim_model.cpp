@@ -114,7 +114,8 @@ namespace ClaimModel
 			if (key != "adminprompt")
 				continue;
 
-			const std::string value = trim(raw.substr(eq + 1));
+			std::string value = trim(raw.substr(eq + 1));
+			std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 			return !(value == "0" || value == "false" || value == "off" || value == "no");
 		}
 		return true;

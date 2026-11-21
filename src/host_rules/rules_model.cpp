@@ -34,7 +34,7 @@ namespace RulesModel
 
 		bool ValidName(const std::string& s)
 		{
-			return !s.empty() && s.size() <= kMaxNameBytes && s[0] != '$' && !HasControl(s)
+			return !s.empty() && s.size() <= kMaxNameBytes && s[0] != '$' && s[0] != '#' && s[0] != ';' && !HasControl(s)
 			       && s.find_first_of(" =") == std::string::npos;
 		}
 

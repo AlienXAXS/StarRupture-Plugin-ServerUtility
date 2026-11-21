@@ -229,6 +229,9 @@ namespace AdminClaim
 		hooks->HostRules->RegisterOnAdminAnswer(GetSelf(), OnAnswer);
 		g_registered = true;
 
+		// With the prompt off nobody is asked, so no code is made until the host asks for one.
+		if (!ClaimModel::AdminPromptOn(HostRules::Get().policyKept))
+			return;
 		std::lock_guard<std::mutex> lk(g_mutex);
 		EnsureCodeLocked("");
 #else
