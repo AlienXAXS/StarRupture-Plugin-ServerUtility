@@ -14,6 +14,7 @@
 #include "rcon/commands/cmd_players.h"
 #include "rcon/commands/cmd_save.h"
 #include "admin/admin_panel.h"
+#include "host_rules/removal.h"
 
 // -----------------------------------------------------------------------
 // Global plugin self pointer
@@ -154,6 +155,8 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 	// `stop` is not among them: the loader already has one.
 	Cmd_Players::Register();
 	Cmd_Save::Register();
+
+	Removal::Init();
 
 	g_self->hooks->Engine->RegisterOnInit(OnEngineInit);
 	LOG_DEBUG("Registered for engine init callback");

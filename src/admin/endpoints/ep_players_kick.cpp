@@ -2,6 +2,7 @@
 #include "../admin_json.h"
 #include "../session/session_store.h"
 #include "../admin_gamethread.h"
+#include "../../host_rules/removal.h"
 
 #if defined(MODLOADER_SERVER_BUILD) || defined(MODLOADER_CLIENT_BUILD)
 #  include "SDK/Engine_classes.hpp"
@@ -14,8 +15,7 @@
 #if KICK_HAS_SDK
 static void KickPlayerController(SDK::APlayerController* pc)
 {
-	SDK::FText reason{};
-	pc->ClientReturnToMainMenuWithTextReason(reason);
+	Removal::Kick(pc, std::string());
 }
 
 static const char* KickPlayer_SEH(int playerIndex)

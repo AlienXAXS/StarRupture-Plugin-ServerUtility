@@ -1,0 +1,112 @@
+#include "removal.h"
+#include "host_rules_pending.h"
+#include "../plugin_helpers.h"
+
+#include "SDK/Engine_classes.hpp"
+#include "object_ref.h"
+
+#include <chrono>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+namespace
+{
+	// The game's FText for a reason. Built once per distinct text and kept:
+	// an FText is a plain 16-byte handle to engine-owned data, the same
+	// pattern BetterDrone uses for its labels. Game thread only.
+	const SDK::FText* TextFor(const std::string& reason)
+	{
+		static std::unordered_map<std::string, SDK::FText> s_texts;
+
+		auto it = s_texts.find(reason);
+		if (it != s_texts.end())
+			return &it->second;
+
+		const std::wstring wide(reason.begin(), reason.end());
+		const SDK::FText text = SDK::UKismetTextLibrary::Conv_StringToText(SDK::FString(wide.c_str()));
+		return &s_texts.emplace(reason, text).first->second;
+	}
+
+	// One removal per join. A join has its own player controller, so the
+	// controller is the key, kept as an ObjectRef and never as a raw pointer.
+	// A new controller can take a dead one's slot, so an entry also ends after
+	// kGuardSeconds, long after the removed player's connection has closed.
+	struct Removed
+	{
+		ObjectRef<SDK::APlayerController>     pc;
+		std::chrono::steady_clock::time_point at;
+	};
+	constexpr int kGuardSeconds = 30;
+
+	bool AlreadyRemoved(SDK::APlayerController* pc)
+	{
+		static std::vector<Removed> s_removed;
+
+		const auto now = std::chrono::steady_clock::now();
+		for (size_t i = 0; i < s_removed.size();)
+		{
+			const bool expired = now - s_removed[i].at > std::chrono::seconds(kGuardSeconds);
+			if (expired || !s_removed[i].pc.Get())
+				s_removed.erase(s_removed.begin() + i);
+			else
+				++i;
+		}
+
+		for (const Removed& r : s_removed)
+			if (r.pc.Get() == pc)
+				return true;
+
+		s_removed.push_back({ ObjectRef<SDK::APlayerController>(pc), now });
+		return false;
+	}
+
+	std::string PlayerName(SDK::APlayerController* pc)
+	{
+		if (pc->PlayerState && pc->PlayerState->PlayerNamePrivate.Num() > 0)
+			return pc->PlayerState->PlayerNamePrivate.ToString();
+		return "unknown";
+	}
+
+	void OnBelowMinimum(void* playerController, const char* plainReason)
+	{
+		auto* hooks = GetHooks();
+		if (!hooks || !hooks->Engine || !hooks->Engine->IsGameThread())
+		{
+			LOG_WARN("[HostRules] Below-minimum callback arrived off the game thread - ignored");
+			return;
+		}
+
+		auto* pc = static_cast<SDK::APlayerController*>(playerController);
+		if (!pc || !plainReason)
+			return;
+
+		const HostRulesPending::PlayerFlags flags = HostRulesPending::FlagsFor(pc);
+		if (flags.admin || flags.exemptVersion)
+			return;
+
+		if (AlreadyRemoved(pc))
+			return;
+
+		LOG_INFO("[HostRules] Player '%s' removed: %s", PlayerName(pc).c_str(), plainReason);
+		Removal::Kick(pc, plainReason);
+	}
+}
+
+namespace Removal
+{
+	void Kick(SDK::APlayerController* pc, const std::string& reason)
+	{
+		pc->ClientReturnToMainMenuWithTextReason(reason.empty() ? SDK::FText{} : *TextFor(reason));
+	}
+
+	void Init()
+	{
+		if (!HostRulesPending::LoaderHasHostRules())
+		{
+			LOG_INFO("[HostRules] This mod loader has no host rules support - minimum version removal is off");
+			return;
+		}
+		HostRulesPending::RegisterBelowMinimum(OnBelowMinimum);
+	}
+}
