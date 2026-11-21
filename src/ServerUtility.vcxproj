@@ -347,6 +347,8 @@
     <ClInclude Include="admin\endpoints\ep_wave_resume.h" />
     <ClInclude Include="admin\endpoints\ep_inventory_give.h" />
     <ClInclude Include="admin\endpoints\wave_common.h" />
+    <ClInclude Include="host_rules\host_rules_pending.h" />
+    <ClInclude Include="host_rules\removal.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(StarRuptureSDKSourceDir)Basic.cpp">
@@ -389,6 +391,7 @@
     <ClCompile Include="admin\endpoints\ep_wave_pause.cpp" />
     <ClCompile Include="admin\endpoints\ep_wave_resume.cpp" />
     <ClCompile Include="admin\endpoints\ep_inventory_give.cpp" />
+    <ClCompile Include="host_rules\removal.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

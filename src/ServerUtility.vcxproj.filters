@@ -82,6 +82,9 @@
     <ClCompile Include="admin\endpoints\ep_inventory_give.cpp">
       <Filter>admin\endpoints</Filter>
     </ClCompile>
+    <ClCompile Include="host_rules\removal.cpp">
+      <Filter>host_rules</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="plugin.h" />
@@ -175,6 +178,12 @@
     <ClInclude Include="admin\endpoints\wave_common.h">
       <Filter>admin\endpoints</Filter>
     </ClInclude>
+    <ClInclude Include="host_rules\host_rules_pending.h">
+      <Filter>host_rules</Filter>
+    </ClInclude>
+    <ClInclude Include="host_rules\removal.h">
+      <Filter>host_rules</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="hooks">
@@ -218,6 +227,9 @@
     </Filter>
     <Filter Include="admin\endpoints">
       <UniqueIdentifier>{a7b8c9d0-e1f2-3456-0123-567890123456}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="host_rules">
+      <UniqueIdentifier>{5e0c7b2a-3d41-4f86-9a17-c2b8e6d04f31}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>
