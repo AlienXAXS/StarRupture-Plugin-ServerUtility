@@ -30,7 +30,7 @@ namespace Cmd_HostRules
 			"  hostrules default allow|deny            what a feature with no rule gets\n"
 			"  hostrules message [text|off]            the line players see when a feature is off\n"
 			"  hostrules minversion [version|off]      minimum mod loader version (players below it are removed)\n"
-			"  hostrules modmin [<plugin> <version|off>]  minimum version of one mod (players below it are removed)\n"
+			"  hostrules modmin [<plugin> <version|wire|off>]  minimum version of one mod, or wire = a copy the wire check accepts\n"
 			"  hostrules reload                        re-read HostRules.ini\n"
 			"  hostrules who <id|number>               what a player's mod loader reported, and its mods\n";
 
@@ -155,7 +155,9 @@ namespace Cmd_HostRules
 			if (sub == "minversion")
 			{
 				if (rest.empty()) return State();
-				const std::string v = Lower(rest) == "off" ? std::string() : NextWord(rest);
+				const std::string word = NextWord(rest);
+				if (!rest.empty()) return kUsage;
+				const std::string v = Lower(word) == "off" ? std::string() : word;
 				if (!HostRules::Change(error, [&](RulesModel::Model& m, std::string& e) { return RulesModel::SetMinLoader(m, v, e); }))
 					return Error(error);
 				return Saved();
