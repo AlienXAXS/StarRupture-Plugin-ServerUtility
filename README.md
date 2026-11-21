@@ -235,7 +235,7 @@ ServerUtility takes its game addresses and member offsets from the mod loader's 
 |---|---|
 | RCON won't start | Both `-RconPort=` and `-RconPassword=` must be provided on the command line. |
 | Server settings not applying | Ensure `-SessionName=` is present — this is what activates command-line mode. |
-| Plugin not loading | Check `modloader.log` in `Binaries\Win64\` for errors. |
+| Plugin not loading | Check `ModLoader.log` in `Binaries\Win64\ModLoader\Logs\` for errors. |
 | Plugin refused after a game update | If the loader's version map has no entry for your server build, the plugin is refused and the log says why. Update the mod loader. |
 | Auto-profession patch is off | Only applies when `MaxPlayers` is set in `ServerUtility.ini`. The log has an `[AutoProfession]` line; if it says `EProfessionType::Soldier` was not found, this game build has no such entry and the patch stays off. |
 

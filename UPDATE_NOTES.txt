@@ -1,5 +1,5 @@
 - ServerUtility now takes its game values (function addresses and member offsets) from the mod loader's version object map (the version map), so the same DLL runs on every supported server build. If the loader has no entry for your server build, the plugin is refused and the log says why.
 - The auto-profession patch that goes with Max Players now reads the Soldier value from the game's own data instead of a fixed number. If the game build has no such entry, the patch stays off and the log says so.
-- Kick, ban, give item, the wave commands and the RCON player count now use the world the mod loader supplies, which stays right after a game update.
+- The RCON player list now uses the world the mod loader supplies, which stays right after a game update, and is refreshed on the game thread instead of a background thread.
 - Building the plain `Debug` or `Release` configuration now stops with a clear error that names the Server configurations, instead of quietly building against the wrong game files.
 - Needs mod loader {LOADER_VERSION} or newer.
