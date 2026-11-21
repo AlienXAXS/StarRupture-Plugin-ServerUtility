@@ -13,8 +13,10 @@
 #include "rcon/commands/command_handler.h"
 #include "rcon/commands/cmd_players.h"
 #include "rcon/commands/cmd_save.h"
+#include "rcon/commands/cmd_player.h"
 #include "admin/admin_panel.h"
 #include "host_rules/removal.h"
+#include "host_rules/player_list.h"
 
 // -----------------------------------------------------------------------
 // Global plugin self pointer
@@ -156,6 +158,8 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 	Cmd_Players::Register();
 	Cmd_Save::Register();
 
+	PlayerList::Init();
+	Cmd_Player::Register();
 	Removal::Init();
 
 	g_self->hooks->Engine->RegisterOnInit(OnEngineInit);

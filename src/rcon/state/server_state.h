@@ -11,6 +11,7 @@ struct PlayerInfo
 	uint32_t pingMs; // APlayerState::CompressedPing (direct ms value, UE5)
 	float duration; // seconds connected (0 if unavailable)
 	std::string ipAddress; // player's IP address (empty if unavailable)
+	std::string id; // the game's player ID string (empty if not readable yet)
 };
 
 // Thread-safe game state cache.

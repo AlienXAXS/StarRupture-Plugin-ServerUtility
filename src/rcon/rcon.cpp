@@ -24,6 +24,7 @@
 #  include "SDK/Engine_classes.hpp"
 #  include "plugin_map.h"
 #  include "listed_players.h"
+#  include "host_rules/player_ids.h"
 #  define RCON_HAS_SDK 1
 #else
 #  define RCON_HAS_SDK 0
@@ -136,6 +137,7 @@ struct RawPlayerData
 	const char* namePtr; // points into FString internal buffer (transient!)
 	int nameLen;
 	uint8_t ping;
+	SDK::APlayerState* ps; // only used right after collection, on the same tick
 };
 
 static constexpr int MAX_RAW_PLAYERS = ListedPlayers::kMax;
@@ -164,6 +166,7 @@ static int CollectPlayersRaw_SEH(void* worldPtr, RawPlayerData* outRaw)
 			outRaw[written].namePtr = nullptr;
 			outRaw[written].nameLen = ps->PlayerNamePrivate.Num();
 			outRaw[written].ping = ps->CompressedPing;
+			outRaw[written].ps = ps;
 
 			// The SDK FString stores wchar_t internally; ToString() returns
 			// std::string, but that involves a destructor. Instead store the
@@ -210,6 +213,7 @@ static void CollectPlayers()
 		PlayerInfo info;
 		info.pingMs = static_cast<uint32_t>(rawBuf[i].ping);
 		info.duration = 0.0f;
+		info.id = PlayerIds::Read(rawBuf[i].ps);
 
 		// The SDK FString is wchar_t internally; convert to narrow string.
 		auto wstr = reinterpret_cast<const wchar_t*>(rawBuf[i].namePtr);

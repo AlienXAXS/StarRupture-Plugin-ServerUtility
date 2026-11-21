@@ -85,6 +85,18 @@
     <ClCompile Include="host_rules\removal.cpp">
       <Filter>host_rules</Filter>
     </ClCompile>
+    <ClCompile Include="host_rules\player_list.cpp">
+      <Filter>host_rules</Filter>
+    </ClCompile>
+    <ClCompile Include="host_rules\player_ids.cpp">
+      <Filter>host_rules</Filter>
+    </ClCompile>
+    <ClCompile Include="rcon\commands\cmd_player.cpp">
+      <Filter>rcon\commands</Filter>
+    </ClCompile>
+    <ClCompile Include="admin\endpoints\ep_rules_players.cpp">
+      <Filter>admin\endpoints</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="plugin.h" />
@@ -186,6 +198,18 @@
     </ClInclude>
     <ClInclude Include="host_rules\removal.h">
       <Filter>host_rules</Filter>
+    </ClInclude>
+    <ClInclude Include="host_rules\player_list.h">
+      <Filter>host_rules</Filter>
+    </ClInclude>
+    <ClInclude Include="host_rules\player_ids.h">
+      <Filter>host_rules</Filter>
+    </ClInclude>
+    <ClInclude Include="rcon\commands\cmd_player.h">
+      <Filter>rcon\commands</Filter>
+    </ClInclude>
+    <ClInclude Include="admin\endpoints\ep_rules_players.h">
+      <Filter>admin\endpoints</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

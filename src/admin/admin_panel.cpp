@@ -13,6 +13,7 @@
 #include "endpoints/ep_wave_pause.h"
 #include "endpoints/ep_wave_resume.h"
 #include "endpoints/ep_inventory_give.h"
+#include "endpoints/ep_rules_players.h"
 
 #include <cstring>
 
@@ -53,6 +54,21 @@ static HttpRequestAction AdminApiFilter(const PluginHttpRequest* req)
 	return HttpRequestAction::Approve;
 }
 
+// True when url ends with suffix, ignoring case.
+static bool ciEndsWith(const char* url, const char* suffix)
+{
+	const size_t ulen = strlen(url);
+	const size_t slen = strlen(suffix);
+	if (ulen < slen) return false;
+	const char* tail = url + ulen - slen;
+	while (*suffix)
+	{
+		if ((*tail | 0x20) != (*suffix | 0x20)) return false;
+		++tail; ++suffix;
+	}
+	return true;
+}
+
 // ---------------------------------------------------------------------------
 // Route dispatchers (one per URL sub-prefix group)
 // ---------------------------------------------------------------------------
@@ -68,20 +84,6 @@ static void AuthRouteHandler(const PluginHttpRequest* req, PluginHttpResponse* r
 static void PlayersRouteHandler(const PluginHttpRequest* req, PluginHttpResponse* resp)
 {
 	if (!req->url) return;
-
-	auto ciEndsWith = [](const char* url, const char* suffix) -> bool
-	{
-		const size_t ulen = strlen(url);
-		const size_t slen = strlen(suffix);
-		if (ulen < slen) return false;
-		const char* tail = url + ulen - slen;
-		while (*suffix)
-		{
-			if ((*tail | 0x20) != (*suffix | 0x20)) return false;
-			++tail; ++suffix;
-		}
-		return true;
-	};
 
 	if (ciEndsWith(req->url, "/list"))
 		Ep_PlayersList::Handle(req, resp);
@@ -102,20 +104,6 @@ static void PlayersRouteHandler(const PluginHttpRequest* req, PluginHttpResponse
 static void WaveRouteHandler(const PluginHttpRequest* req, PluginHttpResponse* resp)
 {
 	if (!req->url) return;
-
-	auto ciEndsWith = [](const char* url, const char* suffix) -> bool
-	{
-		const size_t ulen = strlen(url);
-		const size_t slen = strlen(suffix);
-		if (ulen < slen) return false;
-		const char* tail = url + ulen - slen;
-		while (*suffix)
-		{
-			if ((*tail | 0x20) != (*suffix | 0x20)) return false;
-			++tail; ++suffix;
-		}
-		return true;
-	};
 
 	if (ciEndsWith(req->url, "/status"))
 		Ep_WaveStatus::Handle(req, resp);
@@ -140,6 +128,22 @@ static void WaveRouteHandler(const PluginHttpRequest* req, PluginHttpResponse* r
 static void InventoryRouteHandler(const PluginHttpRequest* req, PluginHttpResponse* resp)
 {
 	Ep_InventoryGive::Handle(req, resp);
+}
+
+// /ServerUtility/api/rules/...
+static void RulesRouteHandler(const PluginHttpRequest* req, PluginHttpResponse* resp)
+{
+	if (!req->url) return;
+
+	if (ciEndsWith(req->url, "/players"))
+		Ep_RulesPlayers::Handle(req, resp);
+	else
+	{
+		std::string body;
+		AdminJson::SetError(resp, 404, "unknown rules endpoint", body);
+		resp->body    = body.c_str();
+		resp->bodyLen = body.size();
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -179,12 +183,13 @@ namespace AdminPanel
 		http->AddRawRoute(self, "api/players",   PlayersRouteHandler);
 		http->AddRawRoute(self, "api/wave",       WaveRouteHandler);
 		http->AddRawRoute(self, "api/inventory",  InventoryRouteHandler);
+		http->AddRawRoute(self, "api/rules",      RulesRouteHandler);
 
 		// Global filter: reject non-POST on API paths
 		http->RegisterOnRawRequest(AdminApiFilter);
 
 		LOG_INFO("[AdminPanel] Admin panel ready — static UI at /ServerUtility/admin/");
-		LOG_INFO("[AdminPanel] API endpoints: /ServerUtility/api/{auth,players,wave,inventory}/...");
+		LOG_INFO("[AdminPanel] API endpoints: /ServerUtility/api/{auth,players,wave,inventory,rules}/...");
 	}
 
 	void Shutdown(IPluginSelf* self)
@@ -198,6 +203,7 @@ namespace AdminPanel
 		http->RemoveRawRoute(self, "api/players");
 		http->RemoveRawRoute(self, "api/wave");
 		http->RemoveRawRoute(self, "api/inventory");
+		http->RemoveRawRoute(self, "api/rules");
 		http->RemoveRoute(self, "admin");
 
 		g_adminSelf = nullptr;

@@ -1,5 +1,6 @@
 #include "removal.h"
 #include "host_rules_pending.h"
+#include "player_ids.h"
 #include "../plugin_helpers.h"
 
 #include "SDK/Engine_classes.hpp"
@@ -84,8 +85,7 @@ namespace
 	// share a function with objects that need unwinding.
 	void RemoveChecked(SDK::APlayerController* pc, const char* plainReason)
 	{
-		const HostRulesPending::PlayerFlags flags = HostRulesPending::FlagsFor(pc);
-		if (flags.admin || flags.exemptVersion)
+		if (PlayerIds::ExemptFromVersion(pc))
 			return;
 
 		if (AlreadyRemoved(pc))
