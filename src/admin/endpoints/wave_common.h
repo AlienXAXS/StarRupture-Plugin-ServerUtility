@@ -6,6 +6,7 @@
 #if defined(MODLOADER_SERVER_BUILD) || defined(MODLOADER_CLIENT_BUILD)
 #  include "SDK/Engine_classes.hpp"
 #  include "SDK/Chimera_classes.hpp"
+#  include "plugin_map.h"
 #  define WAVE_HAS_SDK 1
 #else
 #  define WAVE_HAS_SDK 0
@@ -14,7 +15,7 @@
 #if WAVE_HAS_SDK
 inline SDK::UCrEnviroWaveSubsystem* GetWaveSubsystem()
 {
-	auto* world = static_cast<SDK::UWorld*>(SDK::UWorld::GetWorld());
+	auto* world = static_cast<SDK::UWorld*>(PluginSdkRuntime::GetWorld());
 	if (!world) return nullptr;
 
 	// Use the BPF helper to retrieve the world subsystem by class.

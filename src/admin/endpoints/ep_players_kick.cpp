@@ -5,6 +5,7 @@
 
 #if defined(MODLOADER_SERVER_BUILD) || defined(MODLOADER_CLIENT_BUILD)
 #  include "SDK/Engine_classes.hpp"
+#  include "plugin_map.h"
 #  define KICK_HAS_SDK 1
 #else
 #  define KICK_HAS_SDK 0
@@ -21,7 +22,7 @@ static const char* KickPlayer_SEH(int playerIndex)
 {
 	__try
 	{
-		auto* world = static_cast<SDK::UWorld*>(SDK::UWorld::GetWorld());
+		auto* world = static_cast<SDK::UWorld*>(PluginSdkRuntime::GetWorld());
 		if (!world) return R"({"ok":false,"error":"world unavailable"})";
 
 		SDK::AGameStateBase* gs = world->GameState;

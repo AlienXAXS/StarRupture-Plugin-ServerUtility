@@ -41,7 +41,7 @@ static const char* GiveItem_SEH(int playerIndex, int count, const char* assetPat
 {
 	__try
 	{
-		auto* world = static_cast<SDK::UWorld*>(SDK::UWorld::GetWorld());
+		auto* world = static_cast<SDK::UWorld*>(PluginSdkRuntime::GetWorld());
 		if (!world) return R"({"ok":false,"error":"world unavailable"})";
 
 		SDK::AGameStateBase* gs = world->GameState;

@@ -6,7 +6,7 @@
 // Call Shutdown() from OnEngineShutdown (before UObject teardown).
 //
 // Player state is refreshed every 5 seconds by the background thread using
-// SDK::UWorld::GetWorld() -- no world-event callbacks required.
+// PluginSdkRuntime::GetWorld() -- no world-event callbacks required.
 namespace Rcon
 {
 	// Reads -QueryPort= and -RconPassword=, starts TCP + UDP servers,

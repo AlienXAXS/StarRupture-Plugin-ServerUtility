@@ -14,6 +14,7 @@
 
 #if defined(MODLOADER_SERVER_BUILD) || defined(MODLOADER_CLIENT_BUILD)
 #  include "SDK/Engine_classes.hpp"
+#  include "plugin_map.h"
 #  define BAN_HAS_SDK 1
 #else
 #  define BAN_HAS_SDK 0
@@ -52,7 +53,7 @@ static const char* BanPlayer_SEH(int playerIndex, const char* ip, const char* pl
 {
 	__try
 	{
-		auto* world = static_cast<SDK::UWorld*>(SDK::UWorld::GetWorld());
+		auto* world = static_cast<SDK::UWorld*>(PluginSdkRuntime::GetWorld());
 		if (!world) return R"({"ok":false,"error":"world unavailable"})";
 
 		SDK::AGameStateBase* gs = world->GameState;

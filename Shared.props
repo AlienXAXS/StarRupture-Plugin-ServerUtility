@@ -6,8 +6,8 @@
        Override in CI via /p:GameSDKRoot=... /p:PluginSDKInclude=...
        ============================================================ -->
   <PropertyGroup>
-    <GameSDKRoot Condition="'$(GameSDKRoot)' == ''">C:\Users\markp\Documents\GitHub\StarRupture-Game-SDK</GameSDKRoot>
-    <PluginSDKInclude Condition="'$(PluginSDKInclude)' == ''">C:\Users\markp\Documents\GitHub\StarRupture-Plugin-SDK\include</PluginSDKInclude>
+    <GameSDKRoot Condition="'$(GameSDKRoot)' == ''">..\..\StarRupture-Game-SDK</GameSDKRoot>
+    <PluginSDKInclude Condition="'$(PluginSDKInclude)' == ''">..\..\StarRupture-Plugin-SDK\include</PluginSDKInclude>
   </PropertyGroup>
 
   <!-- ============================================================
@@ -15,9 +15,12 @@
        Points to the SDK subdirectory containing Basic.cpp,
        CoreUObject_functions.cpp and Engine_functions.cpp.
        ============================================================ -->
-  <PropertyGroup Condition="'$(Configuration)' == 'Debug' Or '$(Configuration)' == 'Release'">
-    <StarRuptureSDKSourceDir>$(GameSDKRoot)\Server\SDK\</StarRuptureSDKSourceDir>
-  </PropertyGroup>
+  <!-- Plain Debug / Release name no game target, so they are not built:
+       they used to fall through to the Server dump without saying so. -->
+  <Target Name="RejectPlainConfiguration" BeforeTargets="PrepareForBuild"
+          Condition="'$(Configuration)' == 'Debug' Or '$(Configuration)' == 'Release'">
+    <Error Text="ServerUtility builds the Server configurations only. Use 'Server Debug' or 'Server Release' (/p:Configuration=&quot;Server Release&quot;); '$(Configuration)' does not name a game target." />
+  </Target>
   <PropertyGroup Condition="'$(Configuration)' == 'Client Debug' Or '$(Configuration)' == 'Client Release' Or '$(Configuration)' == 'Local SDK Client Debug' Or '$(Configuration)' == 'Local SDK Client Release'">
     <StarRuptureSDKSourceDir>$(GameSDKRoot)\Client\SDK\</StarRuptureSDKSourceDir>
   </PropertyGroup>
@@ -62,14 +65,13 @@
 
   <!-- ============================================================
        PLUGIN_GAME_BUILT_CL
-       The game build (CL) the plugin's candidate rows are for. Pinned
-       here; a build passes /p:PluginGameBuiltCL=<CL> to override it.
-       PluginGameBuild.props (Plugin SDK) turns it into the define that
-       plugin_interface.h stores in PluginInfo::gameBuiltCL.
+       The game build (CL) the Game-SDK was generated from, read by
+       PluginGameBuild.props (Plugin SDK) from the build_cl.txt beside
+       the Client\ or Server\ SDK the configuration compiles against,
+       and stored in PluginInfo::gameBuiltCL by plugin_interface.h. It is
+       not pinned here, so it follows the headers actually used; a build
+       can still pass /p:PluginGameBuiltCL=<CL>.
        ============================================================ -->
-  <PropertyGroup>
-    <PluginGameBuiltCL Condition="'$(PluginGameBuiltCL)' == ''">127004</PluginGameBuiltCL>
-  </PropertyGroup>
   <Import Project="$(PluginSDKInclude)\..\PluginGameBuild.props"
           Condition="Exists('$(PluginSDKInclude)\..\PluginGameBuild.props')" />
 

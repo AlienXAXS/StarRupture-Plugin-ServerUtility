@@ -22,6 +22,7 @@
 // pulling in the entire SDK.  Engine_classes.hpp includes Basic.hpp itself
 // which sets up the SDK namespace and UC container aliases.
 #  include "SDK/Engine_classes.hpp"
+#  include "plugin_map.h"
 #  define RCON_HAS_SDK 1
 #else
 #  define RCON_HAS_SDK 0
@@ -191,7 +192,7 @@ static int CollectPlayersRaw_SEH(void* worldPtr, RawPlayerData* outRaw)
 static void CollectPlayers()
 {
 #if RCON_HAS_SDK
-	auto* world = static_cast<SDK::UWorld*>(SDK::UWorld::GetWorld());
+	auto* world = static_cast<SDK::UWorld*>(PluginSdkRuntime::GetWorld());
 	if (!world) return;
 
 	RawPlayerData rawBuf[MAX_RAW_PLAYERS];
