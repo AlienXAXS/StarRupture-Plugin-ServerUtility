@@ -205,9 +205,6 @@
     <ClInclude Include="admin\endpoints\wave_common.h">
       <Filter>admin\endpoints</Filter>
     </ClInclude>
-    <ClInclude Include="host_rules\host_rules_pending.h">
-      <Filter>host_rules</Filter>
-    </ClInclude>
     <ClInclude Include="host_rules\rules_model.h">
       <Filter>host_rules</Filter>
     </ClInclude>

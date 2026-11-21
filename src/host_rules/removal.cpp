@@ -1,5 +1,4 @@
 #include "removal.h"
-#include "host_rules_pending.h"
 #include "player_ids.h"
 #include "../plugin_helpers.h"
 
@@ -86,7 +85,10 @@ namespace
 	void RemoveChecked(SDK::APlayerController* pc, const char* plainReason)
 	{
 		if (PlayerIds::ExemptFromVersion(pc))
+		{
+			LOG_INFO("[HostRules] Player '%s' is below a minimum version but exempt - kept", PlayerName(pc).c_str());
 			return;
+		}
 
 		if (AlreadyRemoved(pc))
 			return;
@@ -108,6 +110,7 @@ namespace
 		}
 	}
 
+#if PLUGIN_INTERFACE_VERSION >= 79
 	void OnBelowMinimum(void* playerController, const char* plainReason)
 	{
 		auto* hooks = GetHooks();
@@ -124,6 +127,9 @@ namespace
 		if (!RemoveGuarded(pc, plainReason))
 			LOG_WARN("[HostRules] Exception while removing a player - skipped");
 	}
+
+	bool g_registered = false;
+#endif
 }
 
 namespace Removal
@@ -135,11 +141,27 @@ namespace Removal
 
 	void Init()
 	{
-		if (!HostRulesPending::LoaderHasHostRules())
+#if PLUGIN_INTERFACE_VERSION >= 79
+		auto* hooks = GetHooks();
+		if (!hooks || !hooks->HostRules || !GetSelf())
 		{
 			LOG_INFO("[HostRules] This mod loader has no host rules support - minimum version removal is off");
 			return;
 		}
-		HostRulesPending::RegisterBelowMinimum(OnBelowMinimum);
+		hooks->HostRules->RegisterOnClientBelowMinimum(GetSelf(), OnBelowMinimum);
+		g_registered = true;
+#else
+		LOG_INFO("[HostRules] This build has no host rules support - minimum version removal is off");
+#endif
+	}
+
+	void Shutdown()
+	{
+#if PLUGIN_INTERFACE_VERSION >= 79
+		auto* hooks = GetHooks();
+		if (g_registered && hooks && hooks->HostRules && GetSelf())
+			hooks->HostRules->UnregisterOnClientBelowMinimum(GetSelf(), OnBelowMinimum);
+		g_registered = false;
+#endif
 	}
 }

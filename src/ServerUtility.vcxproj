@@ -348,7 +348,6 @@
     <ClInclude Include="admin\endpoints\ep_wave_resume.h" />
     <ClInclude Include="admin\endpoints\ep_inventory_give.h" />
     <ClInclude Include="admin\endpoints\wave_common.h" />
-    <ClInclude Include="host_rules\host_rules_pending.h" />
     <ClInclude Include="host_rules\removal.h" />
     <ClInclude Include="host_rules\rules_model.h" />
     <ClInclude Include="host_rules\player_list.h" />

@@ -79,6 +79,7 @@ static void OnEngineShutdown()
 {
 	LOG_INFO("Engine shutting down - removing hooks...");
 	AdminPanel::Shutdown(g_self);
+	Removal::Shutdown();
 	HostRules::Shutdown();
 	ParseSettingsHook::Remove();
 	MaxPlayersHook::Remove();
