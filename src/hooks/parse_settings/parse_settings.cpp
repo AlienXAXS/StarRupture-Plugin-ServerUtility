@@ -277,7 +277,7 @@ static HookHandle g_hookHandle = nullptr;
 // the DSSettings.txt dependency — no file needed, no JSON parsing, no
 // risk of garbage FString state from a failed LoadFileToString.
 //
-// The FString fields at +0xB8 and +0xC8 are guaranteed to be in their
+// The SessionName and SaveGameName FStrings are guaranteed to be in their
 // default-constructed state (Data=null, Num=0, Max=0) since UObject
 // zero-inits its memory.  We allocate via the engine's own FMemory::Malloc
 // so the GC destructor sees valid FMallocBinned2 canary values.
@@ -358,12 +358,12 @@ static __int64 __fastcall Hook_ParseSettings(void* thisPtr)
 	// their default-constructed state (zeroed by UObject allocation).
 	// We allocate string data via FMemory::Malloc so GC cleanup works.
 	//
-	// Field layout from IDA pseudocode:
-	//   +0xB8  SessionName      (FString — Data/Num/Max)
-	//   +0xC8  SaveGameName     (FString — Data/Num/Max)
-	//   +0xD8  SaveGameInterval (int32)
-	//+0xDC  bStartNewGame    (bool)
-	//   +0xDD  bLoadSavedGame   (bool)
+	// The five members, in the order the game's own ParseSettings fills them:
+	//   SessionName      (FString — Data/Num/Max)
+	//   SaveGameName     (FString — Data/Num/Max)
+	//   SaveGameInterval (int32)
+	//   bStartNewGame    (bool)
+	//   bLoadSavedGame   (bool)
 	// -----------------------------------------------------------------------
 	LOG_DEBUG("[Hook_ParseSettings] Writing fields directly (thisPtr at 0x%p)...", thisPtr);
 

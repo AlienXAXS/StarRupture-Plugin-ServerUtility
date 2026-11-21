@@ -11,14 +11,6 @@
 #include <string>
 #include <vector>
 
-#if defined(MODLOADER_SERVER_BUILD) || defined(MODLOADER_CLIENT_BUILD)
-#  include "SDK/Engine_classes.hpp"
-#  include "SDK/Chimera_classes.hpp"
-#  define GATHERABLE_FIX_HAS_SDK 1
-#else
-#  define GATHERABLE_FIX_HAS_SDK 0
-#endif
-
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -66,8 +58,6 @@ void GatherableRelevancyFix::Resolve(IPluginSelf* self, IPluginHookScanner* scan
 	g_removeNetworkActor = reinterpret_cast<RepGraphActorFn>(ScanUtil::ResolveFunction(self, scanner,
 		ServerUtilityFields::RemoveNetworkActor, GameSig::REPGRAPH_REMOVE_NETWORK_ACTOR));
 }
-
-#if GATHERABLE_FIX_HAS_SDK
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -480,14 +470,11 @@ static void OnTick(float /*deltaSeconds*/)
 	}
 }
 
-#endif // GATHERABLE_FIX_HAS_SDK
-
 // ---------------------------------------------------------------------------
 // Install / Remove
 // ---------------------------------------------------------------------------
 void GatherableRelevancyFix::Install(bool seedResync)
 {
-#if GATHERABLE_FIX_HAS_SDK
 	if (g_installed)
 		return;
 
@@ -513,14 +500,10 @@ void GatherableRelevancyFix::Install(bool seedResync)
 	g_installed   = true;
 
 	LOG_INFO("[GatherableFix] Installed");
-#else
-	LOG_WARN("[GatherableFix] Built without the game SDK - fix unavailable in this configuration");
-#endif
 }
 
 void GatherableRelevancyFix::Remove()
 {
-#if GATHERABLE_FIX_HAS_SDK
 	if (!g_installed)
 		return;
 
@@ -532,5 +515,4 @@ void GatherableRelevancyFix::Remove()
 	g_livePending = false;
 	g_resyncTicks = -1;
 	g_installed   = false;
-#endif
 }
