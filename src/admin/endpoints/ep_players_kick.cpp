@@ -19,8 +19,8 @@ static void KickPlayerController(SDK::APlayerController* pc)
 	Removal::Kick(pc, std::string());
 }
 
-// playerIndex is a players/list index; expectedName is the name the list showed at it.
-static const char* KickPlayer_SEH(int playerIndex, const wchar_t* expectedName)
+// playerIndex is a players/list index; expectedName and expectedId are what the list showed at it.
+static const char* KickPlayer_SEH(int playerIndex, const wchar_t* expectedName, const char* expectedId)
 {
 	__try
 	{
@@ -30,7 +30,7 @@ static const char* KickPlayer_SEH(int playerIndex, const wchar_t* expectedName)
 		SDK::AGameStateBase* gs = world->GameState;
 		if (!gs) return R"({"ok":false,"error":"game state unavailable"})";
 
-		SDK::APlayerState* ps = ListedPlayers::Find(gs, playerIndex, expectedName);
+		SDK::APlayerState* ps = ListedPlayers::Find(gs, playerIndex, expectedName, expectedId);
 		if (!ps) return R"({"ok":false,"error":"player not found"})";
 
 		SDK::APlayerController* pc = static_cast<SDK::APlayerController*>(ps->GetOwner());
@@ -61,25 +61,27 @@ namespace Ep_PlayersKick
 			return;
 		}
 
+		// The player is named by player_id, or by player_index plus player_name; see rcon/listed_players.h.
+		const std::string listedId   = AdminJson::ExtractString(req->body, req->bodyLen, "player_id");
+		const std::string listedName = AdminJson::ExtractString(req->body, req->bodyLen, "player_name");
 		const int playerIndex = AdminJson::ExtractInt(req->body, req->bodyLen, "player_index");
-		if (playerIndex < 0)
+		if (listedId.empty() && playerIndex < 0)
 		{
-			AdminJson::SetError(resp, 400, "player_index required", body);
+			AdminJson::SetError(resp, 400, "player_id or player_index required", body);
 			return;
 		}
 
-		// Optional: the name the list showed at player_index; see rcon/listed_players.h.
-		const std::string listedName = AdminJson::ExtractString(req->body, req->bodyLen, "player_name");
-
-		const std::string result = AdminGT::Dispatch([playerIndex, listedName]() -> std::string
+		const std::string result = AdminGT::Dispatch([playerIndex, listedId, listedName]() -> std::string
 		{
 #if KICK_HAS_SDK
 			PlayerInfo listed;
-			if (!ListedPlayers::Cached(playerIndex, listedName, listed))
-				return R"({"ok":false,"error":"player not found"})";
+			int position = 0;
+			std::string refusal;
+			if (!ListedPlayers::Resolve(playerIndex, listedId, listedName, listed, position, refusal))
+				return "{\"ok\":false,\"error\":\"" + AdminJson::Escape(refusal) + "\"}";
 
 			const std::wstring expectedName = ListedPlayers::ToWide(listed.name);
-			return KickPlayer_SEH(playerIndex, expectedName.c_str());
+			return KickPlayer_SEH(position, expectedName.c_str(), listed.id.c_str());
 #else
 			return R"({"ok":false,"error":"SDK not available in this build"})";
 #endif

@@ -72,8 +72,9 @@ static SDK::UAuItemDataBase* FindItemByPath(SDK::UAuItemDataBaseSubsystem* itemS
 
 // No C++ objects with destructors in this frame — SEH is legal.
 // err is caller-owned storage for the error JSON FindItemByPath may produce.
-// playerIndex is a players/list index; expectedName is the name the list showed at it.
-static const char* GiveItem_SEH(int playerIndex, const wchar_t* expectedName, int count, const char* assetPath,
+// playerIndex is a players/list index; expectedName and expectedId are what the list showed at it.
+static const char* GiveItem_SEH(int playerIndex, const wchar_t* expectedName, const char* expectedId, int count,
+                                const char* assetPath,
                                 char* err, int errCap)
 {
 	__try
@@ -83,7 +84,7 @@ static const char* GiveItem_SEH(int playerIndex, const wchar_t* expectedName, in
 
 		SDK::AGameStateBase* gs = world->GameState;
 		if (!gs) return R"({"ok":false,"error":"game state unavailable"})";
-		SDK::APlayerState* ps = ListedPlayers::Find(gs, playerIndex, expectedName);
+		SDK::APlayerState* ps = ListedPlayers::Find(gs, playerIndex, expectedName, expectedId);
 		if (!ps) return R"({"ok":false,"error":"player not found"})";
 
 		SDK::APlayerController* pc = static_cast<SDK::APlayerController*>(ps->GetOwner());
@@ -130,10 +131,13 @@ namespace Ep_InventoryGive
 			return;
 		}
 
+		// The player is named by player_id, or by player_index plus player_name; see rcon/listed_players.h.
+		const std::string listedId   = AdminJson::ExtractString(req->body, req->bodyLen, "player_id");
+		const std::string listedName = AdminJson::ExtractString(req->body, req->bodyLen, "player_name");
 		const int playerIndex = AdminJson::ExtractInt(req->body, req->bodyLen, "player_index");
-		if (playerIndex < 0)
+		if (listedId.empty() && playerIndex < 0)
 		{
-			AdminJson::SetError(resp, 400, "player_index required", body);
+			AdminJson::SetError(resp, 400, "player_id or player_index required", body);
 			return;
 		}
 
@@ -151,19 +155,18 @@ namespace Ep_InventoryGive
 			return;
 		}
 
-		// Optional: the name the list showed at player_index; see rcon/listed_players.h.
-		const std::string listedName = AdminJson::ExtractString(req->body, req->bodyLen, "player_name");
-
-		const std::string result = AdminGT::Dispatch([playerIndex, listedName, count, assetPath]() -> std::string
+		const std::string result = AdminGT::Dispatch([playerIndex, listedId, listedName, count, assetPath]() -> std::string
 		{
 #if INV_HAS_SDK
 			PlayerInfo listed;
-			if (!ListedPlayers::Cached(playerIndex, listedName, listed))
-				return R"({"ok":false,"error":"player not found"})";
+			int position = 0;
+			std::string refusal;
+			if (!ListedPlayers::Resolve(playerIndex, listedId, listedName, listed, position, refusal))
+				return "{\"ok\":false,\"error\":\"" + AdminJson::Escape(refusal) + "\"}";
 
 			const std::wstring expectedName = ListedPlayers::ToWide(listed.name);
 			char err[160] = {};
-			return GiveItem_SEH(playerIndex, expectedName.c_str(), count, assetPath.c_str(), err,
+			return GiveItem_SEH(position, expectedName.c_str(), listed.id.c_str(), count, assetPath.c_str(), err,
 			                    static_cast<int>(sizeof(err)));
 #else
 			return R"({"ok":false,"error":"SDK not available in this build"})";

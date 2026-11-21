@@ -7,13 +7,15 @@
 // kick, ban and give take that list index back, so they must count players the
 // same way, and must also confirm the player is still the one the list showed:
 // the list is a cache refreshed every few seconds, and a player leaving shifts
-// every later index. Callers can send the listed name as "player_name" to make the
-// request fail when the index no longer names that player.
+// every later index. A request names its player by "player_id" (the ID `player ids`
+// shows), or by "player_index" together with "player_name"; the name must belong to
+// exactly one connected player, at that index. Anything else is refused.
 
 #if defined(MODLOADER_SERVER_BUILD) || defined(MODLOADER_CLIENT_BUILD)
 
 #include "SDK/Engine_classes.hpp"
 #include "state/server_state.h"
+#include "../host_rules/player_ids.h"
 
 #include <cstdint>
 #include <cwchar>
@@ -37,9 +39,11 @@ namespace ListedPlayers
 	}
 
 	// The live player at listIndex in list numbering, but only when its name still
-	// equals expectedName (the name the list showed). Returns nullptr when the player
-	// has left or the numbering has shifted. Reads engine memory: call inside __try.
-	inline SDK::APlayerState* Find(SDK::AGameStateBase* gs, int listIndex, const wchar_t* expectedName)
+	// equals expectedName (the name the list showed) and, when expectedId is not empty,
+	// its ID equals expectedId. Returns nullptr when the player has left or the
+	// numbering has shifted. Reads engine memory: call inside __try.
+	inline SDK::APlayerState* Find(SDK::AGameStateBase* gs, int listIndex, const wchar_t* expectedName,
+	                               const char* expectedId = "")
 	{
 		if (!gs || listIndex < 0 || listIndex >= kMax) return nullptr;
 
@@ -53,24 +57,49 @@ namespace ListedPlayers
 			if (listed++ != listIndex) continue;
 
 			const wchar_t* name = ps->PlayerNamePrivate.CStr();
-			return (name && wcscmp(name, expectedName) == 0) ? ps : nullptr;
+			if (!name || wcscmp(name, expectedName) != 0) return nullptr;
+			if (expectedId && *expectedId && PlayerIds::Read(ps) != expectedId) return nullptr;
+			return ps;
 		}
 		return nullptr;
 	}
 
-	// The cached list entry at listIndex, or false when the list has no such entry.
-	// expectedName is the name the caller saw in the list: when it is not empty, the
-	// entry must still carry that name, so an index that shifted after a refresh fails
-	// instead of naming someone else.
-	inline bool Cached(int listIndex, const std::string& expectedName, PlayerInfo& out)
+	// The cached list entry a panel request means, and its position in the list.
+	// With playerId, the one connected player with that ID (listIndex is not used).
+	// Without it, playerName is required and must belong to exactly one connected
+	// player, the one at listIndex. On failure error says why.
+	inline bool Resolve(int listIndex, const std::string& playerId, const std::string& playerName,
+	                    PlayerInfo& out, int& position, std::string& error)
 	{
 		const std::vector<PlayerInfo> players = ServerState::Get().GetPlayers();
-		if (listIndex < 0 || static_cast<size_t>(listIndex) >= players.size()) return false;
 
-		const PlayerInfo& entry = players[static_cast<size_t>(listIndex)];
-		if (!expectedName.empty() && entry.name != expectedName) return false;
+		int found = -1;
+		if (!playerId.empty())
+		{
+			for (size_t i = 0; i < players.size(); ++i)
+			{
+				if (players[i].id != playerId) continue;
+				if (found >= 0) { error = "more than one connected player has that ID"; return false; }
+				found = static_cast<int>(i);
+			}
+			if (found < 0) { error = "player not found"; return false; }
+		}
+		else
+		{
+			if (playerName.empty()) { error = "player_id or player_name required"; return false; }
 
-		out = entry;
+			int sameName = 0;
+			for (const PlayerInfo& p : players) if (p.name == playerName) ++sameName;
+			if (sameName > 1) { error = "more than one connected player has that name, send player_id"; return false; }
+
+			if (listIndex < 0 || static_cast<size_t>(listIndex) >= players.size() ||
+			    players[static_cast<size_t>(listIndex)].name != playerName)
+			{ error = "player not found"; return false; }
+			found = listIndex;
+		}
+
+		out = players[static_cast<size_t>(found)];
+		position = found;
 		return true;
 	}
 
