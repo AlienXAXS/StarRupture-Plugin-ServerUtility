@@ -1,4 +1,5 @@
 #include "player_list.h"
+#include "ini_file.h"
 #include "../plugin_helpers.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -15,25 +16,15 @@
 
 namespace
 {
+	using IniFile::Lower;
+	using IniFile::Trim;
+	using IniFile::IsCommentOrBlank;
+
 	std::mutex                      g_mutex;
-	std::wstring                    g_path;
 	std::vector<PlayerList::Entry>  g_entries;
 	// False when the file exists but could not be read: nothing is written
 	// then, so a bad read never replaces the host's file with an empty list.
 	bool                            g_loadOk = true;
-
-	std::string Lower(std::string s)
-	{
-		std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-		return s;
-	}
-
-	std::string Trim(const std::string& s)
-	{
-		const size_t a = s.find_first_not_of(" \t\r\n");
-		if (a == std::string::npos) return {};
-		return s.substr(a, s.find_last_not_of(" \t\r\n") - a + 1);
-	}
 
 	std::string CleanLabel(std::string s)
 	{
@@ -42,21 +33,15 @@ namespace
 		return Trim(s);
 	}
 
-	bool IsCommentOrBlank(const std::string& line)
+	bool IsAnyHeader(const std::string& line)
 	{
 		const std::string t = Trim(line);
-		return t.empty() || t[0] == ';' || t[0] == '#';
+		return !t.empty() && t[0] == '[';
 	}
 
 	bool IsPlayersHeader(const std::string& line)
 	{
 		return Lower(Trim(line)) == "[players]";
-	}
-
-	bool IsAnyHeader(const std::string& line)
-	{
-		const std::string t = Trim(line);
-		return !t.empty() && t[0] == '[';
 	}
 
 	// strict: unknown flags are an error (typed commands); not strict: they are
@@ -112,50 +97,6 @@ namespace
 		return true;
 	}
 
-	bool ReadFileLines(const std::wstring& path, std::vector<std::string>& lines, bool& exists, bool& crlf)
-	{
-		lines.clear();
-		crlf = true;
-
-		const HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
-		                             nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-		if (h == INVALID_HANDLE_VALUE)
-		{
-			const DWORD err = GetLastError();
-			exists = !(err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND);
-			return !exists;
-		}
-		exists = true;
-
-		std::string data;
-		char buf[8192];
-		DWORD got = 0;
-		bool ok = true;
-		while (true)
-		{
-			if (!ReadFile(h, buf, sizeof(buf), &got, nullptr)) { ok = false; break; }
-			if (got == 0) break;
-			data.append(buf, got);
-		}
-		CloseHandle(h);
-		if (!ok) return false;
-
-		if (data.compare(0, 3, "\xEF\xBB\xBF") == 0) data.erase(0, 3);
-		crlf = data.find("\r\n") != std::string::npos || data.find('\n') == std::string::npos;
-
-		size_t s = 0;
-		while (s < data.size())
-		{
-			size_t e = data.find('\n', s);
-			if (e == std::string::npos) e = data.size();
-			std::string line = data.substr(s, e - s);
-			if (!line.empty() && line.back() == '\r') line.pop_back();
-			lines.push_back(std::move(line));
-			s = e + 1;
-		}
-		return true;
-	}
-
 	std::vector<PlayerList::Entry> ParseSection(const std::vector<std::string>& lines)
 	{
 		std::vector<PlayerList::Entry> out;
@@ -178,61 +119,20 @@ namespace
 	// was. Temp file first, then a rename over the old file.
 	bool SaveFile(const std::vector<PlayerList::Entry>& entries, std::string& error)
 	{
-		if (g_path.empty()) { error = "no rules file path"; return false; }
+		const std::wstring& path = IniFile::Path();
+		if (path.empty()) { error = "no rules file path"; return false; }
 		if (!g_loadOk) { error = "the rules file could not be read, so it was not changed"; return false; }
 
-		std::vector<std::string> old;
+		std::lock_guard<std::mutex> fileLock(IniFile::FileMutex());
+		std::vector<std::string> lines;
 		bool exists = false, crlf = true;
-		if (!ReadFileLines(g_path, old, exists, crlf)) { error = "the rules file could not be read"; return false; }
+		if (!IniFile::ReadLines(path, lines, exists, crlf)) { error = "the rules file could not be read"; return false; }
 
-		std::vector<std::string> out;
-		bool wrote = false;
-		bool inSection = false;
-		auto emit = [&]()
-		{
-			for (const PlayerList::Entry& e : entries) out.push_back(PlayerList::FormatLine(e));
-			wrote = true;
-		};
-		std::vector<std::string> keep; // comment lines of the old section
-		for (const std::string& line : old)
-		{
-			if (IsAnyHeader(line))
-			{
-				if (inSection) { out.insert(out.end(), keep.begin(), keep.end()); keep.clear(); emit(); }
-				inSection = IsPlayersHeader(line) && !wrote;
-				out.push_back(line);
-				continue;
-			}
-			if (!inSection) { out.push_back(line); continue; }
-			if (IsCommentOrBlank(line)) keep.push_back(line);
-		}
-		if (inSection) { out.insert(out.end(), keep.begin(), keep.end()); emit(); }
-		if (!wrote)
-		{
-			if (!out.empty() && !Trim(out.back()).empty()) out.push_back({});
-			out.push_back("[Players]");
-			emit();
-		}
+		std::vector<std::string> body;
+		for (const PlayerList::Entry& e : entries) body.push_back(PlayerList::FormatLine(e));
+		IniFile::ReplaceSection(lines, "Players", body);
 
-		const std::wstring dir = g_path.substr(0, g_path.find_last_of(L"\\/"));
-		CreateDirectoryW(dir.c_str(), nullptr);
-
-		std::string text;
-		for (const std::string& l : out) { text += l; text += crlf ? "\r\n" : "\n"; }
-
-		const std::wstring tmp = g_path + L".tmp";
-		const HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-		if (h == INVALID_HANDLE_VALUE) { error = "could not write the rules file"; return false; }
-		DWORD put = 0;
-		const bool wroteOk = WriteFile(h, text.data(), static_cast<DWORD>(text.size()), &put, nullptr) && put == text.size()
-		                     && FlushFileBuffers(h);
-		CloseHandle(h);
-		if (!wroteOk || !MoveFileExW(tmp.c_str(), g_path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-		{
-			DeleteFileW(tmp.c_str());
-			error = "could not write the rules file";
-			return false;
-		}
+		if (!IniFile::WriteLines(path, lines, crlf)) { error = "could not write the rules file"; return false; }
 		return true;
 	}
 
@@ -305,18 +205,6 @@ namespace PlayerList
 
 	void Init()
 	{
-		wchar_t module[MAX_PATH] = {};
-		HMODULE self = nullptr;
-		if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-		                       reinterpret_cast<LPCWSTR>(&PlayerList::Init), &self)
-		    && GetModuleFileNameW(self, module, MAX_PATH) > 0)
-		{
-			std::wstring dir(module);
-			dir.resize(dir.find_last_of(L"\\/"));
-			std::lock_guard<std::mutex> lk(g_mutex);
-			g_path = dir + L"\\config\\HostRules.ini";
-		}
-
 		std::string error;
 		if (!Reload(error))
 			LOG_WARN("[HostRules] Player list not read: %s", error.c_str());
@@ -325,11 +213,12 @@ namespace PlayerList
 	bool Reload(std::string& error)
 	{
 		std::lock_guard<std::mutex> lk(g_mutex);
-		if (g_path.empty()) { error = "the rules file path is unknown"; return false; }
+		const std::wstring& path = IniFile::Path();
+		if (path.empty()) { error = "the rules file path is unknown"; return false; }
 
 		std::vector<std::string> lines;
 		bool exists = false, crlf = true;
-		if (!ReadFileLines(g_path, lines, exists, crlf))
+		if (!IniFile::ReadLines(path, lines, exists, crlf))
 		{
 			g_loadOk = false;
 			error = "the rules file could not be read";
