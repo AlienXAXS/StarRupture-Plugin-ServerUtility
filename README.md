@@ -105,7 +105,7 @@ What works today and what does not:
 - **Rules (`allow`, `deny`, `default`, `message`)** are saved and sent to the mod loader. This is the part that takes effect, on a mod loader that supports it.
 - **`minversion` and `modmin`** are saved only. Nothing enforces them yet (see "Removing players on an old mod loader" above).
 - **`who <id|number>`** shows what the plugin knows about one connected player: the player's ID, how many times their mod loader reported its feature list, and when it last did. The list of mods and features itself is not available to this plugin from the mod loader yet, so `who` cannot show it.
-- **Admins and `ExemptRules` players** are not yet exempt: the rules go to every player for now.
+- **Admins and `ExemptRules` players** are exempt: the host's rules are replaced for them by a set with nothing denied (the server message still shows). A player with `Sections=` gets the host's rules with those keys set to allow. Each player is sent their own set, and a change to the rules or to the player list is applied to players already connected.
 
 ### Admin API
 
@@ -317,7 +317,7 @@ All endpoints return `{"ok": false, "error": "<reason>"}` on failure, with an ap
 
 3. After the first launch, edit `Plugins\config\ServerUtility.ini` and set `Enabled=1` in the `[General]` section.
 
-> **Requires [StarRupture-ModLoader](https://github.com/AlienXAXS/StarRupture-ModLoader) v1.25.0 or newer** to be installed first.
+> **Requires [StarRupture-ModLoader](https://github.com/AlienXAXS/StarRupture-ModLoader)** to be installed first.
 
 > **Host rules need a mod loader with plugin interface 79 or newer.** Older loaders refuse to load this build of ServerUtility and say a newer loader is needed.
 

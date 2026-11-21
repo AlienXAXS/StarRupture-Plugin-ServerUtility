@@ -10,5 +10,4 @@
 - New `hostrules` RCON command and the [Policy], [Rules] and [MinVersions] sections of HostRules.ini: switch a mod's feature off for players (`hostrules deny BetterCheats.movement`, `Plugin.*` for a whole mod), set what a feature with no rule gets (`hostrules default allow|deny`) and the message players see (`hostrules message <text>`). The rules are saved and sent to the mod loader whenever they change. Needs mod loader with plugin interface 79 or newer; older loaders refuse to load it and say a newer loader is needed.
 - `hostrules minversion` and `hostrules modmin <plugin> <version>` are saved but not enforced yet: no mod loader reports a player's version to this plugin yet, so nothing is removed.
 - `hostrules who <id|number>` shows a connected player's ID, how many times their mod loader reported its feature list and when it last did. The list of mods and features itself is not available from the mod loader yet.
-- Admins and ExemptRules players are not yet exempt from the rules: the rules go to every player for now.
-- Needs mod loader v1.25.0 or newer.
+- Admins and ExemptRules players are exempt from the rules: they get a set with nothing denied (the server message still shows). A player with Sections= gets the host's rules with those keys allowed. Edits to the rules or the player list are applied to players already connected.
