@@ -3,6 +3,7 @@
 #include "cmd_args.h"
 #include "../rcon.h"
 #include "../state/server_state.h"
+#include "../../host_rules/admin_claim.h"
 #include "../../host_rules/host_rules.h"
 #include "../../host_rules/player_list.h"
 
@@ -27,7 +28,8 @@ namespace Cmd_Player
 			"Usage:\n"
 			"  admin add <id|number> [label]\n"
 			"  admin remove <id|number>\n"
-			"  admin clear                            take Admin off every entry\n";
+			"  admin clear                            take Admin off every entry\n"
+				"  admin code                             the claim code, while there is no admin\n";
 
 		using CmdArgs::NextWord;
 		using CmdArgs::Lower;
@@ -128,6 +130,9 @@ namespace Cmd_Player
 				return "Took Admin off " + std::to_string(changed) + " entries.\n";
 			}
 
+			if (sub == "code")
+				return AdminClaim::CodeReport();
+
 			if (sub == "add" || sub == "remove")
 			{
 				const std::string who = NextWord(rest);
@@ -160,7 +165,7 @@ namespace Cmd_Player
 		PluginCommands::Register("player", nullptr, "player [list|ids|set|remove|reload]",
 			"Show and edit the host's player list (admins and per-player exemptions)",
 			HandlePlayer);
-		PluginCommands::Register("admin", nullptr, "admin add|remove|clear",
+		PluginCommands::Register("admin", nullptr, "admin add|remove|clear|code",
 			"Add or remove an admin in the player list",
 			HandleAdmin);
 	}

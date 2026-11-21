@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <string>
 
+namespace SDK { class APlayerController; }
+
 // The host's rules: the [Policy], [Rules] and [MinVersions] sections of
 // Plugins\config\HostRules.ini, kept in memory and sent to the mod loader when
 // it has host rules support. Thread safe; the changes and Push are for the game
@@ -28,6 +30,10 @@ namespace HostRules
 	// Re-send each connected player's own rules after the rules or the player
 	// list changed. Runs on the game thread (posted when called from another).
 	void RefreshPlayers();
+
+	// Game thread only. Fills out with the connected players' controllers (at most
+	// max) and returns how many. Fresh each call: use them in this tick and do not keep them.
+	int ConnectedControllers(SDK::APlayerController** out, int max);
 
 	bool Reload(std::string& error);
 	RulesModel::Model Get();

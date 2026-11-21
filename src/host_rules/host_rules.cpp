@@ -2,6 +2,7 @@
 #include "ini_file.h"
 #include "player_ids.h"
 #include "player_list.h"
+#include "admin_claim.h"
 #include "../plugin_helpers.h"
 #include "../rcon/listed_players.h"
 
@@ -48,26 +49,9 @@ namespace
 
 	std::string PushText(const std::string& text);
 
-	// Game thread only. A controller read can fault when the object is already
-	// going away, so it sits in a function of its own (no objects with
-	// destructors, as __try needs).
-	SDK::APlayerState* StateOf(void* playerController)
-	{
-		__try
-		{
-			auto* pc = static_cast<SDK::APlayerController*>(playerController);
-			return pc ? pc->PlayerState : nullptr;
-		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
-		{
-			return nullptr;
-		}
-	}
-
 	std::string IdOf(void* playerController)
 	{
-		SDK::APlayerState* ps = StateOf(playerController);
-		return ps ? PlayerIds::Read(ps) : std::string();
+		return PlayerIds::OfController(playerController);
 	}
 
 	// Note a player whose loader reported its feature list.
@@ -169,6 +153,7 @@ namespace
 				g_waiting.erase(g_waiting.begin() + i);
 				RecordReported(id);
 				ApplyRules(pc, id, true);
+				AdminClaim::AskPlayer(pc, id);
 				continue;
 			}
 
@@ -259,6 +244,7 @@ namespace
 		RecordReported(id);
 #if PLUGIN_INTERFACE_VERSION >= 79
 		ApplyRules(playerController, id, true);
+		AdminClaim::AskPlayer(playerController, id);
 #endif
 	}
 
@@ -273,6 +259,8 @@ namespace
 		const std::string id = IdOf(exitingController);
 		if (id.empty())
 			return;
+
+		AdminClaim::PlayerLeft(id);
 
 		std::lock_guard<std::mutex> lk(g_mutex);
 		g_known.erase(std::remove_if(g_known.begin(), g_known.end(), [&](const Known& k) { return k.id == id; }), g_known.end());
@@ -412,6 +400,16 @@ namespace HostRules
 		auto* hooks2 = GetHooks();
 		if (hooks2 && hooks2->Players)
 			hooks2->Players->RegisterOnPlayerLeft(OnPlayerLeft);
+	}
+
+	int ConnectedControllers(SDK::APlayerController** out, int max)
+	{
+#if PLUGIN_INTERFACE_VERSION >= 79
+		return CollectControllers(PluginSdkRuntime::GetWorld(), out, max);
+#else
+		(void)out; (void)max;
+		return 0;
+#endif
 	}
 
 	void PushWhenGameThreadRuns()

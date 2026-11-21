@@ -51,6 +51,21 @@ namespace
 		return buf[0] != L'\0';
 	}
 
+	// A controller read can fault when the object is already going away, so it
+	// sits in a function of its own (no objects with destructors, as __try needs).
+	SDK::APlayerState* StateOf(void* playerController)
+	{
+		__try
+		{
+			auto* pc = static_cast<SDK::APlayerController*>(playerController);
+			return pc ? pc->PlayerState : nullptr;
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			return nullptr;
+		}
+	}
+
 	bool ReadGuarded(SDK::APlayerState* ps, wchar_t* buf)
 	{
 		__try
@@ -85,6 +100,16 @@ namespace PlayerIds
 		return out;
 #else
 		(void)ps;
+		return {};
+#endif
+	}
+
+	std::string OfController(void* playerController)
+	{
+#if PLAYER_IDS_HAS_SDK
+		return Read(StateOf(playerController));
+#else
+		(void)playerController;
 		return {};
 #endif
 	}

@@ -349,6 +349,8 @@
     <ClInclude Include="admin\endpoints\ep_inventory_give.h" />
     <ClInclude Include="admin\endpoints\wave_common.h" />
     <ClInclude Include="host_rules\removal.h" />
+    <ClInclude Include="host_rules\claim_model.h" />
+    <ClInclude Include="host_rules\admin_claim.h" />
     <ClInclude Include="host_rules\rules_model.h" />
     <ClInclude Include="host_rules\player_list.h" />
     <ClInclude Include="host_rules\ini_file.h" />
@@ -401,6 +403,8 @@
     <ClCompile Include="admin\endpoints\ep_wave_resume.cpp" />
     <ClCompile Include="admin\endpoints\ep_inventory_give.cpp" />
     <ClCompile Include="host_rules\removal.cpp" />
+    <ClCompile Include="host_rules\claim_model.cpp" />
+    <ClCompile Include="host_rules\admin_claim.cpp" />
     <ClCompile Include="host_rules\rules_model.cpp" />
     <ClCompile Include="host_rules\player_list.cpp" />
     <ClCompile Include="host_rules\ini_file.cpp" />
