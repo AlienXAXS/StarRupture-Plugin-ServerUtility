@@ -54,8 +54,8 @@ static void OnEngineInit()
 
 	// Auto-assign professions for players joining when MaxPlayers is patched.
 	// Here, not in PluginInit: it reads the profession by name from the loaded
-	// enum, which needs the game's objects loaded: the engine init callback
-	// runs once they are (on the loader's init thread, not the game thread).
+	// enum, which needs the game's objects loaded: the engine init callback runs
+	// on the loader's init thread, with the game thread parked until plugins load.
 	if (ServerUtilityConfig::Config::GetMaxPlayers() > 0)
 		AutoProfessionHook::Install();
 
