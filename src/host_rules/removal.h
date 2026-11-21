@@ -4,7 +4,7 @@
 
 namespace SDK { class APlayerController; }
 
-// Removing a player with a reason they can read (design 11.4).
+// Removing a player with a reason they can read.
 namespace Removal
 {
 	// Send the player to the main menu with this text. Game thread only.

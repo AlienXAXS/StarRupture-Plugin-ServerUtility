@@ -40,7 +40,7 @@ See the [vulnerability announcement](https://wiki.starrupture-utilities.com/en/d
 
 The groundwork is in place for a server setting that removes a player whose mod loader is older than a version you choose, and tells them why. A player without the mod loader is never affected. Nothing is removed yet: the setting, and the mod loader version that reports the player's version, come in a later release. Until then the log shows `[HostRules] This mod loader has no host rules support - minimum version removal is off`.
 
-The removal shows the player a short reason on the main menu, removes each player at most once per join, and skips players on the server's admin list.
+The removal sends the player to the main menu with a short written reason (whether the game displays that text has not been confirmed yet), removes each player at most once per join, and will skip players the host marks as exempt once the host's player list exists.
 
 ### Admin API
 

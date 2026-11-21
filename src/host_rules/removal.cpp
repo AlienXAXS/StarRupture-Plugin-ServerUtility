@@ -5,6 +5,8 @@
 #include "SDK/Engine_classes.hpp"
 #include "object_ref.h"
 
+#include <windows.h>
+
 #include <chrono>
 #include <string>
 #include <unordered_map>
@@ -14,7 +16,9 @@ namespace
 {
 	// The game's FText for a reason. Built once per distinct text and kept:
 	// an FText is a plain 16-byte handle to engine-owned data, the same
-	// pattern BetterDrone uses for its labels. Game thread only.
+	// pattern BetterDrone uses for its labels. The SDK's FString never frees
+	// the buffer it was built from and the engine text is never released by
+	// us, so the handle stays valid. Game thread only.
 	const SDK::FText* TextFor(const std::string& reason)
 	{
 		static std::unordered_map<std::string, SDK::FText> s_texts;
@@ -23,7 +27,13 @@ namespace
 		if (it != s_texts.end())
 			return &it->second;
 
-		const std::wstring wide(reason.begin(), reason.end());
+		std::wstring wide;
+		const int len = MultiByteToWideChar(CP_UTF8, 0, reason.c_str(), -1, nullptr, 0);
+		if (len > 1)
+		{
+			wide.resize(static_cast<size_t>(len));
+			MultiByteToWideChar(CP_UTF8, 0, reason.c_str(), -1, wide.data(), len);
+		}
 		const SDK::FText text = SDK::UKismetTextLibrary::Conv_StringToText(SDK::FString(wide.c_str()));
 		return &s_texts.emplace(reason, text).first->second;
 	}
@@ -68,6 +78,36 @@ namespace
 		return "unknown";
 	}
 
+	// The loader's controller pointer can be stale by the time the callback
+	// runs, so every read of it sits behind a structured-exception guard, as
+	// in the admin kick. Kept apart from the string work because __try cannot
+	// share a function with objects that need unwinding.
+	void RemoveChecked(SDK::APlayerController* pc, const char* plainReason)
+	{
+		const HostRulesPending::PlayerFlags flags = HostRulesPending::FlagsFor(pc);
+		if (flags.admin || flags.exemptVersion)
+			return;
+
+		if (AlreadyRemoved(pc))
+			return;
+
+		LOG_INFO("[HostRules] Player '%s' removed: %s", PlayerName(pc).c_str(), plainReason);
+		Removal::Kick(pc, plainReason);
+	}
+
+	bool RemoveGuarded(SDK::APlayerController* pc, const char* plainReason)
+	{
+		__try
+		{
+			RemoveChecked(pc, plainReason);
+			return true;
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			return false;
+		}
+	}
+
 	void OnBelowMinimum(void* playerController, const char* plainReason)
 	{
 		auto* hooks = GetHooks();
@@ -81,15 +121,8 @@ namespace
 		if (!pc || !plainReason)
 			return;
 
-		const HostRulesPending::PlayerFlags flags = HostRulesPending::FlagsFor(pc);
-		if (flags.admin || flags.exemptVersion)
-			return;
-
-		if (AlreadyRemoved(pc))
-			return;
-
-		LOG_INFO("[HostRules] Player '%s' removed: %s", PlayerName(pc).c_str(), plainReason);
-		Removal::Kick(pc, plainReason);
+		if (!RemoveGuarded(pc, plainReason))
+			LOG_WARN("[HostRules] Exception while removing a player - skipped");
 	}
 }
 
