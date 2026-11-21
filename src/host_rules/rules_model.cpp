@@ -10,6 +10,7 @@ namespace RulesModel
 		constexpr size_t kMaxRules     = 2047;
 		constexpr size_t kMaxMessage   = 200;
 		constexpr size_t kMaxNameBytes = 128;
+		constexpr int    kMaxVersionDigits = 9;   // keeps each number inside 32 bits
 
 		std::string Lower(std::string s)
 		{
@@ -86,9 +87,13 @@ namespace RulesModel
 		int parts = 0;
 		while (parts < 4 && *p >= '0' && *p <= '9')
 		{
-			while (*p >= '0' && *p <= '9') ++p;
+			int digits = 0;
+			while (*p >= '0' && *p <= '9') { ++p; ++digits; }
+			if (digits > kMaxVersionDigits)
+				return false;
 			++parts;
-			if (*p == '.') ++p; else break;
+			// A dot belongs to the version only when another number follows it.
+			if (*p == '.' && p[1] >= '0' && p[1] <= '9') ++p; else break;
 		}
 		return parts >= 2 && (*p == '\0' || *p == '-' || *p == '+') && !HasControl(version);
 	}

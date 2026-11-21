@@ -100,6 +100,8 @@ int main()
 	// Versions.
 	CHECK(ValidVersion("0.11.0") && ValidVersion("v1.27") && ValidVersion("1.2.3.4") && ValidVersion("1.27.0-dev.1"));
 	CHECK(!ValidVersion("") && !ValidVersion("1") && !ValidVersion("v") && !ValidVersion("1.x") && !ValidVersion("1.2.3.4.5") && !ValidVersion("dev"));
+	CHECK(!ValidVersion("1.2.") && !ValidVersion("1.2.3.4.") && !ValidVersion("1..2") && !ValidVersion(".1.2") && !ValidVersion("1.2.-dev"));
+	CHECK(ValidVersion("999999999.0") && !ValidVersion("1234567890.0") && !ValidVersion("1.99999999999"));
 
 	// What is written back reads back the same.
 	m = Model{};
