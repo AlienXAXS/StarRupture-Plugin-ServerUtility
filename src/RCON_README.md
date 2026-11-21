@@ -131,7 +131,7 @@ Show and edit the host's player list, which is the `[Players]` section of `Plugi
 | `player remove <id\|number>` | Delete an entry |
 | `player reload` | Re-read the file after a hand edit |
 
-Flags for `set`: `admin`, `exemptversion`, `exemptrules`, `sections=<key>;<key>`, `label=<text>` (the label runs to the end of the line). A leading `-` takes a flag off, for example `-admin`.
+Flags for `set`: `admin`, `exemptversion`, `exemptrules`, `sections=<key>;<key>`, `label=<text>` (the label runs to the end of the line). A leading `-` takes a flag off, for example `-admin`. A section key may not hold spaces, control characters or `\| = ; [ ]`, or start with `#`. The reply names the player the number or ID reached. After editing `HostRules.ini` by hand, run `player reload` (or `hostrules reload`) before changing players with RCON or the panel.
 
 A 1-3 digit argument is a list number, the number `player ids` shows. Anything else is an ID.
 
@@ -141,9 +141,9 @@ Players (2 connected):
   [1] Alice  76561198000000001
   [2] Bob    76561198000000002
 > player set 2 exemptversion label=Bob
-Saved: 76561198000000002=Bob|ExemptVersion
+Saved for Bob (76561198000000002): 76561198000000002=Bob|ExemptVersion
 > player remove 2
-Removed the entry for 76561198000000002.
+Removed the entry for Bob (76561198000000002).
 ```
 
 ### `admin add|remove|clear|code`
@@ -152,7 +152,7 @@ Shortcuts for the Admin flag, and the claim code for the first admin.
 
 ```
 > admin add 1 Alice
-Saved: 76561198000000001=Alice|Admin
+Saved for Alice (76561198000000001): 76561198000000001=Alice|Admin
 > admin remove 76561198000000001
 > admin clear
 Took Admin off 0 entries.
@@ -183,7 +183,7 @@ Show and edit the host's rules for mod features: the `[Policy]`, `[Rules]` and `
 | `hostrules default allow\|deny` | What a feature with no rule gets |
 | `hostrules message [text\|off]` | The line players see when a feature is off; with no text, shows the rules. `off` clears it |
 | `hostrules minversion [version\|off]` | Minimum mod loader version. A player below it is removed. With no argument, shows the current value; `off` clears it |
-| `hostrules modmin [<plugin> <version\|off>]` | Minimum version of one mod. A player whose copy is older is removed. With no argument, lists the minimums; `off` clears one. `loader` is refused: use `minversion` |
+| `hostrules modmin [<plugin> <version\|wire\|off>]` | Minimum version of one mod (`wire`: the copy must pass the mod loader's wire check). A player whose copy is older is removed. With no argument, lists the minimums; `off` clears one. `loader` is refused: use `minversion` |
 | `hostrules reload` | Re-read the file after a hand edit |
 | `hostrules who <id\|number>` | What a connected player's mod loader reported: its version and each mod's features, on or off. A 1-3 digit argument is the number from `player ids`; anything else is an ID |
 

@@ -38,7 +38,7 @@ See the [vulnerability announcement](https://wiki.starrupture-utilities.com/en/d
 
 ### Removing players on an old mod loader
 
-The host can set a minimum mod loader version (`hostrules minversion`) and a minimum version for one mod (`hostrules modmin <plugin> <version>`). A player whose mod loader or mod is older is removed: they go to the main menu with a short written reason, for example "This server needs ModLoader ... or newer". Each player is removed at most once per join. **Nothing is removed while both minimums are off**, which is the default.
+The host can set a minimum mod loader version (`hostrules minversion`) and a minimum version for one mod (`hostrules modmin <plugin> <version|wire>`). A player whose mod loader or mod is older is removed: they go to the main menu with a short written reason, for example "This server needs ModLoader ... or newer". Each player is removed at most once per join. **Nothing is removed while both minimums are off**, which is the default.
 
 Exempt: a player with `ExemptVersion` or `Admin` in the player list (below) is kept, and the log says `Player 'X' is below a minimum version but exempt - kept`. Never removed: a player without the mod loader (vanilla), a player on a development build, and a player who does not have the named mod, because the mod loader reports none of them. A removal is logged as `[HostRules] Player 'X' removed: <reason>`.
 
@@ -61,7 +61,7 @@ The text before `=` is the player's ID, the text after it is a label for you, an
 | `Admin` | The player is an admin. Admin also exempts them from the version removal and from the rules. |
 | `ExemptVersion` | Never removed for an old mod loader. |
 | `ExemptRules` | Exempt from the host's rules. |
-| `Sections=<key>;<key>` | Rule sections that apply to this player. |
+| `Sections=<key>;<key>` | Rule sections that apply to this player. A key may not hold spaces, control characters or `\| = ; [ ]`, or start with `#`; such a key is refused. |
 
 The server reads each player's ID from the game; the client does not send it. Whether a client could change it has not been tested, so do not treat the list as a security guarantee. Other sections and comments in `HostRules.ini` are kept when the plugin saves the file. After editing the file by hand, run `player reload`.
 
@@ -84,7 +84,7 @@ What a player sees: when a player joins with the mod loader and the list has no 
 - **Not me:** closes the prompt. That player is not asked again until the server restarts.
 - **When it ends:** the code is gone once the list has an admin, however that happened (claim, `admin add`, a hand edit and `player reload`). A restart makes a new code if the list is still empty.
 
-Every player with the mod loader is asked once per server run while there is no admin, so the host should be ready to tell the first player the code. A player without the mod loader, or with an older one, is never asked. **The prompt needs a mod loader with plugin interface 79 or newer on both the server and the player's side.** On an older server loader the claim is off and `admin code` says to use `admin add`.
+Every player with the mod loader is asked once per server run while there is no admin, so the host should be ready to tell the first player the code. A player without the mod loader, or with an older one, is never asked. **The prompt needs a mod loader with plugin interface 79 or newer on both the server and the player's side.** On a mod loader without the prompt the claim is off and `admin code` says to use `admin add`.
 
 To turn asking off, set `AdminPrompt=0` in `[Policy]` (`off`, `false` and `no` also work). The code is still shown to the host and `admin add` still works.
 
@@ -126,12 +126,12 @@ hostrules default allow
 hostrules unset BetterCheats.movement
 ```
 
-After editing the file by hand, run `hostrules reload`. A line the plugin does not understand is logged, left in the file and ignored.
+After editing the file by hand, run `hostrules reload`. Run `player reload` (or `hostrules reload`) before changing players with RCON or the panel, or the hand edit to `[Players]` is overwritten. A line the plugin does not understand is logged, left in the file and ignored.
 
 What works today and what does not:
 
 - **Rules (`allow`, `deny`, `default`, `message`)** are saved and sent to the mod loader. This is the part that takes effect, on a mod loader that supports it.
-- **`minversion` and `modmin`** are saved, sent to the mod loader and enforced: a player below a minimum is removed (see "Removing players on an old mod loader" above).
+- **`minversion` and `modmin`** (`modmin <plugin> wire` uses the mod loader's wire check instead of a version) are saved, sent to the mod loader and enforced: a player below a minimum is removed (see "Removing players on an old mod loader" above).
 - **`who <id|number>`** shows one connected player: the player's ID, how many times their mod loader reported its features and when it last did, the mod loader version and the mods with each feature on or off. A player whose mod loader sent nothing shows `no report (vanilla or older loader)`.
 - **Admins and `ExemptRules` players** are exempt: the host's rules are replaced for them by a set with nothing denied (the server message still shows). A player with `Sections=` gets the host's rules with those keys set to allow. Each player is sent their own set, and a change to the rules or to the player list is applied to players already connected.
 
@@ -168,7 +168,7 @@ Response:
 
 ##### `POST /players/list`
 
-List all currently connected players with their index, name, ping, IP and player list status. `id` is the player's ID; `label`, `admin`, `exempt_version`, `exempt_rules` and `sections` come from the player list (see above) and are empty or `false` for a player who has no entry.
+List all currently connected players with their index, name, ping, IP (empty in this build) and player list status. `id` is the player's ID; `label`, `admin`, `exempt_version`, `exempt_rules` and `sections` come from the player list (see above) and are empty or `false` for a player who has no entry.
 
 ```bash
 curl -s -X POST http://localhost:7777/ServerUtility/api/players/list \
@@ -178,12 +178,12 @@ curl -s -X POST http://localhost:7777/ServerUtility/api/players/list \
 
 Response:
 ```json
-{"ok": true, "players": [{"index": 0, "name": "Alice", "ping": 42, "ip": "192.168.1.10", "id": "76561198000000001", "label": "Alice", "admin": true, "exempt_version": true, "exempt_rules": true, "sections": []}]}
+{"ok": true, "players": [{"index": 0, "name": "Alice", "ping": 42, "ip": "", "id": "76561198000000001", "label": "Alice", "admin": true, "exempt_version": true, "exempt_rules": true, "sections": []}]}
 ```
 
 ##### `POST /players/kick`
 
-Kick a player by their index from `/players/list`. Send `player_name` (the name the list showed) as well, and the request fails with "player not found" if that index no longer names that player. `/players/ban` and `/inventory/give` take `player_name` the same way.
+Kick a player. Send `player_id` (the `id` from `/players/list`) to name the player by ID. Without it, send `player_index` and `player_name` from the list: the name must belong to exactly one connected player, at that index, or the request fails ("player not found", or "more than one connected player has that name, send player_id"). `/players/ban` and `/inventory/give` name the player the same way. A `player_index` without a name is refused.
 
 ```bash
 curl -s -X POST http://localhost:7777/ServerUtility/api/players/kick \
@@ -198,7 +198,7 @@ Response:
 
 ##### `POST /players/ban`
 
-Ban a player by index. Kicks them immediately and appends their IP and name to `Plugins\ServerUtility\bans.txt`. **Nothing reads `bans.txt`, so a ban is only a kick plus a log line: the player can rejoin.** There is no unban.
+Ban a player (named as for kick). Kicks them immediately and appends their player ID and name to `Plugins\ServerUtility\bans.txt` (and the IP, when it is known). **Nothing reads `bans.txt`, so a ban is only a kick plus a record: the player can rejoin.** If the record cannot be written the player is still kicked and the reply is `{"ok": false, "error": "kicked, but the ban could not be recorded"}`. There is no unban.
 
 ```bash
 curl -s -X POST http://localhost:7777/ServerUtility/api/players/ban \
