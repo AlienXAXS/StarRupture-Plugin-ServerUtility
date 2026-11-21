@@ -122,7 +122,7 @@ namespace Cmd_Save
 		// Optional: a miss disables one RCON command, not the whole server
 		// utility, which is what the old scan-at-register path did.
 		uintptr_t addr = ScanUtil::ResolveFunction(self, scanner,
-			"UCrSaveSubsystem::SaveNextSaveGame", SAVE_PATTERN);
+			ServerUtilityFields::SaveNextSaveGame, SAVE_PATTERN);
 		if (addr)
 		{
 			g_saveFunc = reinterpret_cast<SaveNextSaveGame_t>(addr);

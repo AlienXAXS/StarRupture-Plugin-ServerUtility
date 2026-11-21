@@ -7,6 +7,7 @@
 #  include "SDK/Engine_classes.hpp"
 #  include "SDK/Chimera_classes.hpp"
 #  include "SDK/AuItems_classes.hpp"
+#  include "server_utility_fields.h"
 #  define INV_HAS_SDK 1
 #else
 #  define INV_HAS_SDK 0
@@ -18,10 +19,14 @@
 // Separated from the SEH helper so std::string objects don't live in the __try frame.
 static SDK::UAuItemDataBase* FindItemByPath(SDK::UAuItemDataBaseSubsystem* itemSubsys, const char* assetPath)
 {
-	const int32_t itemCount = itemSubsys->ItemDataBaseArray.Num();
+	const auto* items = ServerUtilityFields::ItemDataBaseArray.In(itemSubsys);
+	if (!items)
+		return nullptr;
+
+	const int32_t itemCount = items->Num();
 	for (int32_t i = 0; i < itemCount; ++i)
 	{
-		SDK::UAuItemDataBase* item = itemSubsys->ItemDataBaseArray[i];
+		SDK::UAuItemDataBase* item = (*items)[i];
 		if (!item) continue;
 
 		std::string fullName = item->GetFullName();

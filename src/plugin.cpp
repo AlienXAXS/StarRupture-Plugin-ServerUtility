@@ -3,6 +3,7 @@
 #include "plugin_config.h"
 #include "game_signatures.h"
 #include "scan_helpers.h"
+#include "server_utility_fields.h"
 #include "hooks/parse_settings/parse_settings.h"
 #include "hooks/max_players/max_players.h"
 #include "hooks/auto_profession/auto_profession.h"
@@ -35,7 +36,9 @@ static PluginInfo s_pluginInfo = {
 	"AlienX",
 	"Provides dedicated-server settings via command-line parameters, bypassing DSSettings.txt as well as other various fixes",
 	PLUGIN_INTERFACE_VERSION,
-	PLUGIN_TARGET_SERVER
+	PLUGIN_TARGET_SERVER,
+	PLUGIN_GAME_BUILT_CL,
+	PLUGIN_MAP_MIGRATED
 };
 
 // Resolved during OnPluginLoadHooks; 0 means the pattern missed on this build.
@@ -92,10 +95,14 @@ __declspec(dllexport) void OnPluginLoadHooks(IPluginSelf* self, IPluginHookScann
 {
 	g_self = self;
 
+	// Every game member the plugin reads, from the loader's map for the running
+	// build. A miss is recorded with the loader, which refuses the plugin.
+	ServerUtilityFields::Resolve(self, scanner);
+
 	// Optional: without it the DSSettings command-line bypass is skipped, but the
 	// RCON server and the rest of the plugin still work.
 	g_parseSettingsAddr = ScanUtil::ResolveFunction(self, scanner,
-		"UCrDedicatedServerSettingsComp::ParseSettings",
+		ServerUtilityFields::ParseSettings,
 		GameSig::DEDSERVER_SETTINGS_COMP_PARSE_SETTINGS);
 
 	MaxPlayersHook::Resolve(self, scanner);
@@ -106,6 +113,10 @@ __declspec(dllexport) void OnPluginLoadHooks(IPluginSelf* self, IPluginHookScann
 
 __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 {
+	// First, before any early return: off its game build the loader refuses a
+	// migrated plugin whose PluginInit did not ask for the Game-SDK globals.
+	PluginSdkRuntime::Init(self->hooks);
+
 	g_self = self;
 
 	LOG_INFO("Plugin initialising...");

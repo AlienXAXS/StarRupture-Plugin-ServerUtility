@@ -1,6 +1,6 @@
 ﻿#include "parse_settings.h"
 #include "plugin_helpers.h"
-#include "game_signatures.h"
+#include "server_utility_fields.h"
 
 #include <Windows.h>
 #include <cstdint>
@@ -10,53 +10,38 @@
 #include <string>
 
 // ---------------------------------------------------------------------------
-// UCrDedicatedServerSettingsComp memory layout
+// UCrDedicatedServerSettingsComp members
 //
-// ParseSettings writes five fields on the component object.  The offsets
-// are defined in game_signatures.h (GameSig::DedicatedServerSettingsComp)
-// and were derived from the IDA decompilation of the original function.
-// ---------------------------------------------------------------------------
-
-// Minimal FString mirror so we can manipulate engine strings from outside.
-// Layout matches UE4/UE5 TArray<TCHAR> used as FString storage.
-struct EngineString
-{
-	wchar_t* Data; // AllocatorInstance.Data
-	int32_t Num; // ArrayNum  (includes null terminator)
-	int32_t Max; // ArrayMax
-};
-
-// ---------------------------------------------------------------------------
-// Field accessor namespace for UCrDedicatedServerSettingsComp
-// Offsets come from game_signatures.h.
+// ParseSettings writes five members on the component object. Where they lie
+// comes from the loader's map for the running build (ServerUtilityFields); the
+// accessors below are null only when a member did not resolve, which the loader
+// has already refused the plugin for.
 // ---------------------------------------------------------------------------
 namespace FieldAccessor
 {
-	using namespace GameSig::DedicatedServerSettingsComp;
-
 	inline EngineString* GetSessionName(void* thisPtr)
 	{
-		return reinterpret_cast<EngineString*>(reinterpret_cast<uint8_t*>(thisPtr) + OFFSET_SESSION_NAME);
+		return ServerUtilityFields::SessionName.In(thisPtr);
 	}
 
 	inline EngineString* GetSaveGameName(void* thisPtr)
 	{
-		return reinterpret_cast<EngineString*>(reinterpret_cast<uint8_t*>(thisPtr) + OFFSET_SAVEGAME_NAME);
+		return ServerUtilityFields::SaveGameName.In(thisPtr);
 	}
 
 	inline int32_t* GetSaveGameInterval(void* thisPtr)
 	{
-		return reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(thisPtr) + OFFSET_SAVE_INTERVAL);
+		return ServerUtilityFields::SaveGameInterval.In(thisPtr);
 	}
 
 	inline bool* GetStartNewGame(void* thisPtr)
 	{
-		return reinterpret_cast<bool*>(reinterpret_cast<uint8_t*>(thisPtr) + OFFSET_START_NEW_GAME);
+		return ServerUtilityFields::StartNewGame.In(thisPtr);
 	}
 
 	inline bool* GetLoadSavedGame(void* thisPtr)
 	{
-		return reinterpret_cast<bool*>(reinterpret_cast<uint8_t*>(thisPtr) + OFFSET_LOAD_SAVED_GAME);
+		return ServerUtilityFields::LoadSavedGame.In(thisPtr);
 	}
 }
 

@@ -6,12 +6,11 @@
 // ---------------------------------------------------------------------------
 // game_signatures.h
 //
-// Single source of truth for every AOB pattern, struct-field offset and
-// instruction-encoding constant the plugin depends on in the game binary.
-//
-// When a game update breaks the plugin, this is the only file that should
-// need touching.  Each entry records where it came from (IDA) so it can be
-// re-derived against the new build.
+// The AOB patterns and instruction-encoding constants the plugin depends on
+// in the game binary. The loader's version map is asked first for every
+// function (the keys are in server_utility_fields.h); the patterns here are
+// the fallback for a loader or build whose map has no row. Each entry records
+// where it came from (IDA) so it can be re-derived against the new build.
 //
 // Pattern syntax is the modloader scanner's: space-separated hex bytes with
 // "??" for wildcards.
@@ -19,7 +18,7 @@
 namespace GameSig
 {
 	// =======================================================================
-	// Function prologue patterns (resolved via IPluginHookScanner)
+	// Function prologue patterns (the fallback when the map has no row)
 	// =======================================================================
 
 	// UCrDedicatedServerSettingsComp::ParseSettings
@@ -53,51 +52,38 @@ namespace GameSig
 
 
 	// =======================================================================
-	// Struct-field offsets
+	// Engine container layout
+	//
+	// Where each game member lies is the loader's map's to say (see
+	// server_utility_fields.h). What follows is the engine's own container
+	// layout inside UCrReplicationGraph::ClassRepNodePolicies, which is the same
+	// on every build and so has no key.
 	// =======================================================================
 
-	// UCrDedicatedServerSettingsComp
-	// Derived from the IDA decompilation of ParseSettings.
-	namespace DedicatedServerSettingsComp
-	{
-		inline constexpr size_t OFFSET_SESSION_NAME     = 0xB8; // FString — (char*)this + 184
-		inline constexpr size_t OFFSET_SAVEGAME_NAME    = 0xC8; // FString — (char*)this + 200
-		inline constexpr size_t OFFSET_SAVE_INTERVAL    = 0xD8; // int32   — (_DWORD*)this + 54 → 216
-		inline constexpr size_t OFFSET_START_NEW_GAME   = 0xDC; // bool    — (_BYTE*)this + 220
-		inline constexpr size_t OFFSET_LOAD_SAVED_GAME  = 0xDD; // bool    — (_BYTE*)this + 221
-	}
-
-	// UCrReplicationGraph::ClassRepNodePolicies
 	// TClassMap<EClassRepNodeMapping> = { TFunction InitNewElement; TMap<FObjectKey,
-	// EClassRepNodeMapping> Map; }. Not a UPROPERTY, so the SDK shows Pad_5D8 there.
-	// Offsets read from the zero-initialising stores in UCrReplicationGraph::
-	// UCrReplicationGraph (0x146fe7700): the map's Elements.Data at +0x610, ArrayNum
-	// +0x618, ArrayMax +0x61C, inline allocation-flag words +0x620, secondary bits
-	// pointer +0x630, NumBits +0x638 (MaxBits +0x63C = 128, FirstFreeIndex +0x640 = -1).
-	// PrintRepNodePolicies (0x1470098c0) indexes elements by `20 * Index`:
+	// EClassRepNodeMapping> Map; }. The TFunction is 0x30 bytes, so the map starts
+	// that far into the member. Its positions, read from the zero-initialising
+	// stores in UCrReplicationGraph::UCrReplicationGraph: Elements.Data at +0x00,
+	// ArrayNum +0x08, ArrayMax +0x0C, inline allocation-flag words +0x10, secondary
+	// bits pointer +0x20, NumBits +0x28 (MaxBits +0x2C = 128, FirstFreeIndex +0x30
+	// = -1). PrintRepNodePolicies indexes elements by `20 * Index`:
 	//   FObjectKey { int32 ObjectIndex; int32 ObjectSerialNumber; }  +0
 	//   uint32 EClassRepNodeMapping                                   +8
 	//   int32 HashNextId, int32 HashIndex                            +12
 	namespace ReplicationGraph
 	{
-		inline constexpr size_t OFFSET_POLICIES_ELEMENTS       = 0x610;
-		inline constexpr size_t OFFSET_POLICIES_ARRAY_NUM      = 0x618;
-		inline constexpr size_t OFFSET_POLICIES_ARRAY_MAX      = 0x61C;
-		inline constexpr size_t OFFSET_POLICIES_BITS_INLINE    = 0x620;
-		inline constexpr size_t OFFSET_POLICIES_BITS_SECONDARY = 0x630;
-		inline constexpr size_t OFFSET_POLICIES_NUM_BITS       = 0x638;
+		inline constexpr size_t POLICIES_MAP                   = 0x30;
+		inline constexpr size_t OFFSET_MAP_ELEMENTS            = 0x00;
+		inline constexpr size_t OFFSET_MAP_ARRAY_NUM           = 0x08;
+		inline constexpr size_t OFFSET_MAP_ARRAY_MAX           = 0x0C;
+		inline constexpr size_t OFFSET_MAP_BITS_INLINE         = 0x10;
+		inline constexpr size_t OFFSET_MAP_BITS_SECONDARY      = 0x20;
+		inline constexpr size_t OFFSET_MAP_NUM_BITS            = 0x28;
 		inline constexpr int    POLICIES_BITS_INLINE_CAPACITY  = 128;   // 4 x uint32
 		inline constexpr size_t POLICIES_ELEMENT_SIZE          = 20;
 		inline constexpr size_t POLICIES_KEY_OBJECT_INDEX      = 0;
 		inline constexpr size_t POLICIES_KEY_SERIAL_NUMBER     = 4;
 		inline constexpr size_t POLICIES_VALUE                 = 8;
-	}
-
-	// FUObjectItem { UObject* Object; int32 Flags; int32 ClusterRootIndex;
-	//                int32 SerialNumber; } -- 0x18 bytes, matching the SDK's Pad_8[0x10].
-	namespace UObjectItem
-	{
-		inline constexpr size_t OFFSET_SERIAL_NUMBER = 0x10;
 	}
 
 	// =======================================================================

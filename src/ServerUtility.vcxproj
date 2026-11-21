@@ -323,6 +323,7 @@
     <ClInclude Include="plugin_helpers.h" />
     <ClInclude Include="game_signatures.h" />
     <ClInclude Include="scan_helpers.h" />
+    <ClInclude Include="server_utility_fields.h" />
     <ClInclude Include="plugin_interface.h" />
     <ClInclude Include="rcon\commands\cmd_save.h" />
     <ClInclude Include="rcon\rcon.h" />

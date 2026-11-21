@@ -1,5 +1,6 @@
 #include "gatherable_relevancy.h"
 #include "scan_helpers.h"
+#include "server_utility_fields.h"
 #include "plugin_helpers.h"
 #include "game_signatures.h"
 
@@ -61,9 +62,9 @@ void GatherableRelevancyFix::Resolve(IPluginSelf* self, IPluginHookScanner* scan
 		return;
 
 	g_addNetworkActor = reinterpret_cast<RepGraphActorFn>(ScanUtil::ResolveFunction(self, scanner,
-		"UReplicationGraph::AddNetworkActor", GameSig::REPGRAPH_ADD_NETWORK_ACTOR));
+		ServerUtilityFields::AddNetworkActor, GameSig::REPGRAPH_ADD_NETWORK_ACTOR));
 	g_removeNetworkActor = reinterpret_cast<RepGraphActorFn>(ScanUtil::ResolveFunction(self, scanner,
-		"UReplicationGraph::RemoveNetworkActor", GameSig::REPGRAPH_REMOVE_NETWORK_ACTOR));
+		ServerUtilityFields::RemoveNetworkActor, GameSig::REPGRAPH_REMOVE_NETWORK_ACTOR));
 }
 
 #if GATHERABLE_FIX_HAS_SDK
@@ -90,10 +91,8 @@ static int32_t GetObjectSerialNumber(int32_t index)
 	if (!items)
 		return 0;
 
-	const auto* item = reinterpret_cast<const uint8_t*>(&items[inChunk]);
-	int32_t serial = 0;
-	std::memcpy(&serial, item + GameSig::UObjectItem::OFFSET_SERIAL_NUMBER, sizeof(serial));
-	return serial;
+	const int32_t* serial = ServerUtilityFields::ObjectItemSerialNumber.In(static_cast<const void*>(&items[inChunk]));
+	return serial ? *serial : 0;
 }
 
 // Live (non-CDO) instances of a class, by class name. Walks GObjects once.
@@ -143,40 +142,54 @@ static std::vector<T*> FindInstancesOf(SDK::UClass* cls)
 //
 // UCrReplicationGraph::ClassRepNodePolicies is a TClassMap: a TFunction
 // followed by TMap<FObjectKey, EClassRepNodeMapping>. Neither is a UPROPERTY,
-// so the SDK shows only padding; the map's position and the 20-byte element
-// (FObjectKey 8, value 4, HashNextId 4, HashIndex 4) come from the class
-// constructor and PrintRepNodePolicies in the server binary -- see
-// game_signatures.h. Returns the number of entries changed.
+// so the SDK shows only padding. The member's offset comes from the loader's
+// map (ServerUtilityFields::ClassRepNodePolicies); the map's position inside it
+// and the 20-byte element (FObjectKey 8, value 4, HashNextId 4, HashIndex 4)
+// are the engine's container layout, from the class constructor and
+// PrintRepNodePolicies in the server binary -- see game_signatures.h. Returns
+// the number of entries changed.
 static int PatchClassPolicy(SDK::UCrReplicationGraph* graph, SDK::UClass* cls, uint32_t newValue)
 {
 	namespace RG = GameSig::ReplicationGraph;
 
-	const auto base = reinterpret_cast<uint8_t*>(graph);
+	// The farthest read below is the map's NumBits; it has to lie inside the
+	// block the loader's row sizes.
+	static_assert(RG::POLICIES_MAP + RG::OFFSET_MAP_NUM_BITS + sizeof(int32_t) <= sizeof(ClassRepNodePolicyBlock),
+	              "the policy map must lie inside ClassRepNodePolicies");
+
+	uint8_t* policies = reinterpret_cast<uint8_t*>(ServerUtilityFields::ClassRepNodePolicies.In(graph));
+	if (!policies)
+	{
+		LOG_ERROR("[GatherableFix] ClassRepNodePolicies did not resolve - cannot patch the live graph");
+		return -1;
+	}
+	const auto base = policies + RG::POLICIES_MAP;
 
 	uint8_t* elements = nullptr;
 	int32_t  arrayNum = 0, arrayMax = 0, numBits = 0;
-	std::memcpy(&elements, base + RG::OFFSET_POLICIES_ELEMENTS,  sizeof(elements));
-	std::memcpy(&arrayNum, base + RG::OFFSET_POLICIES_ARRAY_NUM, sizeof(arrayNum));
-	std::memcpy(&arrayMax, base + RG::OFFSET_POLICIES_ARRAY_MAX, sizeof(arrayMax));
-	std::memcpy(&numBits,  base + RG::OFFSET_POLICIES_NUM_BITS,  sizeof(numBits));
+	std::memcpy(&elements, base + RG::OFFSET_MAP_ELEMENTS,  sizeof(elements));
+	std::memcpy(&arrayNum, base + RG::OFFSET_MAP_ARRAY_NUM, sizeof(arrayNum));
+	std::memcpy(&arrayMax, base + RG::OFFSET_MAP_ARRAY_MAX, sizeof(arrayMax));
+	std::memcpy(&numBits,  base + RG::OFFSET_MAP_NUM_BITS,  sizeof(numBits));
 
 	// The one sanity check that catches a wrong offset before it is trusted:
 	// a TSparseArray keeps these three consistent, garbage does not.
 	if (!elements || arrayNum < 0 || arrayNum > arrayMax || arrayMax > 65536 || numBits != arrayNum)
 	{
-		LOG_ERROR("[GatherableFix] ClassRepNodePolicies at graph+0x%zX does not look like a TMap "
-		          "(data=%p num=%d max=%d bits=%d) - offsets need re-deriving for this build",
-		          RG::OFFSET_POLICIES_ELEMENTS, static_cast<void*>(elements), arrayNum, arrayMax, numBits);
+		LOG_ERROR("[GatherableFix] ClassRepNodePolicies map at graph+0x%zX does not look like a TMap "
+		          "(data=%p num=%d max=%d bits=%d) - the layout needs re-deriving for this build",
+		          static_cast<size_t>(base - reinterpret_cast<uint8_t*>(graph)),
+		          static_cast<void*>(elements), arrayNum, arrayMax, numBits);
 		return -1;
 	}
 
 	// Allocation bits: TInlineAllocator<4> words, or a heap block once the
 	// sparse array outgrows 128 slots.
-	const uint32_t* bits = reinterpret_cast<const uint32_t*>(base + RG::OFFSET_POLICIES_BITS_INLINE);
+	const uint32_t* bits = reinterpret_cast<const uint32_t*>(base + RG::OFFSET_MAP_BITS_INLINE);
 	if (numBits > RG::POLICIES_BITS_INLINE_CAPACITY)
 	{
 		const uint32_t* heapBits = nullptr;
-		std::memcpy(&heapBits, base + RG::OFFSET_POLICIES_BITS_SECONDARY, sizeof(heapBits));
+		std::memcpy(&heapBits, base + RG::OFFSET_MAP_BITS_SECONDARY, sizeof(heapBits));
 		if (!heapBits)
 		{
 			LOG_ERROR("[GatherableFix] ClassRepNodePolicies has %d slots but no allocation bits", numBits);
@@ -342,12 +355,15 @@ static bool ApplyToLiveGraph()
 // simply told the truth.
 // ---------------------------------------------------------------------------
 template <typename T>
-static void CollectLocalSeeds(std::map<int32_t, int>& histogram, int& total)
+static void CollectLocalSeeds(const PluginField<int32_t>& localSeed, std::map<int32_t, int>& histogram, int& total)
 {
 	for (T* actor : FindInstancesOf<T>(T::StaticClass()))
 	{
-		++histogram[actor->LocalSeed];
-		++total;
+		if (const int32_t* seed = localSeed.In(actor))
+		{
+			++histogram[*seed];
+			++total;
+		}
 	}
 }
 
@@ -363,9 +379,9 @@ static bool ResyncSeed()
 
 	std::map<int32_t, int> histogram;
 	int total = 0;
-	CollectLocalSeeds<SDK::ACrPCGGatherableSpawnerVolume>(histogram, total);
-	CollectLocalSeeds<SDK::ACrPCGVolume>(histogram, total);
-	CollectLocalSeeds<SDK::ACrPCGActorBase>(histogram, total);
+	CollectLocalSeeds<SDK::ACrPCGGatherableSpawnerVolume>(ServerUtilityFields::PCGGatherableSpawnerLocalSeed, histogram, total);
+	CollectLocalSeeds<SDK::ACrPCGVolume>(ServerUtilityFields::PCGVolumeLocalSeed, histogram, total);
+	CollectLocalSeeds<SDK::ACrPCGActorBase>(ServerUtilityFields::PCGActorBaseLocalSeed, histogram, total);
 
 	if (total == 0)
 	{
@@ -394,10 +410,16 @@ static bool ResyncSeed()
 
 	for (SDK::ACrGatherableSpawnersRepActor* actor : actors)
 	{
-		const int32_t before = actor->RepGlobalGatherablePCGSeed;
-		actor->RepGlobalGatherablePCGSeed = seed;
-		actor->RepEnviroWaveTypeChange    = SDK::EEnviroWave::Heat;
-		actor->RepEnviroWaveStageChange   = SDK::EEnviroWaveStage::Moving;
+		int32_t* seedAt  = ServerUtilityFields::RepGlobalGatherablePCGSeed.In(actor);
+		auto*    typeAt  = ServerUtilityFields::RepEnviroWaveTypeChange.In(actor);
+		auto*    stageAt = ServerUtilityFields::RepEnviroWaveStageChange.In(actor);
+		if (!seedAt || !typeAt || !stageAt)
+			continue;
+
+		const int32_t before = *seedAt;
+		*seedAt  = seed;
+		*typeAt  = SDK::EEnviroWave::Heat;
+		*stageAt = SDK::EEnviroWaveStage::Moving;
 		LOG_INFO("[GatherableFix] %s: RepGlobalGatherablePCGSeed %d -> %d (Heat/Moving) - clients will regenerate from it",
 		         actor->GetName().c_str(), before, seed);
 	}

@@ -45,7 +45,7 @@ void MaxPlayersHook::Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
 	// Optional: a miss leaves the server on the stock 4-player limit rather than
 	// refusing the whole plugin, which is what the old scan-at-init path did.
 	g_preLoginAddr = ScanUtil::ResolveFunction(self, scanner,
-		"ACrGameModeBase::PreLogin", GameSig::GAMEMODE_PRELOGIN);
+		ServerUtilityFields::PreLogin, GameSig::GAMEMODE_PRELOGIN);
 }
 
 // ---------------------------------------------------------------------------
