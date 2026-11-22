@@ -1,5 +1,6 @@
 #include "admin_panel.h"
 #include "admin_json.h"
+#include "url_match.h"
 #include "../plugin_helpers.h"
 #include "../plugin_config.h"
 
@@ -54,21 +55,6 @@ static HttpRequestAction AdminApiFilter(const PluginHttpRequest* req)
 	return HttpRequestAction::Approve;
 }
 
-// True when url ends with suffix, ignoring case.
-static bool ciEndsWith(const char* url, const char* suffix)
-{
-	const size_t ulen = strlen(url);
-	const size_t slen = strlen(suffix);
-	if (ulen < slen) return false;
-	const char* tail = url + ulen - slen;
-	while (*suffix)
-	{
-		if ((*tail | 0x20) != (*suffix | 0x20)) return false;
-		++tail; ++suffix;
-	}
-	return true;
-}
-
 // ---------------------------------------------------------------------------
 // Route dispatchers (one per URL sub-prefix group)
 // ---------------------------------------------------------------------------
@@ -85,11 +71,11 @@ static void PlayersRouteHandler(const PluginHttpRequest* req, PluginHttpResponse
 {
 	if (!req->url) return;
 
-	if (ciEndsWith(req->url, "/list"))
+	if (UrlEndsWith(req->url, "/list"))
 		Ep_PlayersList::Handle(req, resp);
-	else if (ciEndsWith(req->url, "/kick"))
+	else if (UrlEndsWith(req->url, "/kick"))
 		Ep_PlayersKick::Handle(req, resp);
-	else if (ciEndsWith(req->url, "/ban"))
+	else if (UrlEndsWith(req->url, "/ban"))
 		Ep_PlayersBan::Handle(req, resp);
 	else
 	{
@@ -105,15 +91,15 @@ static void WaveRouteHandler(const PluginHttpRequest* req, PluginHttpResponse* r
 {
 	if (!req->url) return;
 
-	if (ciEndsWith(req->url, "/status"))
+	if (UrlEndsWith(req->url, "/status"))
 		Ep_WaveStatus::Handle(req, resp);
-	else if (ciEndsWith(req->url, "/start"))
+	else if (UrlEndsWith(req->url, "/start"))
 		Ep_WaveStart::Handle(req, resp);
-	else if (ciEndsWith(req->url, "/cancel"))
+	else if (UrlEndsWith(req->url, "/cancel"))
 		Ep_WaveCancel::Handle(req, resp);
-	else if (ciEndsWith(req->url, "/pause"))
+	else if (UrlEndsWith(req->url, "/pause"))
 		Ep_WavePause::Handle(req, resp);
-	else if (ciEndsWith(req->url, "/resume"))
+	else if (UrlEndsWith(req->url, "/resume"))
 		Ep_WaveResume::Handle(req, resp);
 	else
 	{
@@ -135,7 +121,7 @@ static void RulesRouteHandler(const PluginHttpRequest* req, PluginHttpResponse* 
 {
 	if (!req->url) return;
 
-	if (ciEndsWith(req->url, "/players"))
+	if (UrlEndsWith(req->url, "/players"))
 		Ep_RulesPlayers::Handle(req, resp);
 	else
 	{

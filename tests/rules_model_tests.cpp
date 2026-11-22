@@ -4,6 +4,7 @@
 //   rules_model_tests.exe
 #include "host_rules/rules_model.h"
 #include "host_rules/claim_model.h"
+#include "admin/url_match.h"
 
 #include <cstdio>
 #include <cstring>
@@ -262,6 +263,20 @@ int main()
 		for (int i = 0; i < 10; ++i)
 			if (b.RecordWrong(i % 2 ? "x" : "y").codeReplaced) ++replaced;
 		CHECK(replaced == 2 && b.Locked("x") && b.Locked("y"));
+	}
+
+	// Admin url routing: the loader appends one '/'; exactly one is ignored.
+	{
+		CHECK(UrlEndsWith("/ServerUtility/api/players/list/", "/list"));
+		CHECK(UrlEndsWith("/ServerUtility/api/players/list", "/list"));
+		CHECK(UrlEndsWith("/ServerUtility/API/Players/LIST/", "/list"));
+		CHECK(!UrlEndsWith("/ServerUtility/api/players/list//", "/list"));
+		CHECK(!UrlEndsWith("", "/list"));
+		CHECK(!UrlEndsWith("/", "/list"));
+		CHECK(UrlEndsWith("", ""));
+		CHECK(!UrlEndsWith("/ServerUtility/api/players/blist/", "/list"));
+		CHECK(!UrlEndsWith("/ServerUtility/api/players/listx/", "/list"));
+		CHECK(!UrlEndsWith("/ServerUtility/api/players/lis/", "/list"));
 	}
 
 	std::printf("%d checks, %d failed\n", g_checks, g_failed);
