@@ -63,7 +63,7 @@ The text before `=` is the player's ID, the text after it is a label for you, an
 | `ExemptRules` | Exempt from the host's rules. |
 | `Sections=<key>;<key>` | Rule sections that apply to this player. A key may not hold spaces, control characters or `\| = ; [ ]`, or start with `#`; such a key is refused. |
 
-The server reads each player's ID from the game; the client does not send it. Whether a client could change it has not been tested, so do not treat the list as a security guarantee. Other sections and comments in `HostRules.ini` are kept when the plugin saves the file. After editing the file by hand, run `player reload`.
+Host rules are applied by each player's own game, so they keep honest players in line but are not protection: a modified client can ignore them, and it can also claim another player's ID, so anyone who knows a player's Steam ID can use the exemptions on that player's `[Players]` entry. Other sections and comments in `HostRules.ini` are kept when the plugin saves the file. After editing the file by hand, run `player reload`.
 
 Easiest is RCON. `player ids` shows who is connected and the exact ID to use; `admin add 1 Alice` makes the first player in that list an admin. See [RCON_README.md](src/RCON_README.md) for the `player` and `admin` commands.
 
