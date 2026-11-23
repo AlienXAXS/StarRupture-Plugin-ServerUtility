@@ -1,11 +1,13 @@
 #include "cmd_hostrules.h"
 #include "command_handler.h"
 #include "cmd_args.h"
+#include "../../host_rules/admin_ops.h"
 #include "../../host_rules/host_rules.h"
 #include "../../host_rules/ini_file.h"
 #include "../../host_rules/player_list.h"
 
 #include <sstream>
+#include <vector>
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -56,6 +58,13 @@ namespace Cmd_HostRules
 		}
 
 		std::string Saved() { return "Saved.\n" + State(); }
+
+		// One op from RCON; the reply is Saved() or the error.
+		std::string Apply(const char* op, std::vector<std::string> args)
+		{
+			const AdminOps::Result r = AdminOps::Run(AdminOps::Caller::FromRcon(), AdminOps::Op{ op, std::move(args) });
+			return r.ok ? Saved() : Error(r.text);
+		}
 
 		std::string Who(const std::string& arg)
 		{
@@ -109,12 +118,12 @@ namespace Cmd_HostRules
 		{
 			std::string rest = args;
 			const std::string sub = Lower(NextWord(rest));
-			std::string error;
 
 			if (sub.empty() || sub == "list") return State();
 			if (sub == "reload")
 			{
-				if (!HostRules::Reload(error)) return Error(error);
+				const AdminOps::Result r = AdminOps::Run(AdminOps::Caller::FromRcon(), AdminOps::Op{ "rules.reload", {} });
+				if (!r.ok) return Error(r.text);
 				return "Host rules reloaded.\n" + State();
 			}
 			if (sub == "who")
@@ -127,30 +136,20 @@ namespace Cmd_HostRules
 			{
 				const std::string key = NextWord(rest);
 				if (key.empty() || !rest.empty()) return kUsage;
-				const bool deny = sub == "deny";
-				const bool unset = sub == "unset";
-				if (!HostRules::Change(error, [&](RulesModel::Model& m, std::string& e)
-				    { return unset ? RulesModel::UnsetRule(m, key, e) : RulesModel::SetRule(m, key, deny, e); }))
-					return Error(error);
-				return Saved();
+				return Apply("rule.set", { key, sub });
 			}
 
 			if (sub == "default")
 			{
 				const std::string v = Lower(NextWord(rest));
 				if ((v != "allow" && v != "deny") || !rest.empty()) return kUsage;
-				if (!HostRules::Change(error, [&](RulesModel::Model& m, std::string&) { return RulesModel::SetDefault(m, v == "deny"); }))
-					return Error(error);
-				return Saved();
+				return Apply("policy.default", { v });
 			}
 
 			if (sub == "message")
 			{
 				if (rest.empty()) return State();
-				const std::string text = Lower(rest) == "off" ? std::string() : rest;
-				if (!HostRules::Change(error, [&](RulesModel::Model& m, std::string& e) { return RulesModel::SetMessage(m, text, e); }))
-					return Error(error);
-				return Saved();
+				return Apply("policy.message", { rest });
 			}
 
 			if (sub == "minversion")
@@ -158,10 +157,7 @@ namespace Cmd_HostRules
 				if (rest.empty()) return State();
 				const std::string word = NextWord(rest);
 				if (!rest.empty()) return kUsage;
-				const std::string v = Lower(word) == "off" ? std::string() : word;
-				if (!HostRules::Change(error, [&](RulesModel::Model& m, std::string& e) { return RulesModel::SetMinLoader(m, v, e); }))
-					return Error(error);
-				return Saved();
+				return Apply("min.loader", { word });
 			}
 
 			if (sub == "modmin")
@@ -170,10 +166,7 @@ namespace Cmd_HostRules
 				const std::string plugin = NextWord(rest);
 				const std::string v = NextWord(rest);
 				if (v.empty() || !rest.empty()) return kUsage;
-				const std::string version = Lower(v) == "off" ? std::string() : v;
-				if (!HostRules::Change(error, [&](RulesModel::Model& m, std::string& e) { return RulesModel::SetModMin(m, plugin, version, e); }))
-					return Error(error);
-				return Saved();
+				return Apply("min.mod", { plugin, v });
 			}
 
 			return kUsage;

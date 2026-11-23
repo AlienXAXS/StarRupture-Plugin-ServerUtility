@@ -4,11 +4,12 @@
 #include "../rcon.h"
 #include "../state/server_state.h"
 #include "../../host_rules/admin_claim.h"
-#include "../../host_rules/host_rules.h"
+#include "../../host_rules/admin_ops.h"
 #include "../../host_rules/ini_file.h"
 #include "../../host_rules/player_list.h"
 
 #include <sstream>
+#include <vector>
 
 namespace Cmd_Player
 {
@@ -79,6 +80,11 @@ namespace Cmd_Player
 
 		std::string Error(const std::string& text) { return "Error: " + text + "\n"; }
 
+		AdminOps::Result Run(const char* op, std::vector<std::string> args = {})
+		{
+			return AdminOps::Run(AdminOps::Caller::FromRcon(), AdminOps::Op{ op, std::move(args) });
+		}
+
 		std::string HandlePlayer(const std::string& args)
 		{
 			std::string rest = args;
@@ -90,8 +96,8 @@ namespace Cmd_Player
 			std::string error;
 			if (sub == "reload")
 			{
-				if (!PlayerList::Reload(error)) return Error(error);
-				HostRules::RefreshPlayers();
+				const AdminOps::Result r = Run("players.reload");
+				if (!r.ok) return Error(r.text);
 				return "Player list reloaded: " + std::to_string(PlayerList::All().size()) + " entries.\n";
 			}
 
@@ -105,12 +111,11 @@ namespace Cmd_Player
 
 				if (sub == "set")
 				{
-					if (!PlayerList::Set(id, rest, error)) return Error(error);
-					HostRules::RefreshPlayers();
-					return Saved(id, target);
+					const AdminOps::Result r = Run("player.set", { id, rest });
+					return r.ok ? Saved(id, target) : Error(r.text);
 				}
-				if (!PlayerList::Remove(id, error)) return Error(error);
-				HostRules::RefreshPlayers();
+				const AdminOps::Result r = Run("player.remove", { id });
+				if (!r.ok) return Error(r.text);
 				return "Removed the entry for " + target + ".\n";
 			}
 
@@ -125,10 +130,8 @@ namespace Cmd_Player
 			std::string error;
 			if (sub == "clear")
 			{
-				int changed = 0;
-				if (!PlayerList::ClearAdmins(changed, error)) return Error(error);
-				HostRules::RefreshPlayers();
-				return "Took Admin off " + std::to_string(changed) + " entries.\n";
+				const AdminOps::Result r = Run("admin.clear");
+				return r.ok ? r.text + "\n" : Error(r.text);
 			}
 
 			if (sub == "code")
@@ -145,16 +148,14 @@ namespace Cmd_Player
 				if (sub == "add")
 				{
 					const std::string flags = rest.empty() ? "admin" : "admin label=" + rest;
-					if (!PlayerList::Set(id, flags, error)) return Error(error);
-					HostRules::RefreshPlayers();
-					return Saved(id, target);
+					const AdminOps::Result r = Run("player.set", { id, flags });
+					return r.ok ? Saved(id, target) : Error(r.text);
 				}
 
 				PlayerList::Entry existing;
 				if (!PlayerList::Find(id, existing)) return Error("no entry with that ID");
-				if (!PlayerList::Set(id, "-admin", error)) return Error(error);
-				HostRules::RefreshPlayers();
-				return Saved(id, target);
+				const AdminOps::Result r = Run("player.set", { id, "-admin" });
+				return r.ok ? Saved(id, target) : Error(r.text);
 			}
 
 			return kAdminUsage;

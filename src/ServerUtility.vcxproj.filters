@@ -109,6 +109,15 @@
     <ClCompile Include="admin\endpoints\ep_rules_players.cpp">
       <Filter>admin\endpoints</Filter>
     </ClCompile>
+    <ClCompile Include="admin\endpoints\ep_rules_admin.cpp">
+      <Filter>admin\endpoints</Filter>
+    </ClCompile>
+    <ClCompile Include="host_rules\admin_ops.cpp">
+      <Filter>host_rules</Filter>
+    </ClCompile>
+    <ClCompile Include="host_rules\admin_ops_host.cpp">
+      <Filter>host_rules</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="plugin.h" />
@@ -234,6 +243,15 @@
     </ClInclude>
     <ClInclude Include="admin\endpoints\ep_rules_players.h">
       <Filter>admin\endpoints</Filter>
+    </ClInclude>
+    <ClInclude Include="admin\endpoints\ep_rules_admin.h">
+      <Filter>admin\endpoints</Filter>
+    </ClInclude>
+    <ClInclude Include="admin\admin_request.h">
+      <Filter>admin</Filter>
+    </ClInclude>
+    <ClInclude Include="host_rules\admin_ops.h">
+      <Filter>host_rules</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

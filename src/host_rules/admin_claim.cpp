@@ -1,4 +1,5 @@
 #include "admin_claim.h"
+#include "admin_ops.h"
 #include "claim_model.h"
 #include "host_rules.h"
 #include "player_ids.h"
@@ -197,6 +198,7 @@ namespace
 		case Result::Claimed:
 		{
 			LOG_INFO("[Admin] '%s' claimed admin (id %s)", label.c_str(), id.c_str());
+			AdminOps::NoteChanged(AdminOps::kSectionPlayers);
 			HostRules::RefreshPlayers();
 			Say(playerController, "You are now an admin of this server.", true);
 

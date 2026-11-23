@@ -15,6 +15,7 @@
 #include "endpoints/ep_wave_resume.h"
 #include "endpoints/ep_inventory_give.h"
 #include "endpoints/ep_rules_players.h"
+#include "endpoints/ep_rules_admin.h"
 
 #include <cstring>
 
@@ -123,6 +124,18 @@ static void RulesRouteHandler(const PluginHttpRequest* req, PluginHttpResponse* 
 
 	if (UrlEndsWith(req->url, "/players"))
 		Ep_RulesPlayers::Handle(req, resp);
+	else if (UrlEndsWith(req->url, "/catalog"))
+		Ep_RulesAdmin::Catalog(req, resp);
+	else if (UrlEndsWith(req->url, "/get"))
+		Ep_RulesAdmin::Get(req, resp);
+	else if (UrlEndsWith(req->url, "/set"))
+		Ep_RulesAdmin::Set(req, resp);
+	else if (UrlEndsWith(req->url, "/policy"))
+		Ep_RulesAdmin::Policy(req, resp);
+	else if (UrlEndsWith(req->url, "/minversion"))
+		Ep_RulesAdmin::MinVersion(req, resp);
+	else if (UrlEndsWith(req->url, "/modmin"))
+		Ep_RulesAdmin::ModMin(req, resp);
 	else
 	{
 		std::string body;

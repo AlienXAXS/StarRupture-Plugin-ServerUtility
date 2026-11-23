@@ -360,6 +360,9 @@
     <ClInclude Include="host_rules\player_ids.h" />
     <ClInclude Include="rcon\commands\cmd_player.h" />
     <ClInclude Include="admin\endpoints\ep_rules_players.h" />
+    <ClInclude Include="admin\endpoints\ep_rules_admin.h" />
+    <ClInclude Include="admin\admin_request.h" />
+    <ClInclude Include="host_rules\admin_ops.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(StarRuptureSDKSourceDir)Basic.cpp">
@@ -413,6 +416,9 @@
     <ClCompile Include="host_rules\player_ids.cpp" />
     <ClCompile Include="rcon\commands\cmd_player.cpp" />
     <ClCompile Include="admin\endpoints\ep_rules_players.cpp" />
+    <ClCompile Include="admin\endpoints\ep_rules_admin.cpp" />
+    <ClCompile Include="host_rules\admin_ops.cpp" />
+    <ClCompile Include="host_rules\admin_ops_host.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

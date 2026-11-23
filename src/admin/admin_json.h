@@ -53,6 +53,13 @@ namespace AdminJson
 		return result;
 	}
 
+	// True when the body has "key" at all (so an empty string can be told from a missing one).
+	inline bool Has(const char* body, size_t len, const char* key)
+	{
+		if (!body || len == 0 || !key) return false;
+		return std::string(body, len).find(std::string("\"") + key + "\"") != std::string::npos;
+	}
+
 	// Extract an integer value for "key" from a JSON body.
 	// Returns defaultVal if not found or not a valid integer. Values beyond int range saturate.
 	inline int ExtractInt(const char* body, size_t len, const char* key, int defaultVal = -1)

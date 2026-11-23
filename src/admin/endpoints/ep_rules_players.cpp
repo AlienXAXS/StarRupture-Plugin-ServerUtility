@@ -1,7 +1,7 @@
 #include "ep_rules_players.h"
 #include "../admin_json.h"
-#include "../session/session_store.h"
-#include "../../host_rules/host_rules.h"
+#include "../admin_request.h"
+#include "../../host_rules/admin_ops.h"
 #include "../../host_rules/player_list.h"
 
 #include <sstream>
@@ -42,20 +42,12 @@ namespace Ep_RulesPlayers
 	{
 		std::string body;
 
-		if (!AdminJson::RequirePost(req, resp, body)) return;
-
-		const std::string token = AdminJson::ExtractString(req->body, req->bodyLen, "session_token");
-		if (!AdminSessionStore::Get().ValidateSession(token))
-		{
-			AdminJson::SetError(resp, 401, "unauthorized", body);
-			return;
-		}
+		if (!AdminRequest::PostWithSession(req, resp, body)) return;
 
 		const std::string action = AdminJson::ExtractString(req->body, req->bodyLen, "action");
 		const std::string id     = AdminJson::ExtractString(req->body, req->bodyLen, "id");
 		const std::string flags  = AdminJson::ExtractString(req->body, req->bodyLen, "flags");
 
-		std::string error;
 		if (action == "set" || action == "remove")
 		{
 			if (id.empty())
@@ -69,14 +61,14 @@ namespace Ep_RulesPlayers
 				return;
 			}
 
-			const bool ok = (action == "set") ? PlayerList::Set(id, flags, error)
-			                                  : PlayerList::Remove(id, error);
-			if (!ok)
+			const AdminOps::Op op = (action == "set") ? AdminOps::Op{ "player.set", { id, flags } }
+			                                          : AdminOps::Op{ "player.remove", { id } };
+			const AdminOps::Result r = AdminOps::Run(AdminOps::Caller::FromPanel(), op);
+			if (!r.ok)
 			{
-				AdminJson::SetError(resp, 400, error.c_str(), body);
+				AdminJson::SetError(resp, 400, r.text.c_str(), body);
 				return;
 			}
-			HostRules::RefreshPlayers();
 		}
 		else if (action != "get")
 		{
