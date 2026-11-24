@@ -290,6 +290,8 @@ namespace InGameAdminModel
 				const double now = env_.now ? env_.now() : 0;
 				c.tokens = std::min(kOpsBurst, c.tokens + (now - c.tokenTime) * kOpsPerSecond);
 				c.tokenTime = now;
+				if (c.tokens >= kOpsBurst)
+					c.limitLogged = false;   // logged again only after the bucket has refilled
 				double cost = 1;
 				if (decoded == Decoded::Ok && m.tag == Tag::Ops && m.ops.size() > 1)
 					cost = std::min(kOpsBurst, static_cast<double>(m.ops.size()));
@@ -301,8 +303,6 @@ namespace InGameAdminModel
 					return out;
 				}
 				c.tokens -= cost;
-				if (c.tokens >= kOpsBurst)
-					c.limitLogged = false;   // logged again only after the bucket has refilled
 			}
 
 			if (decoded == Decoded::WrongProtocol)

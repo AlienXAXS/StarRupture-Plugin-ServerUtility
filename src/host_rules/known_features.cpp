@@ -272,6 +272,16 @@ namespace KnownFeatures
 		return true;
 	}
 
+	std::string UnmatchedWarnings(const std::vector<std::string>& unmatched, size_t cap)
+	{
+		std::string out;
+		for (size_t i = 0; i < unmatched.size() && i < cap; ++i)
+			out += "  warning: no remembered feature matches the rule " + unmatched[i] + "\n";
+		if (unmatched.size() > cap)
+			out += "  ... and " + std::to_string(unmatched.size() - cap) + " more\n";
+		return out;
+	}
+
 	std::vector<std::string> UnmatchedKeys(const std::vector<std::string>& ruleKeys, const std::vector<Entry>& known)
 	{
 		std::vector<std::string> out;

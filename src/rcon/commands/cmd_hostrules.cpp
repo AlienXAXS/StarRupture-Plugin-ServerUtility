@@ -53,8 +53,7 @@ namespace Cmd_HostRules
 			const std::vector<KnownFeatures::Entry> known = KnownFeatures::Snapshot();
 			std::vector<std::string> keys;
 			for (const auto& r : m.rules) keys.push_back(r.plugin + "." + r.id);
-			for (const std::string& k : KnownFeatures::UnmatchedKeys(keys, known))
-				oss << "  warning: no remembered feature matches the rule " << k << "\n";
+			oss << KnownFeatures::UnmatchedWarnings(KnownFeatures::UnmatchedKeys(keys, known), kMaxKnownListed);
 
 			if (known.empty())
 			{

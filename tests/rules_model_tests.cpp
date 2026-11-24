@@ -55,6 +55,7 @@ namespace
 		std::function<AdminWire::Snapshot()> snapshot;
 		std::function<InGameAdminModel::OpsOutcome(const std::string&, const std::string&,
 		                                           const std::vector<AdminWire::Op>&, uint32_t)> runOps;
+		std::function<void(const std::vector<std::string>&)> catalogPush;
 	};
 
 	std::unique_ptr<InGameAdminModel::Server> MakeIga(IgaEnv& e)
@@ -68,6 +69,7 @@ namespace
 		env.storePath = e.path;
 		env.snapshot = e.snapshot;
 		env.runOps = e.runOps;
+		env.catalogPush = e.catalogPush;
 		return std::make_unique<InGameAdminModel::Server>(env);
 	}
 
@@ -571,6 +573,18 @@ static void InGameAdminOpsTests()
 			replies += static_cast<int>(IgaRaw(*s, 7, "p2", IgaHello()).size());
 		CHECK(replies == 100 && count("too many requests") == 1);
 
+		// A flood that runs on across several refill periods still logs once; a full refill re-arms it.
+		for (int round = 0; round < 5; ++round)
+		{
+			e.now += 0.5;   // 10 tokens back
+			for (int i = 0; i < 30; ++i) IgaRaw(*s, 7, "p2", IgaHello());
+		}
+		CHECK(count("too many requests") == 1);
+		e.now += 30.0;
+		CHECK(!IgaRaw(*s, 7, "p2", IgaHello()).empty());
+		for (int i = 0; i < 300; ++i) IgaRaw(*s, 7, "p2", IgaHello());
+		CHECK(count("too many requests") == 2);
+
 		// Wrong proofs on one connection: the answer stays, the audit line stops at 5.
 		const std::string sid = s->ServerId();
 		e.audit.clear();
@@ -641,6 +655,80 @@ static void InGameAdminOpsTests()
 		s->OnDisconnect(1);
 		CHECK(s->OnChanged("all", 14).empty());
 		std::filesystem::remove(path);
+	}
+
+	// catalog.push: ignored from an unproven connection; from a proven one stored with titles
+	// and versions, capped, bad names dropped; the originator gets result before changed.
+	{
+		IgaEnv e; e.path = path; e.admins = { "p1", "p2" };
+		InGameAdminModel::Server* sp = nullptr;
+		int pushes = 0;
+		e.catalogPush = [&](const std::vector<std::string>& rows)
+		{
+			++pushes;
+			if (KnownFeatures::NoteDeclaredRows(rows))
+				sp->OnChanged("catalog", 9);   // as the plugin does when the catalog changed
+		};
+		auto s = MakeIga(e);
+		sp = s.get();
+		auto push = [&](uint64_t conn, const std::string& id, const std::vector<std::string>& rows)
+		{
+			std::vector<AdminWire::Op> ops;
+			for (const std::string& r : rows) ops.push_back({ "catalog.push", { r } });
+			return IgaRaw(*s, conn, id, IgaOps(31, 0, ops));
+		};
+		auto find = [](const char* plugin, const char* id) -> const KnownFeatures::Entry*
+		{
+			static std::vector<KnownFeatures::Entry> snap;
+			snap = KnownFeatures::Snapshot();
+			for (const auto& en : snap) if (en.plugin == plugin && en.id == id) return &en;
+			return nullptr;
+		};
+
+		IgaChallenge(*s, 5, "p2");   // challenged, not proven
+		CHECK(push(5, "p2", { "Unproven	1	f	on	T" }).empty());
+		CHECK(pushes == 0 && !find("Unproven", "f"));
+
+		IgaMakeProven(*s, 1, "p1");
+		IgaMakeProven(*s, 2, "p2");
+		const auto out = push(1, "p1", { "Best Builder	2.1	fast	on	Fast build mode", "Bad Plugin!	1	f	on	T", "Ok	1	bad id	on	T" });
+		// The originator: result first, then changed. The other admin's changed goes out on its own.
+		CHECK(out.size() == 2);
+		if (out.size() == 2)
+		{
+			AdminWire::Message a, b;
+			CHECK(AdminWire::Decode(out[0], a) == AdminWire::Decoded::Ok && a.tag == Tag::Result && a.requestId == 31);
+			CHECK(AdminWire::Decode(out[1], b) == AdminWire::Decoded::Ok && b.tag == Tag::Changed);
+		}
+		const KnownFeatures::Entry* en = find("Best Builder", "fast");
+		CHECK(en && en->title == "Fast build mode" && en->version == "2.1");
+		CHECK(!find("Bad Plugin!", "f") && !find("Ok", "bad id"));
+
+		// Past the per-report cap only the first rows are kept.
+		std::vector<std::string> many;
+		for (int i = 0; i < 70; ++i) many.push_back("Capped	1	f" + std::to_string(i) + "	on	T");
+		KnownFeatures::NoteDeclaredRows(many);   // the cap applies to one report, so call the catalog directly
+		int kept = 0;
+		for (const auto& x : KnownFeatures::Snapshot()) if (x.plugin == "Capped") ++kept;
+		CHECK(kept == static_cast<int>(KnownFeatures::kMaxRowsPerReport));
+
+		// Mixed with another op: refused with an error result.
+		std::vector<AdminWire::Op> mixed = { { "catalog.push", { "Mixed	1	f	on	T" } }, { "policy.default", { "allow" } } };
+		const auto r = IgaDecode(IgaRaw(*s, 1, "p1", IgaOps(32, 0, mixed)));
+		CHECK(r.size() == 1 && r[0].status == AdminWire::kResultError && !find("Mixed", "f"));
+		std::filesystem::remove(path);
+	}
+
+	// Unmatched-rule warnings stop at the cap with a count of the rest.
+	{
+		std::vector<std::string> keys;
+		for (int i = 0; i < 5; ++i) keys.push_back("P.f" + std::to_string(i));
+		const std::string few = KnownFeatures::UnmatchedWarnings(keys, 10);
+		CHECK(few.find("P.f4") != std::string::npos && few.find("more") == std::string::npos);
+		const std::string capped = KnownFeatures::UnmatchedWarnings(keys, 3);
+		CHECK(capped.find("P.f2") != std::string::npos && capped.find("P.f3") == std::string::npos);
+		CHECK(capped.find("and 2 more") != std::string::npos);
+		CHECK(KnownFeatures::UnmatchedWarnings({}, 3).empty());
 	}
 
 	// Plugin names with single inner spaces travel intact through the codec and the catalog.

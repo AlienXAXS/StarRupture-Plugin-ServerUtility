@@ -88,6 +88,8 @@ namespace KnownFeatures
 
 	// Rule keys ("Plugin.feature" or "Plugin.*") that no remembered feature matches.
 	std::vector<std::string> UnmatchedKeys(const std::vector<std::string>& ruleKeys, const std::vector<Entry>& known);
+	// One warning line per unmatched key, at most `cap`, then "and N more".
+	std::string UnmatchedWarnings(const std::vector<std::string>& unmatched, size_t cap);
 
 	// ---- the plugin's catalog ----
 	// Load the file once. An empty path keeps the catalog in memory only.

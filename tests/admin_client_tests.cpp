@@ -5,7 +5,10 @@
 #include "client/admin_client.h"
 #include "admin_wire/admin_crypto.h"
 
+#include <algorithm>
 #include <cstdio>
+#include <cstring>
+#include <functional>
 #include <filesystem>
 #include <fstream>
 
@@ -31,6 +34,8 @@ namespace
 		double clock = 100.0;
 		std::string store;
 		std::unique_ptr<AdminClient::Client> client;
+		std::function<int(char*, size_t)> addrFn, featFn;   // the fake loader reads; null reads as -1
+		int addrCalls = 0, featCalls = 0;
 
 		explicit Rig(const std::string& storeContents = std::string(), const char* name = "store")
 		{
@@ -48,6 +53,8 @@ namespace
 			env.send = [this](const std::string& s) { Message m; if (Decode(s, m) == Decoded::Ok) sent.push_back(m); };
 			env.now = [this]() { return clock; };
 			env.storePath = store;
+			env.readAddress = [this](char* b, size_t n) { ++addrCalls; return addrFn ? addrFn(b, n) : -1; };
+			env.readDeclaredFeatures = [this](char* b, size_t n) { ++featCalls; return featFn ? featFn(b, n) : -1; };
 			client.reset(new AdminClient::Client(env));
 			client->SetServerAddress(kAddr);
 		}
@@ -68,6 +75,26 @@ namespace
 		size_t Count(Tag t) { size_t n = 0; for (const Message& m : Sent()) if (m.tag == t) ++n; return n; }
 		const Message* Last(Tag t) { Sent(); for (size_t i = sent.size(); i-- > 0;) if (sent[i].tag == t) return &sent[i]; return nullptr; }
 	};
+
+	// A loader read that returns `text` (its full length; copies what fits when given a buffer).
+	std::function<int(char*, size_t)> FakeRead(const std::string& text)
+	{
+		return [text](char* b, size_t n) -> int
+		{
+			if (b && n) { const size_t k = std::min(n - 1, text.size()); std::memcpy(b, text.data(), k); b[k] = '\0'; }
+			return static_cast<int>(text.size());
+		};
+	}
+
+	const std::string kDeclared =
+		"format\t1\n"
+		"kind\tdeclared\n"
+		"game_cl\t12345\n"
+		"loader\t1.2.3\n"
+		"plugin\tServerUtility\t1.0.5\n"
+		"plugin\tBest Builder\t2.1\n"
+		"feature\tServerUtility\tmods.min\ton\tMinimum mod versions\n"
+		"feature\tBest Builder\tbuild.fast\toff\tFast build mode\n";
 
 	Message Welcome(const char* role) { Message m; m.tag = Tag::Welcome; m.role = role; return m; }
 	Message Challenge() { Message m; m.tag = Tag::Challenge; m.serverId = kServerId; m.nonce = "00ff00ff00ff00ff"; return m; }
@@ -607,6 +634,92 @@ int main()
 		t.clock += AdminClient::kSnapshotTimeoutSeconds + 0.1;
 		CHECK(t.View().lastResult == AdminClient::kRefreshing);
 		CHECK(t.Count(Tag::Snap) == 1);
+	}
+
+	// Declared-features text: titles with spaces, a plugin with a space, header rows skipped.
+	{
+		const std::vector<std::string> rows = AdminClient::ParseDeclaredFeatures(kDeclared);
+		CHECK(rows.size() == 2);
+		CHECK(rows.size() == 2 && rows[0] == "ServerUtility\t1.0.5\tmods.min\ton\tMinimum mod versions");
+		CHECK(rows.size() == 2 && rows[1] == "Best Builder\t2.1\tbuild.fast\toff\tFast build mode");
+		CHECK(AdminClient::ParseDeclaredFeatures("format\t1\nkind\tdeclared\ngame_cl\t1\nloader\tx\n").empty());
+		// A title is cut at 80 bytes; a feature of an unlisted plugin has an empty version.
+		const std::vector<std::string> longRows = AdminClient::ParseDeclaredFeatures("feature\tP\tf\ton\t" + std::string(120, 'x') + "\n");
+		CHECK(longRows.size() == 1 && longRows[0] == "P\t\tf\ton\t" + std::string(80, 'x'));
+		// Not on/off: dropped. CRLF is tolerated.
+		CHECK(AdminClient::ParseDeclaredFeatures("feature\tP\tf\tmaybe\tT\n").empty());
+		CHECK(AdminClient::ParseDeclaredFeatures("feature\tP\tf\ton\tT\r\n").size() == 1);
+	}
+
+	// catalog.push: once per connection, only when proven, and not when the read returns -1.
+	{
+		Rig r;
+		r.featFn = FakeRead(kDeclared);
+		r.client->OnServerReady();
+		r.client->Tick();
+		CHECK(r.featCalls == 0);   // not proven yet: no read, no push
+		r.Feed(Challenge());
+		r.Feed(Welcome(kRoleAdmin));
+		r.Clear();
+		r.client->Tick();
+		r.client->Tick();
+		const Message* o = r.Last(Tag::Ops);
+		CHECK(r.Count(Tag::Ops) == 1 && o && o->ops.size() == 2 && o->ops[0].name == "catalog.push");
+		CHECK(o && o->ops[0].args.size() == 1 && o->ops[0].args[0] == "ServerUtility\t1.0.5\tmods.min\ton\tMinimum mod versions");
+		CHECK(r.featCalls == 2);
+
+		// A new connection pushes again, once.
+		r.Clear();
+		r.client->OnServerReady();
+		r.Feed(Challenge());
+		r.Feed(Welcome(kRoleAdmin));
+		r.Clear();
+		r.client->Tick();
+		r.client->Tick();
+		CHECK(r.Count(Tag::Ops) == 1);
+
+		// A -1 read pushes nothing; a later good read does.
+		Rig q;
+		q.client->OnServerReady();
+		q.Feed(Challenge());
+		q.Feed(Welcome(kRoleAdmin));
+		q.Clear();
+		q.featFn = [](char*, size_t) { return -1; };
+		q.client->Tick();
+		CHECK(q.Count(Tag::Ops) == 0 && q.featCalls == 1);
+		q.featFn = FakeRead(kDeclared);
+		q.client->Tick();
+		CHECK(q.Count(Tag::Ops) == 1);
+
+		// A connection that is not an admin never pushes.
+		Rig n;
+		n.featFn = FakeRead(kDeclared);
+		n.client->OnServerReady();
+		n.Feed(Challenge());
+		n.Feed(Welcome(kRoleNone));
+		n.client->Tick();
+		CHECK(n.Count(Tag::Ops) == 0);
+	}
+
+	// The server address is fed from the loader read; -1 leaves it unknown.
+	{
+		Rig r(kServerId + " " + kOtherAddr + " " + kSecret + "\n", "addrfeed");
+		r.client->SetServerAddress(AdminClient::kUnknownAddress);
+		r.addrFn = [](char*, size_t) { return -1; };
+		r.client->OnServerReady();
+		r.client->Tick();
+		r.Clear();
+		r.Feed(Challenge());
+		CHECK(r.addrCalls >= 1 && r.Count(Tag::Prove) == 0);   // still unknown: no proving
+		CHECK(r.View().lastResult == kLoaderText);
+
+		r.addrFn = FakeRead(kOtherAddr);
+		r.client->Tick();
+		r.Feed(Challenge());
+		CHECK(r.Count(Tag::Prove) == 1);
+		const int calls = r.addrCalls;
+		r.client->Tick();
+		CHECK(r.addrCalls == calls);   // read once the answer is in
 	}
 
 	std::printf("%d checks, %d failed\n", g_checks, g_failed);

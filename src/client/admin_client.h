@@ -42,7 +42,7 @@ namespace AdminClient
 	// Rows of a catalog.push, from the mod loader's declared-features text. One row per
 	// feature: "<plugin>\t<version>\t<id>\t<on|off>\t<title>". The header rows (format,
 	// kind, game_cl, loader) and plugin rows are read, not sent; titles are cut to 80 bytes.
-	constexpr size_t kMaxCatalogRows = 90;   // under one connection's request burst
+	constexpr size_t kMaxCatalogRows = 64;   // under one connection's request burst
 	std::vector<std::string> ParseDeclaredFeatures(const std::string& text);
 
 	struct Env
