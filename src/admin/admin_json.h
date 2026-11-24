@@ -9,6 +9,21 @@
 // No external library — only used by admin endpoint .cpp files.
 namespace AdminJson
 {
+	// Position just after the quoted key, where the key is followed by a ':' (so
+	// the same text inside a string value is not taken for a key); npos if none.
+	inline size_t FindKey(const std::string& haystack, const char* key)
+	{
+		const std::string needle = std::string("\"") + key + "\"";
+		for (size_t at = haystack.find(needle); at != std::string::npos; at = haystack.find(needle, at + 1))
+		{
+			size_t pos = at + needle.size();
+			while (pos < haystack.size() && (haystack[pos] == ' ' || haystack[pos] == '	' || haystack[pos] == '' || haystack[pos] == '
+')) ++pos;
+			if (pos < haystack.size() && haystack[pos] == ':') return pos;
+		}
+		return std::string::npos;
+	}
+
 	// Extract a string value for "key" from a JSON body.
 	// Returns empty string if not found.
 	inline std::string ExtractString(const char* body, size_t len, const char* key)
@@ -18,12 +33,11 @@ namespace AdminJson
 		std::string haystack(body, len);
 
 		// Look for "key":
-		std::string needle = std::string("\"") + key + "\"";
-		size_t pos = haystack.find(needle);
+		size_t pos = FindKey(haystack, key);
 		if (pos == std::string::npos) return {};
 
-		pos += needle.size();
-		while (pos < haystack.size() && (haystack[pos] == ' ' || haystack[pos] == ':' || haystack[pos] == '\t')) ++pos;
+		++pos; // skip the ':'
+		while (pos < haystack.size() && (haystack[pos] == ' ' || haystack[pos] == '\t' || haystack[pos] == '\r' || haystack[pos] == '\n')) ++pos;
 		if (pos >= haystack.size() || haystack[pos] != '"') return {};
 		++pos; // skip opening quote
 
@@ -57,7 +71,7 @@ namespace AdminJson
 	inline bool Has(const char* body, size_t len, const char* key)
 	{
 		if (!body || len == 0 || !key) return false;
-		return std::string(body, len).find(std::string("\"") + key + "\"") != std::string::npos;
+		return FindKey(std::string(body, len), key) != std::string::npos;
 	}
 
 	// Extract an integer value for "key" from a JSON body.
@@ -67,12 +81,11 @@ namespace AdminJson
 		if (!body || len == 0 || !key) return defaultVal;
 
 		std::string haystack(body, len);
-		std::string needle = std::string("\"") + key + "\"";
-		size_t pos = haystack.find(needle);
+		size_t pos = FindKey(haystack, key);
 		if (pos == std::string::npos) return defaultVal;
 
-		pos += needle.size();
-		while (pos < haystack.size() && (haystack[pos] == ' ' || haystack[pos] == ':' || haystack[pos] == '\t')) ++pos;
+		++pos; // skip the ':'
+		while (pos < haystack.size() && (haystack[pos] == ' ' || haystack[pos] == '\t' || haystack[pos] == '\r' || haystack[pos] == '\n')) ++pos;
 		if (pos >= haystack.size()) return defaultVal;
 
 		// Handle negative numbers

@@ -298,6 +298,8 @@ namespace InGameAdminModel
 
 			if (m.tag == Tag::Prove)
 			{
+				if (c.proven)
+					return out;   // already proven: a second prove gets no reply, so the client keeps its admin view
 				const std::string nonce = c.nonce;
 				c.nonce.clear();   // one proof per challenge
 				const bool fresh = (env_.now ? env_.now() : 0) < c.nonceExpires;

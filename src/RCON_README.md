@@ -173,7 +173,7 @@ A player gets 5 wrong tries, then is not asked again until restart; 5 wrong trie
 - `admin pair <id|number>` makes a one-time code (8 characters, 10 minutes, one use) for that admin's in-game admin tool and prints it in the reply only; it is never logged. The player must already have the Admin flag. 5 wrong tries on one connection, or 5 in total, void the code. `[Policy] InGameAdmin=0` turns the tool off. A paired admin's tool is told to refresh whenever the rules or player list change over RCON, so a pairing code or an RCON change shows up in the open window at once.
 - `admin unpair <id|number>` forgets that admin's pairing; the tool must be paired again. Taking the Admin flag away does the same.
 
-### `hostrules [list|allow|deny|unset|default|message|minversion|modmin|reload|who]`
+### `hostrules [list|allow|deny|unset|default|message|minversion|modmin|reload|known|who]`
 
 Show and edit the host's rules for mod features: the `[Policy]`, `[Rules]` and `[MinVersions]` sections of `Plugins\config\HostRules.ini`. Each change is written to the file and sent to the mod loader straight away. The rules are sent only to a mod loader with plugin interface 79 or newer; on any other they are saved and `hostrules` says "not sent".
 
@@ -188,6 +188,7 @@ Show and edit the host's rules for mod features: the `[Policy]`, `[Rules]` and `
 | `hostrules minversion [version\|off]` | Minimum mod loader version. A player below it is removed. With no argument, shows the current value; `off` clears it |
 | `hostrules modmin [<plugin> <version\|wire\|off>]` | Minimum version of one mod (`wire`: the copy must pass the mod loader's wire check). A player whose copy is older is removed. With no argument, lists the minimums; `off` clears one. `loader` is refused: use `minversion` |
 | `hostrules reload` | Re-read the file after a hand edit |
+| `hostrules known` | The mod features the server has seen players' mod loaders report (up to 30 shown), and any rule that matches none of them |
 | `hostrules who <id\|number>` | What a connected player's mod loader reported: its version and each mod's features, on or off. A 1-3 digit argument is the number from `player ids`; anything else is an ID |
 
 A mod name with a space goes in double quotes: `hostrules deny "Best Builder.some_feature"`, `hostrules modmin "Best Builder" 1.2.0`. Feature names never hold spaces. In `HostRules.ini` the name is written without quotes.

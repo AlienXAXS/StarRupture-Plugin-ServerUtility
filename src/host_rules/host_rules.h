@@ -40,16 +40,6 @@ namespace HostRules
 
 	bool Commit(const RulesModel::Model& next, std::string& error);
 
-	// Apply one change to a copy, write the file, keep the copy, push. False
-	// with an error when the change or the write failed (nothing changed).
-	template <typename Fn>
-	bool Change(std::string& error, Fn fn)
-	{
-		RulesModel::Model next = Get();
-		if (!fn(next, error)) return false;
-		return Commit(next, error);
-	}
-
 	// True when the running loader can take rules. Without it they are saved only.
 	bool LoaderReceives();
 	// Last push: "sent", "not sent: <why>" or "not sent yet".

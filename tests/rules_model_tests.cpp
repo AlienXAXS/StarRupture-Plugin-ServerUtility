@@ -8,6 +8,7 @@
 #include "host_rules/known_features.h"
 #include "host_rules/player_list.h"
 #include "admin/url_match.h"
+#include "admin/admin_json.h"
 #include "host_rules/ingame_admin_model.h"
 #include "admin_wire/admin_wire.h"
 #include "admin_wire/admin_crypto.h"
@@ -195,6 +196,9 @@ static void InGameAdminTests()
 		CHECK(!nonce.empty());
 		AdminCrypto::MakeProof(kSecretA, nonce, sid, prove.proof);
 		CHECK(IgaRole(IgaSend(*s, 3, "p1", prove)) == "admin");
+		CHECK(s->IsProven(3));
+		// A prove on a proven connection gets no reply and leaves it proven.
+		CHECK(IgaSend(*s, 3, "p1", prove).empty());
 		CHECK(s->IsProven(3));
 
 		nonce = IgaChallenge(*s, 4, "p1");
@@ -660,6 +664,22 @@ int main()
 {
 	std::vector<std::string> w;
 
+	// A key counts only when a ':' follows it, not when its text sits inside a value.
+	{
+		const std::string b1 = "{\"message\":\"default\"}";
+		CHECK(!AdminJson::Has(b1.data(), b1.size(), "default"));
+		CHECK(AdminJson::Has(b1.data(), b1.size(), "message"));
+		CHECK(AdminJson::ExtractString(b1.data(), b1.size(), "message") == "default");
+		const std::string b2 = "{\"plugin\":\"version\",\"version\":\"2.0\"}";
+		CHECK(AdminJson::ExtractString(b2.data(), b2.size(), "version") == "2.0");
+		CHECK(AdminJson::ExtractString(b2.data(), b2.size(), "plugin") == "version");
+		const std::string b3 = "{\"plugin\":\"version\"}";
+		CHECK(!AdminJson::Has(b3.data(), b3.size(), "version"));
+		CHECK(AdminJson::ExtractString(b3.data(), b3.size(), "version").empty());
+		const std::string b4 = "{ \"n\" : 5 }";
+		CHECK(AdminJson::ExtractInt(b4.data(), b4.size(), "n") == 5);
+	}
+
 	// A sample file: comments, policy, rules, minimums, a players section that is skipped.
 	Model m = ParseText({
 		"; host rules", "[Policy]", "Default = deny", "Message=Some mods are off here #rules = ok", "MinLoaderVersion=v1.27.0",
@@ -1109,6 +1129,23 @@ int main()
 			return r;
 		};
 		const std::string d1 = "2026-11-20", d2 = "2026-11-23";
+
+		// Names are checked and rows are capped.
+		{
+			Catalog g;
+			CHECK(!g.Merge(rep("Bad  Name", "x", "", "", false), d1));
+			CHECK(!g.Merge(rep("Bad\"Name", "x", "", "", false), d1));
+			CHECK(!g.Merge(rep("Plug", "has space", "", "", false), d1));
+			CHECK(!g.Merge(rep("Plug", "$id", "", "", false), d1));
+			CHECK(g.Merge(rep("Best Builder", "fast", "", "", false), d1));
+			for (size_t i = 1; g.Size() < kMaxRows; ++i)
+				g.Merge(rep("Plug", ("f" + std::to_string(i)).c_str(), "", "", false), d1);
+			CHECK(g.Size() == kMaxRows);
+			CHECK(!g.Merge(rep("Plug", "one-too-many", "", "", false), d1));
+			CHECK(g.Size() == kMaxRows);
+			CHECK(!g.Merge(rep("Plug", "f1", "", "", false), d1));   // an old row still merges, unchanged
+			CHECK(g.Merge(rep("Plug", "f1", "", "", false), d2));    // a new day still counts
+		}
 
 		// Merge: a new feature is added, the same one again is not a change, a new day is.
 		Catalog c;

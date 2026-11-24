@@ -1,5 +1,7 @@
 #include "known_features.h"
 
+#include "rules_model.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -138,7 +140,7 @@ namespace KnownFeatures
 		Entry e;
 		e.plugin = Clean(r.plugin);
 		e.id = Clean(r.id);
-		if (e.plugin.empty() || e.id.empty() || !ValidDate(today))
+		if (!RulesModel::ValidPluginName(e.plugin) || !RulesModel::ValidName(e.id) || !ValidDate(today))
 			return false;
 		e.title = Clean(r.title);
 		e.version = Clean(r.version);
@@ -151,6 +153,8 @@ namespace KnownFeatures
 		auto it = m_rows.find(key);
 		if (it == m_rows.end())
 		{
+			if (m_rows.size() >= kMaxRows)
+				return false;
 			m_rows.emplace(key, std::move(e));
 			return true;
 		}
@@ -331,8 +335,9 @@ namespace KnownFeatures
 		const std::vector<Report> reports = ParseReportText(text, std::string());
 		const std::string today = Today();
 		std::lock_guard<std::mutex> lk(g_mutex);
-		for (const Report& r : reports)
-			g_dirty |= g_catalog.Merge(r, today);
+		const size_t n = std::min(reports.size(), kMaxRowsPerReport);
+		for (size_t i = 0; i < n; ++i)
+			g_dirty |= g_catalog.Merge(reports[i], today);
 	}
 
 	void Tick(uint64_t nowMs)

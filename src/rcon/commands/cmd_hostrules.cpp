@@ -36,15 +36,20 @@ namespace Cmd_HostRules
 			"  hostrules minversion [version|off]      minimum mod loader version (players below it are removed)\n"
 			"  hostrules modmin [<plugin> <version|wire|off>]  minimum version of one mod, or wire = a copy the wire check accepts\n"
 			"  hostrules reload                        re-read HostRules.ini\n"
+			"  hostrules known                         the mod features the server has seen players report\n"
 			"  hostrules who <id|number>               what a player's mod loader reported, and its mods\n"
 			"Note: a mod name with a space goes in quotes: hostrules deny \"Best Builder.some_feature\", hostrules modmin \"Best Builder\" 1.2.0\n";
 
 		std::string Error(const std::string& text) { return "Error: " + text + "\n"; }
 
+		constexpr size_t kMaxKnownListed = 30;   // keeps the reply inside one RCON packet
+
 		// The remembered catalog, each row with where it came from, and the rules
 		// that match none of it.
-		void AppendKnown(std::ostringstream& oss, const RulesModel::Model& m)
+		std::string Known()
 		{
+			const RulesModel::Model m = HostRules::Get();
+			std::ostringstream oss;
 			const std::vector<KnownFeatures::Entry> known = KnownFeatures::Snapshot();
 			std::vector<std::string> keys;
 			for (const auto& r : m.rules) keys.push_back(r.plugin + "." + r.id);
@@ -54,11 +59,17 @@ namespace Cmd_HostRules
 			if (known.empty())
 			{
 				oss << "  known features: none yet (a player's mod loader lists them when they join)\n";
-				return;
+				return oss.str();
 			}
 			oss << "  known features (" << known.size() << "):\n";
+			size_t shown = 0;
 			for (const KnownFeatures::Entry& e : known)
 			{
+				if (++shown > kMaxKnownListed)
+				{
+					oss << "    ... and " << (known.size() - kMaxKnownListed) << " more\n";
+					break;
+				}
 				oss << "    " << e.plugin << "." << e.id << " [" << e.source << "]";
 				if (!e.title.empty()) oss << " " << e.title;
 				if (!e.version.empty()) oss << " v" << e.version;
@@ -69,6 +80,7 @@ namespace Cmd_HostRules
 				}
 				oss << " (last seen " << e.lastSeen << ")\n";
 			}
+			return oss.str();
 		}
 
 		std::string State()
@@ -83,7 +95,6 @@ namespace Cmd_HostRules
 			oss << "  minimum loader version: " << (m.minLoaderVersion.empty() ? "off" : m.minLoaderVersion) << "\n";
 			if (m.modMins.empty()) oss << "  minimum mod versions: none\n";
 			else for (const auto& r : m.modMins) oss << "  minimum " << r.plugin << ": " << r.version << "\n";
-			AppendKnown(oss, m);
 			if (!HostRules::LoaderReceives())
 				oss << "  This mod loader has no host rules support, so the rules are saved but not sent.\n";
 			oss << "  version minimums: " << HostRules::MinimumsStatus() << "\n";
@@ -159,6 +170,7 @@ namespace Cmd_HostRules
 				if (!r.ok) return Error(r.text);
 				return "Host rules reloaded.\n" + State();
 			}
+			if (sub == "known") return Known();
 			if (sub == "who")
 			{
 				const std::string who = NextWord(rest);

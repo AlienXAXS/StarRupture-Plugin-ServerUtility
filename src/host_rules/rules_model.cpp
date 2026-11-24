@@ -33,28 +33,6 @@ namespace RulesModel
 
 		bool SamePlugin(const std::string& a, const std::string& b) { return Lower(a) == Lower(b); }
 
-		bool ValidName(const std::string& s)
-		{
-			return !s.empty() && s.size() <= kMaxNameBytes && s[0] != '$' && s[0] != '#' && s[0] != ';' && !HasControl(s)
-			       && s.find_first_of(" =") == std::string::npos;
-		}
-
-		// A mod name, as the mod loader allows it: letters, digits, '_' and '-',
-		// with single spaces between words ("Best Builder"), 1 to 64 bytes.
-		bool ValidPluginName(const std::string& s)
-		{
-			if (s.empty() || s.size() > kMaxPluginNameBytes || s.front() == ' ' || s.back() == ' ')
-				return false;
-			for (size_t i = 0; i < s.size(); ++i)
-			{
-				const unsigned char c = static_cast<unsigned char>(s[i]);
-				const bool word = (c < 0x80 && std::isalnum(c)) || c == '_' || c == '-';
-				if (!word && !(c == ' ' && s[i - 1] != ' '))
-					return false;
-			}
-			return true;
-		}
-
 		// A mod name for a minimum row. "loader" is the loader's own row in the
 		// text the loader takes, so no mod can use it.
 		bool ValidModMinName(const std::string& s)
@@ -90,6 +68,28 @@ namespace RulesModel
 			value = Trim(line.substr(eq + 1));
 			return !key.empty();
 		}
+	}
+
+	bool ValidName(const std::string& s)
+	{
+		return !s.empty() && s.size() <= kMaxNameBytes && s[0] != '$' && s[0] != '#' && s[0] != ';' && !HasControl(s)
+		       && s.find_first_of(" =") == std::string::npos;
+	}
+
+	// A mod name, as the mod loader allows it: letters, digits, '_' and '-',
+	// with single spaces between words ("Best Builder"), 1 to 64 bytes.
+	bool ValidPluginName(const std::string& s)
+	{
+		if (s.empty() || s.size() > kMaxPluginNameBytes || s.front() == ' ' || s.back() == ' ')
+			return false;
+		for (size_t i = 0; i < s.size(); ++i)
+		{
+			const unsigned char c = static_cast<unsigned char>(s[i]);
+			const bool word = (c < 0x80 && std::isalnum(c)) || c == '_' || c == '-';
+			if (!word && !(c == ' ' && s[i - 1] != ' '))
+				return false;
+		}
+		return true;
 	}
 
 	bool ParseKey(const std::string& key, std::string& plugin, std::string& id, std::string& error)

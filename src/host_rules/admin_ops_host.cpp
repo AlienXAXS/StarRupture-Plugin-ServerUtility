@@ -78,6 +78,7 @@ namespace
 	struct Shared
 	{
 		AdminOps::Result   result;
+		std::atomic<bool>  started{ false };   // the game thread picked the op up
 		std::atomic<bool>  ran{ false };
 	};
 }
@@ -95,6 +96,7 @@ namespace AdminOps
 		auto shared = std::make_shared<Shared>();
 		AdminGT::Dispatch([shared, caller, ops, baseRevision]() -> std::string
 		{
+			shared->started.store(true, std::memory_order_release);
 			shared->result = Apply(HostBackend(), caller, ops, baseRevision);
 			shared->ran.store(true, std::memory_order_release);
 			return std::string();
@@ -105,7 +107,7 @@ namespace AdminOps
 
 		Result timeout;
 		timeout.ok = false;
-		timeout.text = "game thread timeout";
+		timeout.text = shared->started.load(std::memory_order_acquire) ? "May have applied. Refresh to check." : "game thread timeout";
 		timeout.revision = Revision();
 		return timeout;
 	}

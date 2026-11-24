@@ -26,6 +26,10 @@ namespace KnownFeatures
 		std::string           source;
 	};
 
+	// Limits: rows one client's report may add, and rows the catalog keeps.
+	constexpr size_t kMaxRowsPerReport = 64;
+	constexpr size_t kMaxRows          = 512;
+
 	// One feature as a report or a catalog names it.
 	struct Report
 	{
@@ -46,7 +50,8 @@ namespace KnownFeatures
 	class Catalog
 	{
 	public:
-		// True when the catalog changed. today is YYYY-MM-DD.
+		// True when the catalog changed. Rows with a bad plugin name or feature id,
+		// and new rows past kMaxRows, are refused. today is YYYY-MM-DD.
 		bool Merge(const Report& r, const std::string& today);
 		// Sorted by plugin, then id (case ignored).
 		std::vector<Entry> Entries() const;
@@ -91,7 +96,7 @@ namespace KnownFeatures
 	void Tick(uint64_t nowMs);
 	// Write any change now (shutdown).
 	void Flush();
-	// A copy of every remembered feature, safe from any thread. SA3's snapshot
+	// A copy of every remembered feature, safe from any thread. The wire snapshot
 	// pages through this.
 	std::vector<Entry> Snapshot();
 }

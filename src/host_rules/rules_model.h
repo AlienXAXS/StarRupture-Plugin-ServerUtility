@@ -55,6 +55,9 @@ namespace RulesModel
 	// "Plugin.feature" or "Plugin.*": split and checked.
 	bool ParseKey(const std::string& key, std::string& plugin, std::string& id, std::string& error);
 	// 0.11.0, v0.11.0, 1.27.0-dev.1: at least major.minor, up to four numbers.
+	// A feature id, and a mod name as the mod loader allows it.
+	bool ValidName(const std::string& s);
+	bool ValidPluginName(const std::string& s);
 	bool ValidVersion(const std::string& version);
 	// A key in a player's Sections= list: no control character, space, "|", "=",
 	// ";", "[" or "]", and not starting with "#". Anything else could end the
