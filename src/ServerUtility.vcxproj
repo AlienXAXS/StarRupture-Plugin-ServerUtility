@@ -357,6 +357,7 @@
     <ClInclude Include="host_rules\host_rules.h" />
     <ClInclude Include="rcon\commands\cmd_hostrules.h" />
     <ClInclude Include="rcon\commands\cmd_args.h" />
+    <ClInclude Include="rcon\commands\word_split.h" />
     <ClInclude Include="host_rules\player_ids.h" />
     <ClInclude Include="rcon\commands\cmd_player.h" />
     <ClInclude Include="admin\endpoints\ep_rules_players.h" />

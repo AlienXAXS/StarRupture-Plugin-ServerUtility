@@ -2,6 +2,7 @@
 
 #include "../rcon.h"
 #include "../state/server_state.h"
+#include "word_split.h"
 
 #include <string>
 
@@ -9,19 +10,8 @@
 // hostrules verbs.
 namespace CmdArgs
 {
-	// Take the first space-separated word off rest.
-	inline std::string NextWord(std::string& rest)
-	{
-		const size_t a = rest.find_first_not_of(' ');
-		if (a == std::string::npos) { rest.clear(); return {}; }
-		size_t b = rest.find(' ', a);
-		if (b == std::string::npos) b = rest.size();
-		std::string word = rest.substr(a, b - a);
-		rest.erase(0, b);
-		const size_t c = rest.find_first_not_of(' ');
-		rest.erase(0, c == std::string::npos ? rest.size() : c);
-		return word;
-	}
+	// Take the first space-separated word off rest; a double-quoted part may hold spaces.
+	inline std::string NextWord(std::string& rest) { return WordSplit::TakeWord(rest); }
 
 	// A purely numeric argument of up to 3 digits is the list number.
 	inline bool IsListNumber(const std::string& s)
