@@ -39,6 +39,9 @@ namespace ClaimModel
 	// the rules model kept unread. Anything else, or no line, leaves it on.
 	bool AdminPromptOn(const std::vector<std::string>& policyKept);
 
+	// [Policy] InGameAdmin=0 turns the in-game admin tool off. Same reading as AdminPrompt.
+	bool InGameAdminOn(const std::vector<std::string>& policyKept);
+
 	// Wrong tries: per player (then that player is not asked again until the
 	// server restarts) and overall (then the code is replaced).
 	class Attempts

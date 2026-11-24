@@ -95,7 +95,8 @@ namespace ClaimModel
 		s.clear();
 	}
 
-	bool AdminPromptOn(const std::vector<std::string>& policyKept)
+	// A [Policy] switch kept as an unread line: on unless set to 0, false, off or no.
+	static bool PolicySwitchOn(const std::vector<std::string>& policyKept, const char* wantedKey)
 	{
 		for (const std::string& raw : policyKept)
 		{
@@ -111,7 +112,7 @@ namespace ClaimModel
 			};
 			std::string key = trim(raw.substr(0, eq));
 			std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-			if (key != "adminprompt")
+			if (key != wantedKey)
 				continue;
 
 			std::string value = trim(raw.substr(eq + 1));
@@ -119,6 +120,16 @@ namespace ClaimModel
 			return !(value == "0" || value == "false" || value == "off" || value == "no");
 		}
 		return true;
+	}
+
+	bool AdminPromptOn(const std::vector<std::string>& policyKept)
+	{
+		return PolicySwitchOn(policyKept, "adminprompt");
+	}
+
+	bool InGameAdminOn(const std::vector<std::string>& policyKept)
+	{
+		return PolicySwitchOn(policyKept, "ingameadmin");
 	}
 
 	bool Attempts::Locked(const std::string& playerId) const
