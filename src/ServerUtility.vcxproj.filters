@@ -109,6 +109,10 @@
     <ClCompile Include="admin\endpoints\ep_rules_players.cpp">
       <Filter>admin\endpoints</Filter>
     </ClCompile>
+    <ClCompile Include="admin_wire\admin_wire.cpp"><Filter>admin_wire</Filter></ClCompile>
+    <ClCompile Include="admin_wire\admin_crypto.cpp"><Filter>admin_wire</Filter></ClCompile>
+    <ClCompile Include="admin_wire\wire_info.cpp"><Filter>admin_wire</Filter></ClCompile>
+    <ClCompile Include="client\client_plugin.cpp"><Filter>client</Filter></ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="plugin.h" />
@@ -237,6 +241,12 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
+    <Filter Include="admin_wire">
+      <UniqueIdentifier>{7d1f0c52-3b8e-4c1a-9a6d-2e5b8f0a1c11}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="client">
+      <UniqueIdentifier>{a4c2e9b6-61d3-4f7e-8b05-93d7c1e2f522}</UniqueIdentifier>
+    </Filter>
     <Filter Include="hooks">
       <UniqueIdentifier>{abb35c9f-48e7-415f-9d1b-c17927aa406e}</UniqueIdentifier>
     </Filter>
