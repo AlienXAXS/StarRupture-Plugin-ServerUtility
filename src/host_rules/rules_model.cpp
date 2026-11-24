@@ -132,7 +132,7 @@ namespace RulesModel
 		for (const char ch : key)
 		{
 			const unsigned char c = static_cast<unsigned char>(ch);
-			if (c < 0x20 || c == 0x7f || c == ' ' || c == '|' || c == '=' || c == ';' || c == '[' || c == ']')
+			if (c < 0x20 || c == 0x7f || c == '"' || c == '|' || c == '=' || c == ';' || c == '[' || c == ']')
 				return false;
 		}
 		return true;

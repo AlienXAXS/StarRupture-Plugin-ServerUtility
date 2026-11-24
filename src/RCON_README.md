@@ -131,7 +131,7 @@ Show and edit the host's player list, which is the `[Players]` section of `Plugi
 | `player remove <id\|number>` | Delete an entry |
 | `player reload` | Re-read the file after a hand edit |
 
-Flags for `set`: `admin`, `exemptversion`, `exemptrules`, `sections=<key>;<key>`, `label=<text>` (the label runs to the end of the line). A leading `-` takes a flag off, for example `-admin`. A section key may not hold spaces, control characters or `\| = ; [ ]`, or start with `#`. The reply names the player the number or ID reached. After editing `HostRules.ini` by hand, run `player reload` (or `hostrules reload`) before changing players with RCON or the panel.
+Flags for `set`: `admin`, `exemptversion`, `exemptrules`, `sections=<key>;<key>`, `label=<text>` (the label runs to the end of the line). A leading `-` takes a flag off, for example `-admin`. A section key may not hold control characters, quotes or `\| = ; [ ]`, or start with `#`. For a mod name with a space, put the whole value in quotes: `player set <id|number> sections="Best Builder.some_feature;Other"`. The reply names the player the number or ID reached. After editing `HostRules.ini` by hand, run `player reload` (or `hostrules reload`) before changing players with RCON or the panel.
 
 A 1-3 digit argument is a list number, the number `player ids` shows. Anything else is an ID.
 

@@ -35,9 +35,9 @@ namespace Cmd_HostRules
 			"  hostrules message [text|off]            the line players see when a feature is off\n"
 			"  hostrules minversion [version|off]      minimum mod loader version (players below it are removed)\n"
 			"  hostrules modmin [<plugin> <version|wire|off>]  minimum version of one mod, or wire = a copy the wire check accepts\n"
-			"A mod name with a space goes in quotes: hostrules deny \"Best Builder.some_feature\", hostrules modmin \"Best Builder\" 1.2.0\n"
 			"  hostrules reload                        re-read HostRules.ini\n"
-			"  hostrules who <id|number>               what a player's mod loader reported, and its mods\n";
+			"  hostrules who <id|number>               what a player's mod loader reported, and its mods\n"
+			"Note: a mod name with a space goes in quotes: hostrules deny \"Best Builder.some_feature\", hostrules modmin \"Best Builder\" 1.2.0\n";
 
 		std::string Error(const std::string& text) { return "Error: " + text + "\n"; }
 
