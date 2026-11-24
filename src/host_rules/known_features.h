@@ -47,6 +47,11 @@ namespace KnownFeatures
 	// line), as the mod loader lists them. A line that does not fit is skipped.
 	std::vector<Report> ParseReportText(const std::string& text, const std::string& build);
 
+	// Rows the admin client pushes (catalog.push), one per feature, tab separated:
+	// "<plugin>	<version>	<id>	<on|off>	<title>". Rows that do not fit are
+	// skipped; at most kMaxRowsPerReport are read.
+	std::vector<Report> ParseDeclaredRows(const std::vector<std::string>& rows);
+
 	class Catalog
 	{
 	public:
@@ -89,6 +94,8 @@ namespace KnownFeatures
 	void Init(const std::wstring& path);
 	// Merge a mod loader's feature text (game thread: where reports arrive).
 	void NoteReportText(const std::string& text);
+	// Merge rows pushed by an admin client's mod loader. True when the catalog changed.
+	bool NoteDeclaredRows(const std::vector<std::string>& rows);
 	// Write the file when something changed and 10 s passed. Call from the tick;
 	// it does no I/O unless a write is due.
 	void Tick(uint64_t nowMs);

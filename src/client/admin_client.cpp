@@ -13,6 +13,32 @@ namespace AdminClient
 	{
 		const char* const kNeedsLoader = "The in-game admin needs a newer mod loader.";
 
+		// Measure, then read. False for -1 or an empty text.
+		bool ReadLoaderText(const std::function<int(char*, size_t)>& fn, std::string& out)
+		{
+			if (!fn) return false;
+			const int n = fn(nullptr, 0);
+			if (n <= 0) return false;
+			std::string buf(static_cast<size_t>(n) + 1, '\0');
+			const int got = fn(&buf[0], buf.size());
+			if (got <= 0) return false;
+			out.assign(buf.c_str(), std::min(static_cast<size_t>(got), static_cast<size_t>(n)));
+			return true;
+		}
+
+		std::vector<std::string> SplitTabs(const std::string& line)
+		{
+			std::vector<std::string> f;
+			size_t start = 0;
+			for (;;)
+			{
+				const size_t tab = line.find('\t', start);
+				if (tab == std::string::npos) { f.push_back(line.substr(start)); return f; }
+				f.push_back(line.substr(start, tab - start));
+				start = tab + 1;
+			}
+		}
+
 		bool IsHexOfLength(const std::string& s, size_t n)
 		{
 			if (s.size() != n) return false;
@@ -20,6 +46,46 @@ namespace AdminClient
 				if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) return false;
 			return true;
 		}
+	}
+
+	std::vector<std::string> ParseDeclaredFeatures(const std::string& text)
+	{
+		constexpr size_t kMaxTitle = 80;
+		std::map<std::string, std::string> versions;   // plugin -> version
+		std::vector<std::vector<std::string>> features;
+		size_t pos = 0;
+		while (pos <= text.size())
+		{
+			size_t eol = text.find('\n', pos);
+			if (eol == std::string::npos) eol = text.size();
+			std::string line = text.substr(pos, eol - pos);
+			pos = eol + 1;
+			if (!line.empty() && line.back() == '\r') line.pop_back();
+			const std::vector<std::string> f = SplitTabs(line);   // split on tabs only: names can hold a space
+			if (f[0] == "plugin" && f.size() >= 3)
+				versions[f[1]] = f[2];
+			else if (f[0] == "feature" && f.size() >= 5)
+				features.push_back(f);
+			// format, kind, game_cl, loader and anything unknown: skipped
+		}
+
+		std::vector<std::string> rows;
+		for (const std::vector<std::string>& f : features)
+		{
+			if (rows.size() >= kMaxCatalogRows) break;
+			if (f[3] != "on" && f[3] != "off") continue;
+			std::string title = f[4];
+			for (size_t i = 5; i < f.size(); ++i) title += " " + f[i];
+			if (title.size() > kMaxTitle)
+			{
+				size_t cut = kMaxTitle;
+				while (cut > 0 && (static_cast<unsigned char>(title[cut]) & 0xC0) == 0x80) --cut;
+				title.resize(cut);
+			}
+			const auto v = versions.find(f[1]);
+			rows.push_back(f[1] + "\t" + (v == versions.end() ? std::string() : v->second) + "\t" + f[2] + "\t" + f[3] + "\t" + title);
+		}
+		return rows;
 	}
 
 	Client::Client(const Env& env) : env_(env)
@@ -84,6 +150,67 @@ namespace AdminClient
 			for (const std::string& msg : out) env_.send(msg);
 	}
 
+	void Client::Tick()
+	{
+		bool wantAddress = false, wantCatalog = false;
+		{
+			std::lock_guard<std::mutex> lock(mu_);
+			wantAddress = helloSent_ && !addressRead_;
+			wantCatalog = status_ == Status::Ready && !catalogSent_;
+		}
+		std::string text;
+		if (wantAddress && ReadLoaderText(env_.readAddress, text))
+		{
+			std::lock_guard<std::mutex> lock(mu_);
+			address_ = text;
+			addressRead_ = true;
+		}
+		text.clear();
+		if (wantCatalog && ReadLoaderText(env_.readDeclaredFeatures, text))
+		{
+			const std::vector<std::string> rows = ParseDeclaredFeatures(text);
+			std::lock_guard<std::mutex> lock(mu_);
+			if (status_ == Status::Ready && !catalogSent_)
+			{
+				catalogSent_ = true;
+				QueueCatalog(rows);
+			}
+		}
+	}
+
+	// One or more ops messages, each as many rows as fit. Their results are not shown.
+	void Client::QueueCatalog(const std::vector<std::string>& rows)
+	{
+		std::vector<Op> batch;
+		auto flush = [&]
+		{
+			if (batch.empty()) return;
+			std::string enc;
+			if (EncodeBatch(batch, nextReqId_, 0, enc))
+			{
+				catalogReqIds_.insert(nextReqId_);
+				++nextReqId_;
+				outbox_.push_back(std::move(enc));
+			}
+			batch.clear();
+		};
+		for (const std::string& row : rows)
+		{
+			Op op;
+			op.name = "catalog.push";
+			op.args = { row };
+			batch.push_back(op);
+			std::string enc;
+			if (!EncodeBatch(batch, nextReqId_, 0, enc))
+			{
+				batch.pop_back();
+				flush();
+				batch.push_back(op);
+			}
+		}
+		flush();
+	}
+
 	void Client::SendSnapReq()
 	{
 		Message m;
@@ -96,6 +223,9 @@ namespace AdminClient
 	{
 		status_ = Status::Waiting;
 		helloSent_ = false;
+		addressRead_ = false;
+		catalogSent_ = false;
+		catalogReqIds_.clear();
 		outbox_.clear();
 		serverId_.clear();
 		pendingSecret_.clear();
@@ -343,6 +473,7 @@ namespace AdminClient
 
 	void Client::HandleResult(const Message& m)
 	{
+		if (catalogReqIds_.erase(m.requestId) > 0) return;   // our own catalog push: nothing to show
 		const bool isApply = applyReqId_ != 0 && m.requestId == applyReqId_;
 		const size_t sent = isApply ? applyCount_ : 0;
 		if (isApply) { applyReqId_ = 0; applyCount_ = 0; }

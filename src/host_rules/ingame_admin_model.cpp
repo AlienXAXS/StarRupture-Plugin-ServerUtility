@@ -139,14 +139,68 @@ namespace InGameAdminModel
 		return AdminWire::EncodeSnapshot(snap);
 	}
 
-	std::vector<std::string> Server::RunOps(const std::string& playerId, const std::string& name, const AdminWire::Message& m) const
+	namespace
+	{
+		// Set while one connection's ops run: the "changed" the run causes for that
+		// connection is held back so it follows that connection's "result".
+		thread_local ConnId              t_originConn = 0;
+		thread_local std::vector<std::string>* t_afterResult = nullptr;
+	}
+
+	std::vector<std::string> Server::CatalogPush(ConnId conn, const AdminWire::Message& m) const
+	{
+		AdminWire::Message r;
+		r.tag = AdminWire::Tag::Result;
+		r.requestId = m.requestId;
+		r.revision = env_.revision ? env_.revision() : 0;
+		std::vector<std::string> rows, afterResult;
+		bool only = true;
+		for (const AdminWire::Op& o : m.ops)
+		{
+			if (o.name != "catalog.push" || o.args.size() != 1) { only = false; break; }
+			rows.push_back(o.args[0]);
+		}
+		if (!only)
+		{
+			r.status = AdminWire::kResultError;
+			r.text = "catalog.push goes in a message of its own";
+		}
+		else
+		{
+			if (env_.catalogPush)
+			{
+				t_originConn = conn;
+				t_afterResult = &afterResult;
+				env_.catalogPush(rows);   // bumps the revision when the catalog changed
+				t_originConn = 0;
+				t_afterResult = nullptr;
+			}
+			r.status = AdminWire::kResultOk;
+			r.revision = env_.revision ? env_.revision() : 0;
+		}
+		std::vector<std::string> out;
+		std::string wire;
+		if (AdminWire::Encode(r, wire))
+			out.push_back(wire);
+		out.insert(out.end(), afterResult.begin(), afterResult.end());
+		return out;
+	}
+
+	std::vector<std::string> Server::RunOps(ConnId conn, const std::string& playerId, const std::string& name, const AdminWire::Message& m) const
 	{
 		AdminWire::Message r;
 		r.tag = AdminWire::Tag::Result;
 		r.requestId = m.requestId;
 		OpsOutcome o;
+		std::vector<std::string> afterResult;
 		if (env_.runOps)
+		{
+			t_originConn = conn;
+			t_afterResult = &afterResult;
 			o = env_.runOps(playerId, name, m.ops, m.baseRevision);
+			t_originConn = 0;
+			t_afterResult = nullptr;
+		}
 		else
 			o.text = "Not available";
 		r.revision = o.revision;
@@ -162,6 +216,7 @@ namespace InGameAdminModel
 			const std::vector<std::string> snap = SnapshotMessages(AdminWire::kSectionAll);
 			out.insert(out.end(), snap.begin(), snap.end());
 		}
+		out.insert(out.end(), afterResult.begin(), afterResult.end());
 		return out;
 	}
 
@@ -184,7 +239,12 @@ namespace InGameAdminModel
 			return out;
 		for (const auto& p : proven)
 			if (env_.isAdmin && env_.isAdmin(p.second))   // still an Admin, read now
-				out.push_back(Out{ p.first, wire });
+			{
+				if (t_afterResult && p.first == t_originConn)
+					t_afterResult->push_back(wire);   // goes out after this connection's result
+				else
+					out.push_back(Out{ p.first, wire });
+			}
 		return out;
 	}
 
@@ -241,7 +301,8 @@ namespace InGameAdminModel
 					return out;
 				}
 				c.tokens -= cost;
-				c.limitLogged = false;
+				if (c.tokens >= kOpsBurst)
+					c.limitLogged = false;   // logged again only after the bucket has refilled
 			}
 
 			if (decoded == Decoded::WrongProtocol)
@@ -402,7 +463,9 @@ namespace InGameAdminModel
 		// The game-thread work runs outside the model lock.
 		if (m.tag == Tag::Snap)
 			return SnapshotMessages(m.sections);
-		return RunOps(playerId, who, m);
+		if (m.tag == Tag::Ops && !m.ops.empty() && m.ops.front().name == "catalog.push")
+			return CatalogPush(conn, m);
+		return RunOps(conn, playerId, who, m);
 	}
 
 	std::vector<std::string> Server::WithSnapshot(std::vector<std::string> out) const

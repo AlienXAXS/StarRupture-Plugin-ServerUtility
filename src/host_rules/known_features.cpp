@@ -132,6 +132,29 @@ namespace KnownFeatures
 		return out;
 	}
 
+	std::vector<Report> ParseDeclaredRows(const std::vector<std::string>& rows)
+	{
+		std::vector<Report> out;
+		for (const std::string& row : rows)
+		{
+			if (out.size() >= kMaxRowsPerReport) break;
+			std::vector<std::string> f;
+			size_t start = 0;
+			for (;;)
+			{
+				const size_t tab = row.find('	', start);
+				if (tab == std::string::npos) { f.push_back(row.substr(start)); break; }
+				f.push_back(row.substr(start, tab - start));
+				start = tab + 1;
+			}
+			if (f.size() != 5 || (f[3] != "on" && f[3] != "off")) continue;
+			Report r;
+			r.plugin = f[0]; r.version = f[1]; r.id = f[2]; r.off = f[3] == "off"; r.title = f[4];
+			out.push_back(std::move(r));
+		}
+		return out;
+	}
+
 	bool Catalog::Merge(const Report& r, const std::string& today)
 	{
 		Entry e;
@@ -313,6 +336,18 @@ namespace KnownFeatures
 		const size_t n = std::min(reports.size(), kMaxRowsPerReport);
 		for (size_t i = 0; i < n; ++i)
 			g_dirty |= g_catalog.Merge(reports[i], today);
+	}
+
+	bool NoteDeclaredRows(const std::vector<std::string>& rows)
+	{
+		const std::vector<Report> reports = ParseDeclaredRows(rows);
+		const std::string today = Today();
+		bool changed = false;
+		std::lock_guard<std::mutex> lk(g_mutex);
+		for (const Report& r : reports)
+			changed |= g_catalog.Merge(r, today);
+		g_dirty |= changed;
+		return changed;
 	}
 
 	void Tick(uint64_t nowMs)

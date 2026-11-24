@@ -51,6 +51,9 @@ namespace InGameAdminModel
 		// Game thread. Runs a batch as this player; applies the in-game guards.
 		std::function<OpsOutcome(const std::string& playerId, const std::string& name,
 		                         const std::vector<AdminWire::Op>& ops, uint32_t baseRevision)> runOps;
+		// Game thread. Rows an admin client's mod loader declared (catalog.push); remembers
+		// them and bumps the revision when the catalog changed.
+		std::function<void(const std::vector<std::string>& rows)> catalogPush;
 	};
 
 	// A message for one connection.
@@ -141,7 +144,8 @@ namespace InGameAdminModel
 		std::vector<std::string> SnapshotMessages(const std::string& sections) const;
 		std::vector<std::string> WithSnapshot(std::vector<std::string> out) const;
 		// A proven connection's ops message.
-		std::vector<std::string> RunOps(const std::string& playerId, const std::string& name, const AdminWire::Message& m) const;
+		std::vector<std::string> CatalogPush(ConnId conn, const AdminWire::Message& m) const;
+		std::vector<std::string> RunOps(ConnId conn, const std::string& playerId, const std::string& name, const AdminWire::Message& m) const;
 		void UnproveIdLocked(const std::string& id);
 		void EraseClaimedLocked(const std::string& playerId);
 

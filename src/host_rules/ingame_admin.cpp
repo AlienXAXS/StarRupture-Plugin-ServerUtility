@@ -326,6 +326,11 @@ namespace InGameAdmin
 		env.storePath = StorePath();
 		env.snapshot  = &BuildSnapshot;
 		env.runOps    = &RunOps;
+		env.catalogPush = [](const std::vector<std::string>& rows)
+		{
+			if (KnownFeatures::NoteDeclaredRows(rows))
+				AdminOps::NoteChanged(0);   // every section: the mods list changed
+		};
 
 		auto model = std::make_unique<InGameAdminModel::Server>(env);
 		if (!model->Ready())

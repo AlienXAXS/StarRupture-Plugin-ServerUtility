@@ -14,6 +14,7 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -38,11 +39,21 @@ namespace AdminClient
 	constexpr double kPairTimeoutSeconds = 10.0;      // no answer to a pair message
 	constexpr const char* kUnknownAddress = "unknown";
 
+	// Rows of a catalog.push, from the mod loader's declared-features text. One row per
+	// feature: "<plugin>\t<version>\t<id>\t<on|off>\t<title>". The header rows (format,
+	// kind, game_cl, loader) and plugin rows are read, not sent; titles are cut to 80 bytes.
+	constexpr size_t kMaxCatalogRows = 90;   // under one connection's request burst
+	std::vector<std::string> ParseDeclaredFeatures(const std::string& text);
+
 	struct Env
 	{
 		std::function<void(const std::string&)> send;   // sends one encoded message to the server
 		std::function<double()> now;                    // seconds, monotonic
 		std::string storePath;                          // client secret store file
+		// Loader text calls (loader interface 80), game thread only. Same convention as the
+		// loader: the full length, or -1 when there is nothing to give; null buf and size 0 measure.
+		std::function<int(char*, size_t)> readAddress;          // IPluginNetworkChannel::GetServerAddress
+		std::function<int(char*, size_t)> readDeclaredFeatures; // IPluginRegistry::GetDeclaredFeatures
 	};
 
 	// Everything the render callback needs, copied out under the lock.
@@ -68,6 +79,9 @@ namespace AdminClient
 		void OnPacket(const uint8_t* data, size_t size);
 		void OnWorldEnd();                                 // back to waiting, drops snapshot and staged ops
 		void Flush();                                      // game-thread tick: sends the queued messages
+		// Game-thread tick, before Flush: reads the server address once the server is ready
+		// (until the loader gives one), and pushes the declared features once the connection is proven.
+		void Tick();
 		// Game-thread tick, after the server is ready: the address of the client's own connection
 		// as lower-case "ip:port", or kUnknownAddress (or empty) when the loader cannot give it.
 		void SetServerAddress(const std::string& address);
@@ -104,6 +118,10 @@ namespace AdminClient
 			std::string secretHex;
 		};
 		std::map<std::string, Pin> secrets_;           // server id -> pin (loaded once)
+		bool addressRead_ = false;                     // the loader gave an address on this connection
+		bool catalogSent_ = false;                     // catalog.push went out on this connection
+		std::set<uint32_t> catalogReqIds_;             // their results are not shown
+		void QueueCatalog(const std::vector<std::string>& rows);
 		std::string address_ = kUnknownAddress;        // current connection address, fed by SetServerAddress
 
 		Status status_ = Status::Waiting;

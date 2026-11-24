@@ -1,5 +1,8 @@
 // ServerUtility, client half: the in-game admin tool. Reads no game values and
 // touches no UObjects; it only exchanges plugin packets with the server half.
+#ifndef MODLOADER_CLIENT_BUILD
+#error "The client half calls loader interface 80 and is built only in the Client configurations"
+#endif
 #include "plugin.h"
 #include "plugin_helpers.h"
 #include "client/admin_client.h"
@@ -43,7 +46,9 @@ static void OnAdminPacket(const char*, const char*, const uint8_t* data, size_t 
 // Game thread: the only place the client sends, so the render callback makes no loader calls.
 static void OnTick(float)
 {
-	if (g_client) g_client->Flush();
+	if (!g_client) return;
+	g_client->Tick();   // loader address and declared-features reads belong to the game thread
+	g_client->Flush();
 }
 
 static void OnServerReady(const char*)
@@ -108,6 +113,19 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 		if (s && s->hooks && s->hooks->Network)
 			s->hooks->Network->SendPacketToServer(s, AdminWire::kPacketTag,
 				reinterpret_cast<const uint8_t*>(msg.data()), msg.size());
+	};
+	// Loader interface 80. A v79 loader never loads this DLL, so both exist when this runs.
+	env.readAddress = [](char* buf, size_t size) -> int
+	{
+		IPluginSelf* s = g_self;
+		if (!s || !s->hooks || !s->hooks->Network || !s->hooks->Network->GetServerAddress) return -1;
+		return s->hooks->Network->GetServerAddress(buf, size);
+	};
+	env.readDeclaredFeatures = [](char* buf, size_t size) -> int
+	{
+		IPluginSelf* s = g_self;
+		if (!s || !s->hooks || !s->hooks->Registry || !s->hooks->Registry->GetDeclaredFeatures) return -1;
+		return s->hooks->Registry->GetDeclaredFeatures(buf, size);
 	};
 	env.now = &NowSeconds;
 	env.storePath = PairingStorePath();
