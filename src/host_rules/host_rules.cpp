@@ -416,6 +416,7 @@ namespace HostRules
 			LOG_WARN("[HostRules] Rules not read: %s", error.c_str());
 
 		const std::wstring featuresPath = IniFile::DataPath(L"known-features.txt");
+		KnownFeatures::SetWarnSink([](const std::string& line) { LOG_WARN("%s", line.c_str()); });
 		if (!featuresPath.empty())
 			KnownFeatures::Init(featuresPath);
 

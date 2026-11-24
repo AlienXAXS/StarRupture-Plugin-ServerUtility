@@ -44,14 +44,10 @@ namespace KnownFeatures
 
 		constexpr size_t kMaxTitle = 80;
 
-		// The row as the catalog keeps it: a title cut to kMaxTitle bytes on a UTF-8
-		// boundary, and false when a version is given that is not a version.
-		bool Fit(Report& r)
+		// The row as the catalog keeps it: a title cut to kMaxTitle bytes on a UTF-8 boundary.
+		void Fit(Report& r)
 		{
-			if (!r.version.empty() && !RulesModel::ValidVersion(Clean(r.version)))
-				return false;
 			r.title = AdminWire::CleanText(r.title, kMaxTitle);
-			return true;
 		}
 
 		// Numbers of a version, at most four; empty when it has none.
@@ -143,7 +139,7 @@ namespace KnownFeatures
 			Report r;
 			r.plugin = f[0]; r.version = f[1]; r.id = f[2]; r.off = f[3] == "off"; r.title = f[4];
 			r.recordOff = false;   // the push carries no game build
-			if (!Fit(r)) continue;
+			Fit(r);
 			out.push_back(std::move(r));
 		}
 		return out;
@@ -155,7 +151,7 @@ namespace KnownFeatures
 		bool seen = false;
 		bool& shown = visible ? *visible : seen;
 		shown = false;
-		if (!Fit(r)) return false;
+		Fit(r);
 		Entry e;
 		e.plugin = Clean(r.plugin);
 		e.id = Clean(r.id);
@@ -163,6 +159,13 @@ namespace KnownFeatures
 			return false;
 		e.title = Clean(r.title);
 		e.version = Clean(r.version);
+		if (!e.version.empty() && !RulesModel::ValidVersion(e.version))
+		{
+			// A plugin built without a tag reports "dev": keep the row, without a version.
+			e.version.clear();
+			if (m_versionWarned.insert(Lower(e.plugin)).second)
+				m_newVersionWarn.push_back(e.plugin);
+		}
 		if (r.off && r.recordOff)
 			e.offBuilds.insert(r.build.empty() ? kUnknownBuild : CleanBuild(r.build));
 		e.lastSeen = today;
@@ -208,6 +211,13 @@ namespace KnownFeatures
 		out.reserve(m_rows.size());
 		for (const auto& kv : m_rows)
 			out.push_back(kv.second);
+		return out;
+	}
+
+	std::vector<std::string> Catalog::TakeVersionWarnings()
+	{
+		std::vector<std::string> out;
+		out.swap(m_newVersionWarn);
 		return out;
 	}
 
@@ -307,6 +317,15 @@ namespace KnownFeatures
 		Debounce    g_debounce;
 		std::wstring g_path;
 		bool        g_dirty = false;
+		WarnSink    g_warn = nullptr;
+
+		// Logs, once per plugin, a version the catalog could not read. Lock not held.
+		void WarnVersions(const std::vector<std::string>& plugins)
+		{
+			if (!g_warn) return;
+			for (const std::string& p : plugins)
+				g_warn("[KnownFeatures] " + p + " reports a version that is not a version number; its features are listed without one");
+		}
 
 		// Writes the catalog; the lock is not held during the write.
 		void Write(uint64_t nowMs)
@@ -330,22 +349,38 @@ namespace KnownFeatures
 	{
 		std::string text;
 		const bool read = LoadFile(path, text);
+		std::vector<std::string> warn;
+		{
+			std::lock_guard<std::mutex> lk(g_mutex);
+			g_path = path;
+			g_catalog = Catalog();
+			g_dirty = false;
+			if (read)
+				g_catalog.Parse(text);
+			warn = g_catalog.TakeVersionWarnings();
+		}
+		WarnVersions(warn);
+	}
+
+	void SetWarnSink(WarnSink sink)
+	{
 		std::lock_guard<std::mutex> lk(g_mutex);
-		g_path = path;
-		g_catalog = Catalog();
-		g_dirty = false;
-		if (read)
-			g_catalog.Parse(text);
+		g_warn = sink;
 	}
 
 	void NoteReportText(const std::string& text)
 	{
 		const std::vector<Report> reports = ParseReportText(text, std::string());
 		const std::string today = Today();
-		std::lock_guard<std::mutex> lk(g_mutex);
-		const size_t n = std::min(reports.size(), kMaxRowsPerReport);
-		for (size_t i = 0; i < n; ++i)
-			g_dirty |= g_catalog.Merge(reports[i], today);
+		std::vector<std::string> warn;
+		{
+			std::lock_guard<std::mutex> lk(g_mutex);
+			const size_t n = std::min(reports.size(), kMaxRowsPerReport);
+			for (size_t i = 0; i < n; ++i)
+				g_dirty |= g_catalog.Merge(reports[i], today);
+			warn = g_catalog.TakeVersionWarnings();
+		}
+		WarnVersions(warn);
 	}
 
 	bool NoteDeclaredRows(const std::vector<std::string>& rows)
@@ -353,13 +388,18 @@ namespace KnownFeatures
 		const std::vector<Report> reports = ParseDeclaredRows(rows);
 		const std::string today = Today();
 		bool shown = false;
-		std::lock_guard<std::mutex> lk(g_mutex);
-		for (const Report& r : reports)
+		std::vector<std::string> warn;
 		{
-			bool one = false;
-			g_dirty |= g_catalog.Merge(r, today, &one);
-			shown |= one;
+			std::lock_guard<std::mutex> lk(g_mutex);
+			for (const Report& r : reports)
+			{
+				bool one = false;
+				g_dirty |= g_catalog.Merge(r, today, &one);
+				shown |= one;
+			}
+			warn = g_catalog.TakeVersionWarnings();
 		}
+		WarnVersions(warn);
 		return shown;
 	}
 

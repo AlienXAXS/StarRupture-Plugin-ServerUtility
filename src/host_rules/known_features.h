@@ -56,12 +56,15 @@ namespace KnownFeatures
 	class Catalog
 	{
 	public:
-		// True when the catalog changed. Rows with a bad plugin name, feature id or
-		// version, and new rows past kMaxRows, are refused; a title is cut to 80
+		// True when the catalog changed. Rows with a bad plugin name or feature id,
+		// and new rows past kMaxRows, are refused; a title is cut to 80
 		// bytes. today is YYYY-MM-DD. *visible, when given, is set when something a
 		// window shows changed (a new row, version, title or off build) - a newer
 		// lastSeen alone is a change to save, not to show.
 		bool Merge(const Report& r, const std::string& today, bool* visible = nullptr);
+		// The plugins whose version could not be read since the last call, each named
+		// once for the life of the catalog. Their rows are kept, with no version.
+		std::vector<std::string> TakeVersionWarnings();
 		// Sorted by plugin, then id (case ignored).
 		std::vector<Entry> Entries() const;
 		size_t Size() const { return m_rows.size(); }
@@ -73,6 +76,8 @@ namespace KnownFeatures
 
 	private:
 		std::map<std::string, Entry> m_rows;   // lower-case "plugin.id"
+		std::set<std::string> m_versionWarned;   // lower-case plugin names
+		std::vector<std::string> m_newVersionWarn;
 	};
 
 	// At most one write per interval. Not thread safe: one owner.
@@ -98,6 +103,9 @@ namespace KnownFeatures
 	// ---- the plugin's catalog ----
 	// Load the file once. An empty path keeps the catalog in memory only.
 	void Init(const std::wstring& path);
+	// Where a catalog warning goes (one line); none by default. The lock is not held when it runs.
+	using WarnSink = void (*)(const std::string&);
+	void SetWarnSink(WarnSink sink);
 	// Merge a mod loader's feature text (game thread: where reports arrive).
 	void NoteReportText(const std::string& text);
 	// Merge rows pushed by an admin client's mod loader. True when something a

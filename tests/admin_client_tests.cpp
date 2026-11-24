@@ -291,6 +291,9 @@ int main()
 		r.addrFn = FakeRead(kAddr);
 		r.client->Tick();                                   // a late address does not revive the refused challenge
 		CHECK(r.Count(Tag::Prove) == 0);
+		CHECK(r.View().lastResult == kNoAddressText);
+		r.Ready();                                          // the next server-ready starts clean
+		CHECK(r.View().lastResult.empty() && !r.View().lastResultIsError && r.View().status == Status::Waiting);
 
 		Rig q;
 		q.addrFn = [](char*, size_t) { return -1; };
@@ -301,6 +304,24 @@ int main()
 		CHECK(!q.client->Pair("ABCD2345"));
 		CHECK(q.Count(Tag::Pair) == 0 && !q.View().pairPending);
 		CHECK(q.View().lastResultIsError && q.View().lastResult == kNoAddressText);
+	}
+
+	// A server that keeps sending challenges does not extend the hold: it times out from the first.
+	{
+		Rig r(kServerId + " " + kAddr + " " + kSecret + "
+", "repeatchallenge");
+		r.addrFn = [](char*, size_t) { return -1; };
+		r.Ready();
+		r.Clear();
+		r.Feed(Challenge());
+		r.clock += AdminClient::kPairTimeoutSeconds - 0.5;
+		r.Feed(Challenge());
+		r.clock += 0.3;
+		r.Feed(Challenge());
+		CHECK(r.View().status == Status::Waiting);
+		r.clock += 0.3;
+		AdminClient::View v = r.View();
+		CHECK(r.Count(Tag::Prove) == 0 && v.status == Status::PairNeeded && v.lastResult == kNoAddressText);
 	}
 
 	// A second server-ready without a world end, with the read failing, forgets the previous server's address.

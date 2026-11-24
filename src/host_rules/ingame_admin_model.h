@@ -52,7 +52,7 @@ namespace InGameAdminModel
 		std::function<OpsOutcome(const std::string& playerId, const std::string& name,
 		                         const std::vector<AdminWire::Op>& ops, uint32_t baseRevision)> runOps;
 		// Game thread. Rows an admin client's mod loader declared (catalog.push); remembers
-		// them and bumps the revision when the catalog changed.
+		// them; the host announces a change with NoteCatalogChanged (the revision stays).
 		std::function<void(const std::vector<std::string>& rows)> catalogPush;
 	};
 

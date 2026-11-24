@@ -1252,20 +1252,33 @@ int main()
 			for (const auto& en : g.Entries()) if (en.id == "other") CHECK(en.offBuilds.empty());
 		}
 
-		// A long title is cut to 80 bytes on a UTF-8 boundary; a row with a junk version is dropped.
+		// A long title is cut to 80 bytes on a UTF-8 boundary; a junk version is kept out, the row stays.
 		{
 			const std::string kb(4000, 'x');
 			std::string wide;
-			for (int i = 0; i < 100; ++i) wide += "Ã©";   // 2-byte characters
+			for (int i = 0; i < 100; ++i) wide += "â¬";   // 3-byte characters (euro sign): byte 80 falls mid-character
 			const auto rows = ParseDeclaredRows({ "P	1.0	long	on	" + kb, "P	1.0	wide	on	" + wide, "P	99999	junk	on	T", "P	abc	junk2	on	T", "P		blank	on	T" });
-			CHECK(rows.size() == 3);
-			CHECK(rows.size() == 3 && rows[0].title.size() == 80 && rows[0].id == "long");
-			CHECK(rows.size() == 3 && rows[1].title.size() == 80 && rows[1].title.back() == static_cast<char>(0xA9));
-			CHECK(rows.size() == 3 && rows[2].id == "blank");
+			CHECK(rows.size() == 5);
+			CHECK(rows.size() == 5 && rows[0].title.size() == 80 && rows[0].id == "long");
+			CHECK(rows.size() == 5 && rows[1].title.size() <= 80 && rows[1].title.size() < 80 && rows[1].title.size() % 3 == 0
+			      && rows[1].title.compare(rows[1].title.size() - 3, 3, "â¬") == 0);
+			CHECK(rows.size() == 5 && rows[2].id == "junk" && rows[3].id == "junk2" && rows[4].id == "blank");
 			Catalog g;
 			Report big = rep("P", "big", "1.0", "", false, kb.c_str());
 			CHECK(g.Merge(big, d1) && g.Entries()[0].title.size() == 80);
-			CHECK(!g.Merge(rep("P", "junk", "99999", "", false), d1) && g.Size() == 1);
+			// A version that is not one: the row is kept with no version, and the plugin is named once.
+			CHECK(g.Merge(rep("P", "junk", "99999", "", false), d1) && g.Size() == 2);
+			CHECK(g.Merge(rep("P", "junk2", "dev", "", false), d1) && g.Size() == 3);
+			for (const auto& en : g.Entries()) if (en.id == "junk" || en.id == "junk2") CHECK(en.version.empty());
+			const auto warned = g.TakeVersionWarnings();
+			CHECK(warned.size() == 1 && warned[0] == "P");
+			g.Merge(rep("p", "junk3", "dev", "", false), d1);
+			CHECK(g.TakeVersionWarnings().empty());
+			// Our real version strings are versions, except a plugin built with no tag, which reports "dev".
+			CHECK(ValidVersion("0.19.0-dev.13"));
+			CHECK(ValidVersion("1.26.1-dev.13"));
+			CHECK(ValidVersion("1.0"));
+			CHECK(!ValidVersion("dev"));
 		}
 
 		// Names are checked and rows are capped.

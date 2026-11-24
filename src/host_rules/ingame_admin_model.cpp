@@ -177,7 +177,7 @@ namespace InGameAdminModel
 			{
 				t_originConn = conn;
 				t_afterResult = &afterResult;
-				env_.catalogPush(rows);   // bumps the revision when the catalog changed
+				env_.catalogPush(rows);   // the host announces a change with NoteCatalogChanged; the revision stays
 				t_originConn = 0;
 				t_afterResult = nullptr;
 			}

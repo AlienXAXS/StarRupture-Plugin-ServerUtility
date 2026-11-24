@@ -318,6 +318,8 @@ namespace AdminClient
 
 	void Client::HandleChallenge(const Message& m)
 	{
+		// One held challenge at a time: a server that keeps challenging must not restart the timeout.
+		if (haveHeldChallenge_) return;
 		serverId_ = m.serverId;
 		Message p;
 		p.tag = Tag::Prove;
