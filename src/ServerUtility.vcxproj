@@ -508,6 +508,8 @@
     <ClCompile Include="admin_wire\wire_info.cpp" />
     <ClCompile Include="client\client_plugin.cpp" Condition="'$(Configuration)' == 'Client Debug' Or '$(Configuration)' == 'Client Release'" />
     <ClCompile Include="client\admin_client.cpp" Condition="'$(Configuration)' == 'Client Debug' Or '$(Configuration)' == 'Client Release'" />
+    <ClCompile Include="client\admin_view.cpp" Condition="'$(Configuration)' == 'Client Debug' Or '$(Configuration)' == 'Client Release'" />
+    <ClCompile Include="client\admin_window.cpp" Condition="'$(Configuration)' == 'Client Debug' Or '$(Configuration)' == 'Client Release'" />
   </ItemGroup>
   <ItemGroup Condition="'$(Configuration)' == 'Client Debug' Or '$(Configuration)' == 'Client Release'">
     <ClCompile Remove="hooks\**;rcon\**;admin\**;host_rules\**;plugin.cpp;plugin_config.cpp;$(StarRuptureSDKSourceDir)*.cpp" />

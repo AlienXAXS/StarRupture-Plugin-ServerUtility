@@ -132,6 +132,8 @@
     <ClCompile Include="admin_wire\wire_info.cpp"><Filter>admin_wire</Filter></ClCompile>
     <ClCompile Include="client\client_plugin.cpp"><Filter>client</Filter></ClCompile>
     <ClCompile Include="client\admin_client.cpp"><Filter>client</Filter></ClCompile>
+    <ClCompile Include="client\admin_view.cpp"><Filter>client</Filter></ClCompile>
+    <ClCompile Include="client\admin_window.cpp"><Filter>client</Filter></ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="plugin.h" />
