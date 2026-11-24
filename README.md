@@ -126,6 +126,8 @@ hostrules default allow
 hostrules unset BetterCheats.movement
 ```
 
+ServerUtility remembers every mod feature a player's mod loader has reported, in `Plugins\ServerUtility\known-features.txt` (plugin, newest version seen, feature ID, title, the game builds that reported it off, the date it was last seen, and where the row came from). The file is read at start and rewritten, at most once every 10 seconds, only when something changed. `hostrules` lists the remembered features with each row's source and warns about a rule that matches none of them, so a mod appears here after one player with it has joined and stays after a restart. The panel's `/rules/catalog` returns the same list as `known`.
+
 After editing the file by hand, run `hostrules reload`. Run `player reload` (or `hostrules reload`) before changing players with RCON or the panel, or the hand edit to `[Players]` is overwritten. A line the plugin does not understand is logged, left in the file and ignored.
 
 What works today and what does not:

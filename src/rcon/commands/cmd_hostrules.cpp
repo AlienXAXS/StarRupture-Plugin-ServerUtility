@@ -4,6 +4,7 @@
 #include "../../host_rules/admin_ops.h"
 #include "../../host_rules/host_rules.h"
 #include "../../host_rules/ini_file.h"
+#include "../../host_rules/known_features.h"
 #include "../../host_rules/player_list.h"
 
 #include <sstream>
@@ -39,6 +40,36 @@ namespace Cmd_HostRules
 
 		std::string Error(const std::string& text) { return "Error: " + text + "\n"; }
 
+		// The remembered catalog, each row with where it came from, and the rules
+		// that match none of it.
+		void AppendKnown(std::ostringstream& oss, const RulesModel::Model& m)
+		{
+			const std::vector<KnownFeatures::Entry> known = KnownFeatures::Snapshot();
+			std::vector<std::string> keys;
+			for (const auto& r : m.rules) keys.push_back(r.plugin + "." + r.id);
+			for (const std::string& k : KnownFeatures::UnmatchedKeys(keys, known))
+				oss << "  warning: no remembered feature matches the rule " << k << "\n";
+
+			if (known.empty())
+			{
+				oss << "  known features: none yet (a player's mod loader lists them when they join)\n";
+				return;
+			}
+			oss << "  known features (" << known.size() << "):\n";
+			for (const KnownFeatures::Entry& e : known)
+			{
+				oss << "    " << e.plugin << "." << e.id << " [" << e.source << "]";
+				if (!e.title.empty()) oss << " " << e.title;
+				if (!e.version.empty()) oss << " v" << e.version;
+				if (!e.offBuilds.empty())
+				{
+					oss << " off on:";
+					for (const std::string& b : e.offBuilds) oss << " " << b;
+				}
+				oss << " (last seen " << e.lastSeen << ")\n";
+			}
+		}
+
 		std::string State()
 		{
 			const RulesModel::Model m = HostRules::Get();
@@ -51,6 +82,7 @@ namespace Cmd_HostRules
 			oss << "  minimum loader version: " << (m.minLoaderVersion.empty() ? "off" : m.minLoaderVersion) << "\n";
 			if (m.modMins.empty()) oss << "  minimum mod versions: none\n";
 			else for (const auto& r : m.modMins) oss << "  minimum " << r.plugin << ": " << r.version << "\n";
+			AppendKnown(oss, m);
 			if (!HostRules::LoaderReceives())
 				oss << "  This mod loader has no host rules support, so the rules are saved but not sent.\n";
 			oss << "  version minimums: " << HostRules::MinimumsStatus() << "\n";

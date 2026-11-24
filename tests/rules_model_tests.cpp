@@ -1,14 +1,16 @@
 // Unit tests of the rules parser and the text it makes for the mod loader.
 // No project file: from a Visual Studio developer prompt, in the repo root:
-//   cl /nologo /EHsc /std:c++17 /Isrc tests\rules_model_tests.cpp src\host_rules\rules_model.cpp src\host_rules\claim_model.cpp /Fe:rules_model_tests.exe
+//   cl /nologo /EHsc /std:c++17 /Isrc tests\rules_model_tests.cpp src\host_rules\rules_model.cpp src\host_rules\claim_model.cpp src\host_rules\admin_ops.cpp src\host_rules\known_features.cpp /Fe:rules_model_tests.exe
 //   rules_model_tests.exe
 #include "host_rules/rules_model.h"
 #include "host_rules/claim_model.h"
 #include "host_rules/admin_ops.h"
+#include "host_rules/known_features.h"
 #include "admin/url_match.h"
 
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <set>
 
 static int g_checks = 0, g_failed = 0;
@@ -453,6 +455,97 @@ int main()
 			CHECK(Revision() == before + 1 && calls == 1 && secs == kSectionPlayers);
 			RemoveListener(h);
 		}
+	}
+
+	// Remembered feature catalog.
+	{
+		using namespace KnownFeatures;
+		auto rep = [](const char* plugin, const char* id, const char* version, const char* build, bool off, const char* title = "")
+		{
+			Report r; r.plugin = plugin; r.id = id; r.version = version; r.build = build; r.off = off; r.title = title;
+			return r;
+		};
+		const std::string d1 = "2026-11-20", d2 = "2026-11-23";
+
+		// Merge: a new feature is added, the same one again is not a change, a new day is.
+		Catalog c;
+		CHECK(c.Merge(rep("BetterDrone", "drone-limits", "1.2.0", "", false, "Drone limits"), d1));
+		CHECK(c.Size() == 1);
+		CHECK(!c.Merge(rep("betterdrone", "Drone-Limits", "1.2.0", "", false), d1));
+		CHECK(c.Size() == 1);
+		CHECK(c.Merge(rep("BetterDrone", "drone-limits", "1.2.0", "", false), d2));
+		CHECK(c.Entries()[0].lastSeen == d2 && c.Entries()[0].title == "Drone limits" && c.Entries()[0].source == "reported");
+		CHECK(c.Merge(rep("BetterCheats", "movement", "", "", false), d1) && c.Size() == 2);
+		CHECK(c.Entries()[0].plugin == "BetterCheats");   // sorted
+
+		// Newest version wins (numbers, not text).
+		CHECK(CompareVersions("1.10.0", "1.9.0") > 0 && CompareVersions("v1.2", "1.2.0") == 0);
+		CHECK(CompareVersions("1.2.0-dev.3", "1.2.0") == 0 && CompareVersions("", "0.0.1") < 0);
+		Catalog v;
+		v.Merge(rep("P", "f", "1.9.0", "", false, "Old title"), d1);
+		CHECK(v.Merge(rep("P", "f", "1.10.0", "", false, "New title"), d1));
+		CHECK(v.Entries()[0].version == "1.10.0" && v.Entries()[0].title == "New title");
+		CHECK(!v.Merge(rep("P", "f", "1.9.5", "", false, "Older title"), d1));
+		CHECK(v.Entries()[0].version == "1.10.0" && v.Entries()[0].title == "New title");
+
+		// Off by build accumulates; an on report does not clear it.
+		Catalog b;
+		b.Merge(rep("P", "f", "1.0", "1.0.100", true), d1);
+		CHECK(b.Merge(rep("P", "f", "1.0", "1.0.200", true), d1));
+		CHECK(!b.Merge(rep("P", "f", "1.0", "1.0.200", true), d1));
+		CHECK(!b.Merge(rep("P", "f", "1.0", "1.0.300", false), d1));
+		CHECK(b.Entries()[0].offBuilds == std::set<std::string>({ "1.0.100", "1.0.200" }));
+
+		// A loader's text: first line skipped, bad lines skipped.
+		const std::vector<Report> parsed = ParseReportText("loader=1.2 interface=79\nA.x=on\nB.y=off\nnoequals\nC=on\nD.z=maybe\n", "b1");
+		CHECK(parsed.size() == 2 && parsed[0].plugin == "A" && !parsed[0].off && parsed[1].id == "y" && parsed[1].off && parsed[1].build == "b1");
+
+		// Save then load round trip, through the file.
+		const std::filesystem::path dir = std::filesystem::temp_directory_path() / "su_known_features_test";
+		std::filesystem::remove_all(dir);
+		const std::wstring path = (dir / "known-features.txt").wstring();
+		Catalog full;
+		full.Merge(rep("Plug", "id1", "2.0.1", "b1", true, "A title with spaces"), d1);
+		full.Merge(rep("Plug", "id1", "2.0.1", "b2", true), d2);
+		full.Merge(rep("Plug", "id2", "", "", false), d2);
+		CHECK(SaveFile(path, full.Serialize()));
+		CHECK(!std::filesystem::exists(dir / "known-features.txt.tmp"));
+		std::string back;
+		CHECK(LoadFile(path, back));
+		Catalog loaded;
+		CHECK(loaded.Parse(back) == 0);
+		CHECK(loaded.Serialize() == full.Serialize() && loaded.Size() == 2);
+		CHECK(loaded.Entries()[0].offBuilds.size() == 2 && loaded.Entries()[0].lastSeen == d2 && loaded.Entries()[0].title == "A title with spaces");
+		CHECK(SaveFile(path, loaded.Serialize()));   // overwrites an existing file
+		std::filesystem::remove_all(dir);
+		std::string none;
+		CHECK(!LoadFile(path, none));
+
+		// A corrupt line is skipped, the rest kept.
+		Catalog corrupt;
+		const int skipped = corrupt.Parse("known-features 1\n"
+			"feature\tP\t1.0\ta\tTitle\t\t2026-11-20\treported\n"
+			"garbage line\n"
+			"feature\tP\t1.0\tb\tTitle\t\tnot-a-date\treported\n"
+			"feature\tP\t1.0\n"
+			"feature\tQ\t\tc\t\tb1,b2\t2026-11-21\tpublished\n");
+		CHECK(skipped == 3 && corrupt.Size() == 2);
+		CHECK(corrupt.Entries()[1].source == "published" && corrupt.Entries()[1].offBuilds.size() == 2);
+
+		// Debounce: the first change writes, none again inside 10 s, one after.
+		Debounce db;
+		CHECK(!db.Due(false, 0));
+		CHECK(db.Due(true, 1000));
+		db.Wrote(1000);
+		CHECK(!db.Due(true, 1001) && !db.Due(true, 10999));
+		CHECK(!db.Due(false, 20000));
+		CHECK(db.Due(true, 11000));
+		db.Wrote(11000);
+		CHECK(!db.Due(true, 12000));
+
+		// Rule keys that match nothing remembered.
+		const std::vector<std::string> unmatched = UnmatchedKeys({ "BetterDrone.drone-limits", "betterdrone.*", "Other.x", "Other.*", "BetterCheats.nope" }, c.Entries());
+		CHECK(unmatched.size() == 3 && unmatched[0] == "Other.x" && unmatched[1] == "Other.*" && unmatched[2] == "BetterCheats.nope");
 	}
 
 	std::printf("%d checks, %d failed\n", g_checks, g_failed);

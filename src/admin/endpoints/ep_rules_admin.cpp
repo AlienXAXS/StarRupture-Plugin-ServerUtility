@@ -4,6 +4,7 @@
 #include "../admin_gamethread.h"
 #include "../../host_rules/admin_ops.h"
 #include "../../host_rules/host_rules.h"
+#include "../../host_rules/known_features.h"
 #include "../../host_rules/player_ids.h"
 
 #include "SDK/Engine_classes.hpp"
@@ -111,6 +112,22 @@ namespace
 		{
 			json << (firstFeature ? "" : ",") << "{\"key\":\"" << Escape(f.first) << "\",\"players\":" << f.second << "}";
 			firstFeature = false;
+		}
+		json << "],\"known\":[";
+		bool firstKnown = true;
+		for (const KnownFeatures::Entry& e : KnownFeatures::Snapshot())
+		{
+			json << (firstKnown ? "" : ",") << "{\"plugin\":\"" << Escape(e.plugin) << "\",\"id\":\"" << Escape(e.id)
+			     << "\",\"title\":\"" << Escape(e.title) << "\",\"version\":\"" << Escape(e.version)
+			     << "\",\"off_builds\":[";
+			bool firstBuild = true;
+			for (const std::string& b : e.offBuilds)
+			{
+				json << (firstBuild ? "" : ",") << "\"" << Escape(b) << "\"";
+				firstBuild = false;
+			}
+			json << "],\"last_seen\":\"" << Escape(e.lastSeen) << "\",\"source\":\"" << Escape(e.source) << "\"}";
+			firstKnown = false;
 		}
 		json << "]";
 		return json.str();

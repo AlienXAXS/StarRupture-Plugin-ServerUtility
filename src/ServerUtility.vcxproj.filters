@@ -91,6 +91,9 @@
     <ClCompile Include="host_rules\player_list.cpp">
       <Filter>host_rules</Filter>
     </ClCompile>
+    <ClCompile Include="host_rules\known_features.cpp">
+      <Filter>host_rules</Filter>
+    </ClCompile>
     <ClCompile Include="host_rules\ini_file.cpp">
       <Filter>host_rules</Filter>
     </ClCompile>

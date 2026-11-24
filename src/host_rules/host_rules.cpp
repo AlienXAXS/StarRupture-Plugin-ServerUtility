@@ -1,5 +1,6 @@
 #include "host_rules.h"
 #include "ini_file.h"
+#include "known_features.h"
 #include "player_ids.h"
 #include "player_list.h"
 #include "admin_claim.h"
@@ -19,6 +20,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <map>
 #include <mutex>
 #include <vector>
@@ -54,9 +56,39 @@ namespace
 	std::vector<Waiting>      g_waiting;
 	bool                      g_tickRegistered = false;
 
-	// Note a player whose loader reported its feature list.
-	void RecordReported(const std::string& id)
+	// Game thread. The feature text one controller's loader reported; false
+	// when there is none.
+	bool ReadFeatures(IPluginHostRules* api, void* playerController, std::string& text)
 	{
+		// Measure, then fetch; a second pass covers a text that grew in between.
+		std::string buf;
+		int need = api->GetClientFeatures(playerController, nullptr, 0);
+		for (int pass = 0; pass < 3 && need >= 0; ++pass)
+		{
+			buf.assign(static_cast<size_t>(need) + 1, '\0');
+			const int got = api->GetClientFeatures(playerController, buf.data(), buf.size());
+			if (got < 0)
+				return false;
+			if (static_cast<size_t>(got) < buf.size())
+			{
+				buf.resize(static_cast<size_t>(got));
+				text = buf;
+				return true;
+			}
+			need = got;
+		}
+		return false;
+	}
+
+	// Note a player whose loader reported its feature list, and remember the
+	// features in it. Game thread (where the loader's callback runs).
+	void RecordReported(const std::string& id, void* playerController)
+	{
+		auto* hooks = GetHooks();
+		std::string text;
+		if (hooks && hooks->HostRules && ReadFeatures(hooks->HostRules, playerController, text))
+			KnownFeatures::NoteReportText(text);
+
 		std::lock_guard<std::mutex> lk(g_mutex);
 		auto it = std::find_if(g_known.begin(), g_known.end(), [&](const Known& k) { return k.id == id; });
 		if (it == g_known.end()) { g_known.push_back({ id, {} }); it = g_known.end() - 1; }
@@ -134,6 +166,7 @@ namespace
 
 	void OnTick(float)
 	{
+		KnownFeatures::Tick(GetTickCount64());
 		if (g_waiting.empty())
 			return;
 
@@ -156,7 +189,7 @@ namespace
 			if (step != RulesModel::HeldStep::Act)
 				continue;
 
-			RecordReported(id);
+			RecordReported(id, pc);
 			ApplyRules(pc, id, true);
 			AdminClaim::AskPlayer(pc, id);
 		}
@@ -234,7 +267,7 @@ namespace
 			return;
 		}
 
-		RecordReported(id);
+		RecordReported(id, playerController);
 		ApplyRules(playerController, id, true);
 		AdminClaim::AskPlayer(playerController, id);
 	}
@@ -379,6 +412,10 @@ namespace HostRules
 		if (!Load(error))
 			LOG_WARN("[HostRules] Rules not read: %s", error.c_str());
 
+		const std::wstring& iniPath = IniFile::Path();
+		if (!iniPath.empty())
+			KnownFeatures::Init((std::filesystem::path(iniPath).parent_path().parent_path() / L"ServerUtility" / L"known-features.txt").wstring());
+
 #if PLUGIN_INTERFACE_VERSION >= 79
 		auto* hooks = GetHooks();
 		if (hooks && hooks->HostRules && GetSelf())
@@ -437,6 +474,7 @@ namespace HostRules
 		g_tickRegistered = false;
 		g_waiting.clear();
 #endif
+		KnownFeatures::Flush();
 		if (hooks->Players)
 			hooks->Players->UnregisterOnPlayerLeft(OnPlayerLeft);
 	}
@@ -523,24 +561,7 @@ namespace HostRules
 			if (IdOf(controllers[i]) != playerId)
 				continue;
 
-			// Measure, then fetch; a second pass covers a text that grew in between.
-			std::string buf;
-			int need = api->GetClientFeatures(controllers[i], nullptr, 0);
-			for (int pass = 0; pass < 3 && need >= 0; ++pass)
-			{
-				buf.assign(static_cast<size_t>(need) + 1, '\0');
-				const int got = api->GetClientFeatures(controllers[i], buf.data(), buf.size());
-				if (got < 0)
-					return FeaturesState::NoReport;
-				if (static_cast<size_t>(got) < buf.size())
-				{
-					buf.resize(static_cast<size_t>(got));
-					text = buf;
-					return FeaturesState::Ok;
-				}
-				need = got;
-			}
-			return FeaturesState::NoReport;
+			return ReadFeatures(api, controllers[i], text) ? FeaturesState::Ok : FeaturesState::NoReport;
 		}
 		return FeaturesState::NotConnected;
 #else
