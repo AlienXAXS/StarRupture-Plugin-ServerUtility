@@ -17,8 +17,7 @@ namespace AdminJson
 		for (size_t at = haystack.find(needle); at != std::string::npos; at = haystack.find(needle, at + 1))
 		{
 			size_t pos = at + needle.size();
-			while (pos < haystack.size() && (haystack[pos] == ' ' || haystack[pos] == '	' || haystack[pos] == '' || haystack[pos] == '
-')) ++pos;
+			while (pos < haystack.size() && (haystack[pos] == ' ' || haystack[pos] == '\t' || haystack[pos] == '\r' || haystack[pos] == '\n')) ++pos;
 			if (pos < haystack.size() && haystack[pos] == ':') return pos;
 		}
 		return std::string::npos;

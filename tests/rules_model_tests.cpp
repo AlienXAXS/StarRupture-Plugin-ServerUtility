@@ -225,8 +225,8 @@ static void InGameAdminTests()
 			const AdminWire::Message p6 = proveFor(n6);
 			CHECK(IgaRole(IgaSend(*s, 7, "p1", p6)) == "pair" && !s->IsProven(7));
 			CHECK(IgaRole(IgaSend(*s, 6, "p1", p6)) == "admin" && s->IsProven(6));
-			// A reused nonce fails like a wrong proof.
-			CHECK(IgaRole(IgaSend(*s, 6, "p1", p6)) == "pair");
+			// A second prove on a proven connection gets no reply.
+			CHECK(IgaSend(*s, 6, "p1", p6).empty() && s->IsProven(6));
 			const std::string n8 = IgaChallenge(*s, 8, "p1");
 			prove.proof = std::string(64, '0');
 			IgaSend(*s, 8, "p1", prove);   // a wrong proof uses the nonce up
@@ -445,16 +445,16 @@ static void InGameAdminOpsTests()
 		CHECK(!msgs.empty() && msgs.back().tag == Tag::SnapEnd && msgs.back().revision == 7);
 		CHECK(msgs.size() > 3 && msgs[2].tag == Tag::SnapPolicy);
 		size_t mods = 0, players = 0, rules = 0, mins = 0;
-		bool small = true, spaced = false;
+		bool allSmall = true, spaced = false;
 		for (size_t i = 0; i < raw.size(); ++i)
 		{
-			small = small && raw[i].size() < AdminWire::kMaxMessage;
+			allSmall = allSmall && raw[i].size() < AdminWire::kMaxMessage;
 			if (msgs[i].tag == Tag::SnapMod && !msgs[i].cont) { ++mods; spaced = spaced || msgs[i].mod.plugin == "Best Builder"; }
 			if (msgs[i].tag == Tag::SnapPlayer && !msgs[i].cont) ++players;
 			if (msgs[i].tag == Tag::SnapRule) rules += msgs[i].rules.size();
 			if (msgs[i].tag == Tag::SnapMin) mins += msgs[i].mins.size();
 		}
-		CHECK(small);
+		CHECK(allSmall);
 		CHECK(mods == 30 && players == 40 && rules == 1 && mins == 2);
 		CHECK(spaced);
 
