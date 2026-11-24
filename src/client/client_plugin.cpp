@@ -23,7 +23,7 @@ static double NowSeconds()
 	return duration<double>(steady_clock::now().time_since_epoch()).count();
 }
 
-// Plugins\ServerUtilitydmin-pairing.txt, next to this DLL.
+// Plugins\ServerUtility\admin-pairing.txt, next to this DLL.
 static std::string PairingStorePath()
 {
 	HMODULE self = nullptr;
@@ -38,6 +38,12 @@ static std::string PairingStorePath()
 static void OnAdminPacket(const char*, const char*, const uint8_t* data, size_t size)
 {
 	if (g_client) g_client->OnPacket(data, size);
+}
+
+// Game thread: the only place the client sends, so the render callback makes no loader calls.
+static void OnTick(float)
+{
+	if (g_client) g_client->Flush();
 }
 
 static void OnServerReady(const char*)
@@ -89,7 +95,7 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 	if (self->hooks && self->hooks->Engine && self->hooks->Engine->GetSdkGlobals)
 		self->hooks->Engine->GetSdkGlobals();
 
-	if (!self->hooks || !self->hooks->Network || !self->hooks->World)
+	if (!self->hooks || !self->hooks->Network || !self->hooks->World || !self->hooks->Engine)
 	{
 		LOG_ERROR("Admin client: network or world interface missing");
 		return false;
@@ -109,6 +115,7 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 
 	self->hooks->Network->RegisterMessageHandler(self, AdminWire::kPacketTag, &OnAdminPacket);
 	self->hooks->World->RegisterOnAfterWorldEndPlay(&OnWorldEnd);
+	self->hooks->Engine->RegisterOnTick(&OnTick);
 	// Fires at once when the server is already ready (hot reload).
 	self->hooks->Network->RegisterServerReadyCallback(self, &OnServerReady);
 
@@ -130,6 +137,7 @@ __declspec(dllexport) void PluginShutdown()
 			self->hooks->Network->UnregisterMessageHandler(self, AdminWire::kPacketTag, &OnAdminPacket);
 		}
 		if (self->hooks->World) self->hooks->World->UnregisterOnAfterWorldEndPlay(&OnWorldEnd);
+		if (self->hooks->Engine) self->hooks->Engine->UnregisterOnTick(&OnTick);
 	}
 	g_client.reset();
 	g_self = nullptr;
