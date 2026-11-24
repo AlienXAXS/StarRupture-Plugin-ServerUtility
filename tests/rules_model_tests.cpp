@@ -476,31 +476,104 @@ static void InGameAdminOpsTests()
 		std::filesystem::remove(path);
 	}
 
-	// Rate limit: 20 ops messages a second per connection, then an error result and the op is dropped.
+	// Rate limit: a burst of 100 tokens per connection; every decoded message takes tokens,
+	// an ops batch one per op. Over the limit: dropped with no reply, one audit line per burst.
 	{
 		IgaEnv e; e.path = path; e.admins = { "p1", "p2" };
 		int ran = 0;
-		e.runOps = [&](const std::string&, const std::string&, const std::vector<AdminWire::Op>&, uint32_t)
+		e.runOps = [&](const std::string&, const std::string&, const std::vector<AdminWire::Op>& ops, uint32_t)
 		{
-			++ran;
+			ran += static_cast<int>(ops.size());
 			InGameAdminModel::OpsOutcome o; o.ok = true; o.revision = 7;
 			return o;
 		};
 		auto s = MakeIga(e);
 		IgaMakeProven(*s, 1, "p1");
 		IgaMakeProven(*s, 2, "p2");
-		int refused = 0;
-		for (uint32_t i = 1; i <= 25; ++i)
-		{
-			const auto r = IgaDecode(IgaRaw(*s, 1, "p1", IgaOps(i, 0, { { "policy.default", { "allow" } } })));
-			if (r.size() == 1 && r[0].status == "error" && r[0].requestId == i) ++refused;
-		}
-		CHECK(ran == 20 && refused == 5);
+		auto tooMany = [&e] { int n = 0; for (const auto& l : e.audit) if (l.find("too many requests") != std::string::npos) ++n; return n; };
+
+		// Single-op messages: the burst, then silence.
+		int answered = 0;
+		for (uint32_t i = 1; i <= 120; ++i)
+			if (!IgaRaw(*s, 1, "p1", IgaOps(i, 0, { { "policy.default", { "allow" } } })).empty()) ++answered;
+		CHECK(answered <= 98 && answered >= 90);   // hello and pair above took a few tokens
+		CHECK(ran == answered && tooMany() == 1);
 		// Another connection has its own allowance; time refills this one.
 		CHECK(IgaDecode(IgaRaw(*s, 2, "p2", IgaOps(1, 0, { { "policy.default", { "allow" } } })))[0].status == "ok");
 		e.now += 1.0;
-		CHECK(IgaDecode(IgaRaw(*s, 1, "p1", IgaOps(99, 0, { { "policy.default", { "allow" } } })))[0].status == "ok");
+		CHECK(IgaDecode(IgaRaw(*s, 1, "p1", IgaOps(999, 0, { { "policy.default", { "allow" } } }))).size() == 1);
+		CHECK(tooMany() == 1);
+
+		// A batch is charged per op: 60 ops, then a second 60 is dropped.
+		std::vector<AdminWire::Op> sixty(60, AdminWire::Op{ "min.loader", { "1" } });
+		ran = 0;
+		e.now += 10.0;
+		CHECK(IgaDecode(IgaRaw(*s, 2, "p2", IgaOps(5, 0, sixty))).size() == 1 && ran == 60);
+		CHECK(IgaRaw(*s, 2, "p2", IgaOps(6, 0, sixty)).empty() && ran == 60);
+		CHECK(tooMany() == 2);
 		std::filesystem::remove(path);
+	}
+
+	// Messages that are not proven take tokens too, and audit lines about failures stop at 5.
+	{
+		IgaEnv e; e.path = path; e.admins = { "p1", "p2" };
+		auto s = MakeIga(e);
+		IgaMakeProven(*s, 1, "p1");   // p1 has a secret
+		auto count = [&e](const char* what) { int n = 0; for (const auto& l : e.audit) if (l.find(what) != std::string::npos) ++n; return n; };
+
+		// Hellos from an unproven connection: 100 are answered, the rest dropped with one line.
+		int replies = 0;
+		for (int i = 0; i < 300; ++i)
+			replies += static_cast<int>(IgaRaw(*s, 7, "p2", IgaHello()).size());
+		CHECK(replies == 100 && count("too many requests") == 1);
+
+		// Wrong proofs on one connection: the answer stays, the audit line stops at 5.
+		const std::string sid = s->ServerId();
+		e.audit.clear();
+		for (int i = 0; i < 12; ++i)
+		{
+			const std::string nonce = IgaChallenge(*s, 8, "p1");
+			CHECK(!nonce.empty());
+			AdminWire::Message prove; prove.tag = Tag::Prove;
+			AdminCrypto::MakeProof(kSecretB, nonce, sid, prove.proof);
+			CHECK(IgaRole(IgaSend(*s, 8, "p1", prove)) == "pair");
+		}
+		CHECK(count("proof failed") == 5);
+
+		// Wrong pairing codes: same cap.
+		e.audit.clear();
+		for (int i = 0; i < 12; ++i)
+		{
+			IgaChallenge(*s, 9, "p2");
+			IgaSend(*s, 9, "p2", IgaPair("22222222", kSecretA));
+		}
+		CHECK(count("pairing refused") >= 1 && count("pairing refused") + count("voided") <= 5);
+		std::filesystem::remove(path);
+	}
+
+	// A connection told "none" that later gains Admin is woken with a challenge, once.
+	{
+		IgaEnv e; e.path = path; e.admins = { "p1" };
+		auto s = MakeIga(e);
+		CHECK(IgaRole(IgaSend(*s, 5, "p9", IgaHello())) == "none");
+		CHECK(IgaRaw(*s, 5, "p9", IgaHello()).empty());   // silent
+		CHECK(s->OnPlayersChanged().empty());
+		e.admins.insert("p9");
+		const auto woke = s->OnPlayersChanged();
+		CHECK(woke.size() == 1 && woke[0].conn == 5);
+		AdminWire::Message ch;
+		CHECK(woke.size() == 1 && AdminWire::Decode(woke[0].data, ch) == AdminWire::Decoded::Ok && ch.tag == Tag::Challenge && !ch.nonce.empty());
+		CHECK(s->OnPlayersChanged().empty());
+		std::filesystem::remove(path);
+	}
+
+	// Section keys with spaces are quoted in the flag text and survive the real parser.
+	{
+		const std::string flag = PlayerList::SectionsFlag("sections", { "Best Builder.x", "Other.y" });
+		CHECK(flag == "sections=\"Best Builder.x;Other.y\"");
+		CHECK(PlayerList::SectionsFlag("sections", { "A.b", "C.d" }) == "sections=A.b;C.d");
+		PlayerList::Entry en; std::string err;
+		CHECK(PlayerList::ApplyFlags(en, flag, err) && en.sections.size() == 2 && en.sections[0] == "Best Builder.x");
 	}
 
 	// Changed push: every proven admin connection, nobody else.
