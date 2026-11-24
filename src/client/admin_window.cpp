@@ -38,6 +38,11 @@ namespace
 	{
 		char pairCode[16] = {};
 		bool tooManyChanges = false;
+
+		// Mods tab. The message box is re-filled only when the effective message changes.
+		char message[512] = {};
+		std::string messageSynced;
+		char modFilter[64] = {};
 	};
 	UiState g_ui;
 
@@ -94,16 +99,198 @@ namespace
 		if (ui->Button("Revert")) { g_ui.tooManyChanges = false; f.client->Revert(); }
 		ui->EndDisabled();
 		if (f.view.applyPending) { ui->SameLine(0, -1); ui->TextDisabled("Waiting for the server..."); }
-		ResultLine(f);
+	}
+
+	Op MakeOp(const char* name, std::initializer_list<std::string> args)
+	{
+		Op op;
+		op.name = name;
+		op.args.assign(args.begin(), args.end());
+		return op;
+	}
+
+	// One edit = one staged op per target: drop the earlier ones for it, stage the new
+	// one unless it changes nothing on the server.
+	void Edit(Frame& f, const Op& op)
+	{
+		for (size_t i : AdminView::StagedWithTarget(f.view.staged, op)) f.client->Unstage(i);
+		g_ui.tooManyChanges = false;
+		if (AdminView::IsNoop(f.view.snapshot, op)) return;
+		if (!f.client->Stage(op)) g_ui.tooManyChanges = true;
+	}
+
+	const char* RuleLabel(const std::string& value)
+	{
+		if (value == "allow") return "Allow";
+		if (value == "deny") return "Deny";
+		return "Default";
+	}
+
+	// Default / Allow / Deny for one rule key.
+	void DrawRuleCombo(Frame& f, const std::string& key)
+	{
+		IModLoaderImGui* ui = f.ui;
+		const std::string cur = AdminView::RuleValue(f.eff, key);
+		ui->SetNextItemWidth(-FLT_MIN);
+		if (ui->BeginCombo("##rule", RuleLabel(cur)))
+		{
+			static const char* const values[] = { "unset", "allow", "deny" };
+			for (const char* v : values)
+			{
+				const std::string val = v;
+				const std::string shown = RuleLabel(val == "unset" ? std::string() : val);
+				if (ui->Selectable(shown.c_str(), (val == "unset" ? std::string() : val) == cur))
+					Edit(f, MakeOp("rule.set", { key, val }));
+			}
+			ui->EndCombo();
+		}
+	}
+
+	std::string Marked(bool changed, const std::string& text)
+	{
+		return changed ? "* " + text : text;
+	}
+
+	void DrawModPolicy(Frame& f)
+	{
+		IModLoaderImGui* ui = f.ui;
+		const Snapshot& base = f.view.snapshot;
+		const bool policyChanged = base.defaultPolicy != f.eff.defaultPolicy;
+		ui->AlignTextToFramePadding();
+		ui->Text(Marked(policyChanged, "Mods without a rule are").c_str());
+		ui->SameLine(0, -1);
+		if (ui->BeginCombo("##defaultpolicy", f.eff.defaultPolicy == "deny" ? "Denied" : "Allowed"))
+		{
+			if (ui->Selectable("Allowed", f.eff.defaultPolicy != "deny")) Edit(f, MakeOp("policy.default", { "allow" }));
+			if (ui->Selectable("Denied", f.eff.defaultPolicy == "deny")) Edit(f, MakeOp("policy.default", { "deny" }));
+			ui->EndCombo();
+		}
+
+		if (f.eff.message != g_ui.messageSynced)
+		{
+			std::snprintf(g_ui.message, sizeof(g_ui.message), "%s", f.eff.message.c_str());
+			g_ui.messageSynced = f.eff.message;
+		}
+		ui->Text(Marked(base.message != f.eff.message, "Message shown to refused players").c_str());
+		ui->SetNextItemWidth(-FLT_MIN);
+		if (ui->InputText("##message", g_ui.message, sizeof(g_ui.message)))
+			Edit(f, MakeOp("policy.message", { g_ui.message }));
+	}
+
+	void DrawModRow(Frame& f, const char* label, const std::string& key, int players, bool changed)
+	{
+		IModLoaderImGui* ui = f.ui;
+		ui->TableNextRow(0, 0.0f);
+		ui->TableNextColumn();
+		ui->AlignTextToFramePadding();
+		ui->Text(Marked(changed, label).c_str());
+		ui->TableNextColumn();
+		ui->PushIDStr(key.c_str());
+		DrawRuleCombo(f, key);
+		ui->PopID();
+		ui->TableNextColumn();
+		char count[16];
+		std::snprintf(count, sizeof(count), "%d", players);
+		ui->Text(count);
+	}
+
+	void DrawMod(Frame& f, const ModInfo& mod, const std::map<std::string, int>& players)
+	{
+		IModLoaderImGui* ui = f.ui;
+		const auto it = players.find(mod.plugin);
+		const int count = it == players.end() ? 0 : it->second;
+		const bool changed = AdminView::ModChanged(f.view.snapshot, f.eff, mod);
+
+		std::string title = mod.plugin;
+		if (!mod.version.empty()) title += " " + mod.version;
+		title = Marked(changed, title) + "##mod_" + mod.plugin;
+		if (!ui->CollapsingHeader(title.c_str())) return;
+
+		ui->PushIDStr(mod.plugin.c_str());
+		ui->TextDisabled("Default means no rule for that row.");
+		if (ui->BeginTable("##features", 3, kTableFlags))
+		{
+			ui->TableSetupColumn("Feature", kColumnWidthStretch, 3.0f);
+			ui->TableSetupColumn("Rule", kColumnWidthStretch, 2.0f);
+			ui->TableSetupColumn("Players", kColumnWidthStretch, 1.0f);
+			ui->TableHeadersRow();
+			DrawModRow(f, "Whole mod", mod.plugin + ".*", count,
+				AdminView::RuleChanged(f.view.snapshot, f.eff, mod.plugin + ".*"));
+			for (const Feature& feature : mod.features)
+			{
+				const std::string key = mod.plugin + "." + feature.id;
+				DrawModRow(f, feature.label.empty() ? feature.id.c_str() : feature.label.c_str(), key, count,
+					AdminView::RuleChanged(f.view.snapshot, f.eff, key));
+			}
+			ui->EndTable();
+		}
+		ui->PopID();
+	}
+
+	void DrawUnknownRules(Frame& f)
+	{
+		IModLoaderImGui* ui = f.ui;
+		const std::vector<std::string> keys = AdminView::UnknownRuleKeys(f.view.snapshot);
+		if (keys.empty()) return;
+		char title[96];
+		std::snprintf(title, sizeof(title), "Rules that match no known feature (%zu)##unknown", keys.size());
+		if (!ui->CollapsingHeader(title)) return;
+		for (const std::string& key : keys)
+		{
+			const std::string value = AdminView::RuleValue(f.eff, key);
+			ui->PushIDStr(key.c_str());
+			ui->AlignTextToFramePadding();
+			ui->Text(Marked(AdminView::RuleChanged(f.view.snapshot, f.eff, key), key).c_str());
+			ui->SameLine(0, -1);
+			ui->TextDisabled(value.empty() ? "(removed)" : RuleLabel(value));
+			ui->SameLine(0, -1);
+			ui->BeginDisabled(value.empty());
+			if (ui->SmallButton("Unset")) Edit(f, MakeOp("rule.set", { key, "unset" }));
+			ui->EndDisabled();
+			ui->PopID();
+		}
+	}
+
+	void DrawModsTab(Frame& f)
+	{
+		IModLoaderImGui* ui = f.ui;
+		DrawModPolicy(f);
+		ui->Separator();
+		ui->SetNextItemWidth(-FLT_MIN);
+		ui->InputTextWithHint("##modfilter", "Filter mods and features", g_ui.modFilter, sizeof(g_ui.modFilter));
+		const std::map<std::string, int> players = AdminView::PlayersPerMod(f.eff);
+		bool any = false;
+		for (const ModInfo& mod : f.eff.mods)
+		{
+			if (!AdminView::ModMatches(mod, g_ui.modFilter)) continue;
+			any = true;
+			DrawMod(f, mod, players);
+		}
+		if (!any) ui->TextDisabled(f.eff.mods.empty() ? "The server lists no mods." : "No mod matches the filter.");
+		DrawUnknownRules(f);
 	}
 
 	void DrawReady(Frame& f)
 	{
+		IModLoaderImGui* ui = f.ui;
 		if (!f.view.haveSnapshot)
 		{
 			Message(f, "Loading the server settings...");
 			return;
 		}
+		ResultLine(f);
+		// Leave one button row at the bottom for Apply and Revert.
+		const bool child = ui->BeginChild("##content", 0.0f, -ui->GetFrameHeightWithSpacing(), false);
+		if (child && ui->BeginTabBar("##admintabs", 0))
+		{
+			if (ui->BeginTabItem("Mods", nullptr, 0))
+			{
+				DrawModsTab(f);
+				ui->EndTabItem();
+			}
+			ui->EndTabBar();
+		}
+		ui->EndChild();
 		DrawApplyBar(f);
 	}
 
