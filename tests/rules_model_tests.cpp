@@ -1,15 +1,19 @@
 // Unit tests of the rules parser and the text it makes for the mod loader.
 // No project file: from a Visual Studio developer prompt, in the repo root:
-//   cl /nologo /EHsc /std:c++17 /Isrc tests\rules_model_tests.cpp src\host_rules\rules_model.cpp src\host_rules\claim_model.cpp /Fe:rules_model_tests.exe
+//   cl /nologo /EHsc /std:c++17 /Isrc tests\rules_model_tests.cpp src\host_rules\rules_model.cpp src\host_rules\claim_model.cpp src\host_rules\player_list.cpp src\host_rules\ini_file.cpp user32.lib /I<Plugin SDK>\include /Fe:rules_model_tests.exe
 //   rules_model_tests.exe
 #include "host_rules/rules_model.h"
 #include "host_rules/claim_model.h"
+#include "host_rules/player_list.h"
 #include "admin/url_match.h"
 #include "rcon/commands/word_split.h"
 
 #include <cstdio>
 #include <cstring>
 #include <set>
+
+struct IPluginSelf;
+IPluginSelf* GetSelf() { return nullptr; }   // player_list.cpp logs through the plugin; no plugin here
 
 static int g_checks = 0, g_failed = 0;
 
@@ -111,7 +115,7 @@ int main()
 	CHECK(ValidVersion("0.11.0") && ValidVersion("v1.27") && ValidVersion("1.2.3.4") && ValidVersion("1.27.0-dev.1"));
 	CHECK(ValidSectionKey("Codex") && ValidSectionKey("Plugin.feature") && ValidSectionKey("a-b_c"));
 	CHECK(!ValidSectionKey("") && !ValidSectionKey("a\nB=|Admin") && !ValidSectionKey("a\rb") && !ValidSectionKey("a\tb"));
-	CHECK(!ValidSectionKey("a|b") && !ValidSectionKey("a=b") && !ValidSectionKey("a;b") && !ValidSectionKey("a b"));
+	CHECK(!ValidSectionKey("a|b") && !ValidSectionKey("a=b") && !ValidSectionKey("a;b") && !ValidSectionKey("a\"b") && ValidSectionKey("Best Builder.x"));
 	CHECK(!ValidSectionKey("[a]") && !ValidSectionKey("a]") && !ValidSectionKey("#a") && !ValidSectionKey("a\x7f"));
 	CHECK(!ValidVersion("") && !ValidVersion("1") && !ValidVersion("v") && !ValidVersion("1.x") && !ValidVersion("1.2.3.4.5") && !ValidVersion("dev"));
 	CHECK(!ValidVersion("1.2.") && !ValidVersion("1.2.3.4.") && !ValidVersion("1..2") && !ValidVersion(".1.2") && !ValidVersion("1.2.-dev"));
@@ -345,6 +349,42 @@ int main()
 		CHECK(WordSplit::TakeWord(rest) == "unterminated name" && rest.empty());
 		rest = "   ";
 		CHECK(WordSplit::TakeWord(rest).empty() && rest.empty());
+
+		rest = "\"";
+		CHECK(WordSplit::TakeWord(rest).empty() && rest.empty());
+		rest = "ab\"c d\"";
+		CHECK(WordSplit::TakeWord(rest) == "abc d" && rest.empty());
+		rest = "\"\" x";
+		CHECK(WordSplit::TakeWord(rest).empty() && rest == "x");
+		rest = "a	b c";
+		CHECK(WordSplit::TakeWord(rest) == "a	b" && rest == "c");
+	}
+
+	// Per-player section keys: a mod name with a space is quoted in the flags and in the file.
+	{
+		PlayerList::Entry e;
+		std::string err;
+		CHECK(PlayerList::ApplyFlags(e, "sections=\"Best Builder.x;Other.y\" admin", err));
+		CHECK(e.admin && e.sections.size() == 2 && e.sections[0] == "Best Builder.x" && e.sections[1] == "Other.y");
+
+		const std::string line = PlayerList::FormatLine(e);
+		CHECK(line.find("Sections=\"Best Builder.x;Other.y\"") != std::string::npos);
+		PlayerList::Entry back;
+		CHECK(PlayerList::ParseLine("76561198000000001=Al|ExemptRules Sections=\"Best Builder.x;Other.y\" ExemptVersion", back));
+		CHECK(back.exemptRules && back.exemptVersion && back.sections == e.sections && back.label == "Al");
+		e.id = "76561198000000001";
+		CHECK(PlayerList::ParseLine(PlayerList::FormatLine(e), back) && back.sections == e.sections && back.admin);
+
+		// Unspaced keys: unchanged on the way in and out, written without quotes.
+		PlayerList::Entry plain;
+		CHECK(PlayerList::ApplyFlags(plain, "sections=wave;save label=Some Name", err));
+		CHECK(plain.sections.size() == 2 && plain.sections[1] == "save" && plain.label == "Some Name");
+		plain.id = "1";
+		CHECK(PlayerList::FormatLine(plain) == "1=Some Name|Sections=wave;save");
+		CHECK(PlayerList::ParseLine("2=Bob|ExemptVersion Sections=wave;save", back) && back.sections.size() == 2 && back.exemptVersion);
+
+		// An unquoted space still ends the value, as before.
+		CHECK(PlayerList::ParseLine("3=Bob|Sections=Best Builder.x", back) && back.sections.size() == 1 && back.sections[0] == "Best");
 	}
 
 	std::printf("%d checks, %d failed\n", g_checks, g_failed);

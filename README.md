@@ -61,7 +61,7 @@ The text before `=` is the player's ID, the text after it is a label for you, an
 | `Admin` | The player is an admin. Admin also exempts them from the version removal and from the rules. |
 | `ExemptVersion` | Never removed for an old mod loader. |
 | `ExemptRules` | Exempt from the host's rules. |
-| `Sections=<key>;<key>` | Rule sections that apply to this player. A key may not hold spaces, control characters or `\| = ; [ ]`, or start with `#`; such a key is refused. |
+| `Sections=<key>;<key>` | Rule sections that apply to this player. A key may not hold control characters, quotes or `\| = ; [ ]`, or start with `#`; such a key is refused. A mod name with a space goes in quotes around the whole value: `Sections="Best Builder.some_feature;Other"`. |
 
 Host rules are applied by each player's own game, so they keep honest players in line but are not protection: a modified client can ignore them, and it can also claim another player's ID, so anyone who knows a player's Steam ID can use the exemptions on that player's `[Players]` entry. Other sections and comments in `HostRules.ini` are kept when the plugin saves the file. After editing the file by hand, run `player reload`.
 

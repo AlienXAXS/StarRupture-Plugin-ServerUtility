@@ -2,6 +2,7 @@
 #include "ini_file.h"
 #include "rules_model.h"
 #include "../plugin_helpers.h"
+#include "../rcon/commands/word_split.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -49,25 +50,25 @@ namespace
 	// skipped (a hand-edited file may carry flags from a newer version).
 	bool ApplyFlagsImpl(PlayerList::Entry& e, const std::string& flags, std::string& error, bool strict)
 	{
-		const size_t n = flags.size();
-		size_t pos = 0;
-		while (pos < n)
+		// Words as the console takes them: a double-quoted part may hold spaces,
+		// so a mod name with a space is written Sections="Best Builder.x;Other.y".
+		std::string rest = flags;
+		while (true)
 		{
-			while (pos < n && flags[pos] == ' ') ++pos;
-			if (pos >= n) break;
+			const size_t a = rest.find_first_not_of(' ');
+			if (a == std::string::npos) break;
+			rest.erase(0, a);
 
-			size_t end = flags.find(' ', pos);
-			if (end == std::string::npos) end = n;
-
-			const std::string tok = flags.substr(pos, end - pos);
-			const bool remove = tok[0] == '-';
-			const std::string low = Lower(remove ? tok.substr(1) : tok);
-
-			if (!remove && low.rfind("label=", 0) == 0)
+			if (Lower(rest.substr(0, 6)) == "label=")
 			{
-				e.label = CleanLabel(flags.substr(pos + (tok.size() - low.size()) + 6));
+				e.label = CleanLabel(rest.substr(6));
 				break;
 			}
+
+			const std::string tok = WordSplit::TakeWord(rest);
+			if (tok.empty()) continue;
+			const bool remove = tok[0] == '-';
+			const std::string low = Lower(remove ? tok.substr(1) : tok);
 
 			if (low == "admin")              e.admin = !remove;
 			else if (low == "exemptversion") e.exemptVersion = !remove;
@@ -87,7 +88,7 @@ namespace
 					if (key.empty()) { s = sep + 1; continue; }
 					if (!RulesModel::ValidSectionKey(key))
 					{
-						if (strict) { error = "a section key may not hold control characters, spaces, | = ; [ ], or start with #"; return false; }
+						if (strict) { error = "a section key may not hold control characters, quotes, | = ; [ ], or start with #"; return false; }
 					}
 					else e.sections.push_back(key);
 					s = sep + 1;
@@ -98,7 +99,6 @@ namespace
 				error = "unknown flag '" + tok + "' (admin, exemptversion, exemptrules, sections=<key>;<key>, label=<text>)";
 				return false;
 			}
-			pos = end;
 		}
 		return true;
 	}
@@ -204,7 +204,8 @@ namespace PlayerList
 				if (!list.empty()) list += ';';
 				list += s;
 			}
-			if (!list.empty()) add("Sections=" + list);
+			// A key with a space (a mod name like "Best Builder") needs the quotes to stay one word.
+			if (!list.empty()) add(list.find(' ') == std::string::npos ? "Sections=" + list : "Sections=\"" + list + "\"");
 		}
 		return e.id + "=" + e.label + (flags.empty() ? "" : "|" + flags);
 	}
