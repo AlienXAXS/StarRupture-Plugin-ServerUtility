@@ -308,8 +308,7 @@ int main()
 
 	// A server that keeps sending challenges does not extend the hold: it times out from the first.
 	{
-		Rig r(kServerId + " " + kAddr + " " + kSecret + "
-", "repeatchallenge");
+		Rig r(kServerId + " " + kAddr + " " + kSecret + "\n", "repeatchallenge");
 		r.addrFn = [](char*, size_t) { return -1; };
 		r.Ready();
 		r.Clear();

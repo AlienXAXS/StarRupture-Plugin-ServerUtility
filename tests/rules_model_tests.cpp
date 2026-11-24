@@ -1256,12 +1256,12 @@ int main()
 		{
 			const std::string kb(4000, 'x');
 			std::string wide;
-			for (int i = 0; i < 100; ++i) wide += "â¬";   // 3-byte characters (euro sign): byte 80 falls mid-character
+			for (int i = 0; i < 100; ++i) wide += "\xE2\x82\xAC";   // 3-byte characters (euro sign): byte 80 falls mid-character
 			const auto rows = ParseDeclaredRows({ "P	1.0	long	on	" + kb, "P	1.0	wide	on	" + wide, "P	99999	junk	on	T", "P	abc	junk2	on	T", "P		blank	on	T" });
 			CHECK(rows.size() == 5);
 			CHECK(rows.size() == 5 && rows[0].title.size() == 80 && rows[0].id == "long");
 			CHECK(rows.size() == 5 && rows[1].title.size() <= 80 && rows[1].title.size() < 80 && rows[1].title.size() % 3 == 0
-			      && rows[1].title.compare(rows[1].title.size() - 3, 3, "â¬") == 0);
+			      && rows[1].title.compare(rows[1].title.size() - 3, 3, "\xE2\x82\xAC") == 0);
 			CHECK(rows.size() == 5 && rows[2].id == "junk" && rows[3].id == "junk2" && rows[4].id == "blank");
 			Catalog g;
 			Report big = rep("P", "big", "1.0", "", false, kb.c_str());
