@@ -3,6 +3,8 @@
 #include "claim_model.h"
 #include "host_rules.h"
 #include "ini_file.h"
+#include "known_features.h"
+#include "rules_model.h"
 #include "player_ids.h"
 #include "player_list.h"
 #include "../admin_wire/admin_wire.h"
@@ -22,6 +24,8 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <map>
+#include <set>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -95,6 +99,149 @@ namespace InGameAdmin
 				reinterpret_cast<const uint8_t*>(message.data()), message.size());
 		}
 
+		constexpr int kMaxControllers = 128;
+		const char* const kStaleText = "Changed elsewhere, refreshed";
+
+		std::string FlagsText(const PlayerList::Entry& e)
+		{
+			std::string flags;
+			auto add = [&](const std::string& f) { flags += (flags.empty() ? "" : " ") + f; };
+			if (e.admin) add("admin");
+			if (e.exemptVersion) add("exemptversion");
+			if (e.exemptRules) add("exemptrules");
+			if (!e.sections.empty())
+			{
+				std::string keys;
+				for (const std::string& k : e.sections) keys += (keys.empty() ? "" : ";") + k;
+				add("sections=" + keys);
+			}
+			return flags;
+		}
+
+		// Game thread. The state a snapshot carries: rules, minimums, the mods the
+		// server has heard of, and the players (listed and connected).
+		AdminWire::Snapshot BuildSnapshot()
+		{
+			AdminWire::Snapshot snap;
+			const RulesModel::Model model = AdminOps::HostBackend().getModel();
+			snap.defaultPolicy = model.defaultDeny ? "deny" : "allow";
+			snap.message = model.message;
+			for (const RulesModel::Rule& r : model.rules)
+				snap.rules.push_back({ r.plugin + "." + r.id, r.deny ? "deny" : "allow" });
+			if (!model.minLoaderVersion.empty())
+				snap.mins.push_back({ std::string(), model.minLoaderVersion });
+			for (const RulesModel::ModMin& m : model.modMins)
+				snap.mins.push_back({ m.plugin, m.version });
+
+			std::map<std::string, size_t> modIndex;   // plugin -> index in snap.mods
+			for (const KnownFeatures::Entry& e : KnownFeatures::Snapshot())
+			{
+				const auto it = modIndex.find(e.plugin);
+				size_t at;
+				if (it == modIndex.end())
+				{
+					at = snap.mods.size();
+					modIndex[e.plugin] = at;
+					AdminWire::ModInfo info;
+					info.plugin = e.plugin;
+					snap.mods.push_back(info);
+				}
+				else
+					at = it->second;
+				AdminWire::ModInfo& info = snap.mods[at];
+				if (!e.version.empty() && (info.version.empty() || KnownFeatures::CompareVersions(e.version, info.version) > 0))
+					info.version = e.version;
+				info.features.push_back({ e.id, e.title.empty() ? e.id : e.title });
+			}
+
+			std::set<std::string> online;
+			SDK::APlayerController* controllers[kMaxControllers] = {};
+			const int count = HostRules::ConnectedControllers(controllers, kMaxControllers);
+			for (int i = 0; i < count; ++i)
+				if (controllers[i])
+				{
+					const std::string id = PlayerIds::OfController(controllers[i]);
+					if (!id.empty()) online.insert(id);
+				}
+
+			std::set<std::string> listed;
+			auto addPlayer = [&](const std::string& id, const std::string& label, const std::string& flags)
+			{
+				AdminWire::PlayerInfo p;
+				p.id = id;
+				p.name = label.empty() ? id : label;
+				p.flags = flags;
+				p.online = online.count(id) > 0;
+				if (p.online)
+				{
+					std::string text;
+					if (HostRules::ClientFeatures(id, text) == HostRules::FeaturesState::Ok)
+					{
+						std::map<std::string, std::string> seen;   // plugin -> version
+						for (const KnownFeatures::Report& r : KnownFeatures::ParseReportText(text, std::string()))
+						{
+							std::string& v = seen[r.plugin];
+							if (v.empty()) v = r.version;
+						}
+						for (const auto& kv : seen)
+							p.mods.push_back({ kv.first, kv.second });
+					}
+				}
+				snap.players.push_back(p);
+			};
+			for (const PlayerList::Entry& e : PlayerList::All())
+			{
+				listed.insert(e.id);
+				addPlayer(e.id, e.label, FlagsText(e));
+			}
+			for (const std::string& id : online)
+				if (!listed.count(id))
+					addPlayer(id, std::string(), std::string());
+			return snap;
+		}
+
+		InGameAdminModel::OpsOutcome RunOps(const std::string& id, const std::string& name,
+		                                    const std::vector<AdminWire::Op>& wireOps, uint32_t baseRevision)
+		{
+			std::vector<AdminOps::Op> ops;
+			for (const AdminWire::Op& o : wireOps)
+				ops.push_back({ o.name, o.args });
+			const AdminOps::Result r = AdminOps::Run(AdminOps::Caller::FromPlayer(id, name), ops, baseRevision);
+			InGameAdminModel::OpsOutcome out;
+			out.ok = r.ok;
+			out.stale = !r.ok && r.text == kStaleText;
+			out.text = r.text;
+			out.revision = static_cast<uint32_t>(r.revision);
+			return out;
+		}
+
+		std::string SectionsText(unsigned sections)
+		{
+			std::string text;
+			auto add = [&](const char* s) { text += (text.empty() ? "" : ",") + std::string(s); };
+			if (sections & AdminOps::kSectionRules) add("rules");
+			if (sections & AdminOps::kSectionMins) add("mins");
+			if (sections & AdminOps::kSectionPlayers) add("players");
+			return text.empty() ? std::string(AdminWire::kSectionAll) : text;
+		}
+
+		// Game thread: a change was made, tell every proven admin connection.
+		void PushChanged(uint32_t revision, unsigned sections)
+		{
+			InGameAdminModel::Server* model = ModelPtr();
+			if (!model) return;
+			for (const InGameAdminModel::Out& out : model->OnChanged(SectionsText(sections), revision))
+				SendToConnection(out.conn, out.data);
+		}
+
+		struct ChangedJob { uint32_t revision; unsigned sections; };
+
+		void ChangedOnGameThread(void* context)
+		{
+			std::unique_ptr<ChangedJob> job(static_cast<ChangedJob*>(context));
+			PushChanged(job->revision, job->sections);
+		}
+
 		std::string NameOf(const std::string& id)
 		{
 			PlayerList::Entry e;
@@ -165,6 +312,8 @@ namespace InGameAdmin
 		env.now       = &NowSeconds;
 		env.audit     = [](const std::string& line) { LOG_INFO("%s", line.c_str()); };
 		env.storePath = StorePath();
+		env.snapshot  = &BuildSnapshot;
+		env.runOps    = &RunOps;
 
 		auto model = std::make_unique<InGameAdminModel::Server>(env);
 		if (!model->Ready())
@@ -182,12 +331,19 @@ namespace InGameAdmin
 			g_worldRegistered = true;
 		}
 
-		g_listener = AdminOps::AddListener([](uint64_t, unsigned sections)
+		g_listener = AdminOps::AddListener([](uint64_t revision, unsigned sections)
 		{
-			if ((sections & AdminOps::kSectionPlayers) == 0)
-				return;
-			if (InGameAdminModel::Server* m = ModelPtr())
-				m->OnPlayersChanged();
+			if (sections & AdminOps::kSectionPlayers)
+				if (InGameAdminModel::Server* m = ModelPtr())
+					m->OnPlayersChanged();
+
+			// The push touches the controllers, so it runs on the game thread.
+			auto* hooks = GetHooks();
+			if (!hooks || !hooks->Engine) return;
+			if (hooks->Engine->IsGameThread())
+				PushChanged(static_cast<uint32_t>(revision), sections);
+			else
+				hooks->Engine->PostToGameThread(&ChangedOnGameThread, new ChangedJob{ static_cast<uint32_t>(revision), sections });
 		});
 
 		// An ID that lost the Admin flag while the server was down loses its secret now.
@@ -283,13 +439,5 @@ namespace InGameAdmin
 		if (!pc) return false;
 		SendRaw(pc, message);
 		return true;
-	}
-
-	void SendToProven(const std::string& message)
-	{
-		InGameAdminModel::Server* model = ModelPtr();
-		if (!model) return;
-		for (ConnId conn : model->ProvenConnections())
-			SendToConnection(conn, message);
 	}
 }

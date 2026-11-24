@@ -145,10 +145,63 @@ namespace InGameAdminModel
 				kv.second.proven = false;
 	}
 
-	void Server::SetProvenHandler(ProvenHandler handler)
+	std::vector<std::string> Server::SnapshotMessages(const std::string& sections) const
 	{
-		std::lock_guard<std::mutex> lk(mutex_);
-		proven_ = std::move(handler);
+		if (!env_.snapshot)
+			return {};
+		AdminWire::Snapshot snap = env_.snapshot();
+		snap.revision = env_.revision ? env_.revision() : 0;
+		snap.sections = sections.empty() ? std::string(AdminWire::kSectionAll) : sections;
+		return AdminWire::EncodeSnapshot(snap);
+	}
+
+	std::vector<std::string> Server::RunOps(const std::string& playerId, const std::string& name, const AdminWire::Message& m) const
+	{
+		AdminWire::Message r;
+		r.tag = AdminWire::Tag::Result;
+		r.requestId = m.requestId;
+		OpsOutcome o;
+		if (env_.runOps)
+			o = env_.runOps(playerId, name, m.ops, m.baseRevision);
+		else
+			o.text = "Not available";
+		r.revision = o.revision;
+		r.text = o.text;
+		r.status = o.ok ? AdminWire::kResultOk : (o.stale ? AdminWire::kResultChanged : AdminWire::kResultError);
+
+		std::vector<std::string> out;
+		std::string wire;
+		if (AdminWire::Encode(r, wire))
+			out.push_back(wire);
+		if (o.stale)
+		{
+			const std::vector<std::string> snap = SnapshotMessages(AdminWire::kSectionAll);
+			out.insert(out.end(), snap.begin(), snap.end());
+		}
+		return out;
+	}
+
+	std::vector<Out> Server::OnChanged(const std::string& sections, uint32_t revision)
+	{
+		std::vector<std::pair<ConnId, std::string>> proven;
+		{
+			std::lock_guard<std::mutex> lk(mutex_);
+			for (const auto& kv : conns_)
+				if (kv.second.proven)
+					proven.emplace_back(kv.first, kv.second.id);
+		}
+		AdminWire::Message m;
+		m.tag = AdminWire::Tag::Changed;
+		m.revision = revision;
+		m.sections = sections;
+		std::string wire;
+		std::vector<Out> out;
+		if (!AdminWire::Encode(m, wire))
+			return out;
+		for (const auto& p : proven)
+			if (env_.isAdmin && env_.isAdmin(p.second))   // still an Admin, read now
+				out.push_back(Out{ p.first, wire });
+		return out;
 	}
 
 	std::vector<std::string> Server::OnPacket(ConnId conn, const std::string& playerId, const std::string& name,
@@ -169,8 +222,6 @@ namespace InGameAdminModel
 		const uint32_t revision = env_.revision ? env_.revision() : 0;
 		const std::string who = name.empty() ? playerId : name;
 
-		ProvenHandler handler;
-		bool forward = false;
 		{
 			std::lock_guard<std::mutex> lk(mutex_);
 			Conn& c = conns_[conn];
@@ -240,7 +291,7 @@ namespace InGameAdminModel
 				{
 					c.proven = true;
 					out.push_back(Welcome(kRoleAdmin, revision));
-					return out;
+					goto sendSnapshot;
 				}
 				if (env_.audit) env_.audit("[Admin] '" + who + "' proof failed");
 				out.push_back(Welcome(kRolePair, revision));
@@ -328,18 +379,47 @@ namespace InGameAdminModel
 				c.nonce.clear();
 				if (env_.audit) env_.audit("[Admin] '" + who + "' paired");
 				out.push_back(Welcome(kRoleAdmin, revision));
-				return out;
+				goto sendSnapshot;
 			}
 
+			// Anything else is for a proven connection only.
 			if (!c.proven)
 				return out;
-			handler = proven_;
-			forward = true;
+			if (m.tag != Tag::Snap && m.tag != Tag::Ops)
+				return out;
+			if (m.tag == Tag::Ops)
+			{
+				// 20 ops messages a second per connection: a token bucket.
+				const double now = env_.now ? env_.now() : 0;
+				c.tokens = std::min(kOpsPerSecond, c.tokens + (now - c.tokenTime) * kOpsPerSecond);
+				c.tokenTime = now;
+				if (c.tokens < 1)
+				{
+					Message r;
+					r.tag = Tag::Result;
+					r.requestId = m.requestId;
+					r.status = kResultError;
+					r.text = "Too many requests, slow down";
+					r.revision = revision;
+					std::string wire;
+					if (Encode(r, wire)) out.push_back(wire);
+					return out;
+				}
+				c.tokens -= 1;
+			}
 		}
 
-		if (forward && handler)
-			out = handler(conn, playerId, who, data, size);
-		return out;
+		// The game-thread work runs outside the model lock.
+		if (m.tag == Tag::Snap)
+			return SnapshotMessages(m.sections);
+		return RunOps(playerId, who, m);
+
+	sendSnapshot:   // reached only after "welcome admin": the state follows it
+		{
+			const std::vector<std::string> snap = SnapshotMessages(AdminWire::kSectionAll);
+			out.insert(out.end(), snap.begin(), snap.end());
+			return out;
+		}
 	}
 
 	void Server::OnDisconnect(ConnId conn)

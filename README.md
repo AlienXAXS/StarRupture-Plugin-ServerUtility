@@ -93,13 +93,15 @@ To turn asking off, set `AdminPrompt=0` in `[Policy]` (`off`, `false` and `no` a
 AdminPrompt=0
 ```
 
-### In-game admin tool (server side)
+### In-game admin
 
-Admins can manage the server from the ServerUtility admin client in the game. The server half answers only players who have the Admin flag in the player list; anyone else gets one "no access" answer and then silence. To turn it off, set `InGameAdmin=0` in `[Policy]` of `HostRules.ini` (default on).
+The ServerUtility admin client lets an admin look at the server's rules, version minimums, mods and players from inside the game, and change them: allow or deny a mod feature, set the default and the message, set the minimums, flag or remove a player, and kick a player with a reason. The server half described here answers it. Admins can manage the server from the ServerUtility admin client in the game. The server half answers only players who have the Admin flag in the player list; anyone else gets one "no access" answer and then silence. To turn it off, set `InGameAdmin=0` in `[Policy]` of `HostRules.ini` (default on).
 
 An admin pairs the client once. Either the host runs `admin pair <id|number>` in RCON and gives the player the 8-character code it prints (one use, 10 minutes, 5 wrong tries per connection and 5 in total, then the code is void), or the player who has just claimed admin with the claim code above pairs on that same connection with no code. After pairing, the client proves a stored secret each session, and the secret is kept in `Plugins\ServerUtility\admin-pairing.txt`. `admin unpair <id|number>` forgets it, and so does taking the Admin flag away. The code is shown only in the RCON reply and is never written to the log.
 
-The admin panel has matching endpoints (`/rules/players`, below), but the panel is off in this build, so RCON is the way to manage the list for now. `Admin` and `ExemptVersion` players are skipped by the version removal.
+The admin panel has matching endpoints (`/rules/players`, below), but the panel is off in this build, so RCON is the way to manage the list for now.
+
+What the client sends and gets. Once an admin is paired and proven, the server sends the current state (rules, minimums, the mods it knows, the players) in small pieces, and sends it again when the client asks. A change the admin makes goes to the server as a batch and is applied as one save. If someone else (another admin, RCON or the panel) changed things first, the batch is refused with "Changed elsewhere, refreshed" and the admin gets the new state to apply again. After any change, from any front end, every paired admin is told to refresh. A connection may send 20 change requests a second; more are refused. The server is the authority: it reads each player's ID itself, checks the Admin flag on every message, and applies the same checks as RCON, including that the last Admin cannot be removed and an Admin cannot be kicked from the game. The client is only a window onto that. `Admin` and `ExemptVersion` players are skipped by the version removal.
 
 ### Host rules: switch mod features off for players
 

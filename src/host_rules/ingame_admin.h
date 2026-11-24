@@ -29,8 +29,7 @@ namespace InGameAdmin
 	// [Policy] InGameAdmin (default on).
 	bool Enabled();
 
-	// For the snapshot and ops layer (SA3b).
+	// Sending to one connection (game thread).
 	InGameAdminModel::Server* Model();
 	bool SendToConnection(InGameAdminModel::ConnId conn, const std::string& message);
-	void SendToProven(const std::string& message);
 }

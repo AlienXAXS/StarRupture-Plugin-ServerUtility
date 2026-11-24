@@ -15,6 +15,7 @@
 #include <cstring>
 #include <memory>
 #include <filesystem>
+#include <functional>
 #include <set>
 #include <string>
 #include <vector>
@@ -43,6 +44,10 @@ namespace
 		bool on = true;
 		std::vector<std::string> audit;
 		std::string path;
+		// SA3b: the state a snapshot carries and what a batch of ops comes to. Unset = none.
+		std::function<AdminWire::Snapshot()> snapshot;
+		std::function<InGameAdminModel::OpsOutcome(const std::string&, const std::string&,
+		                                           const std::vector<AdminWire::Op>&, uint32_t)> runOps;
 	};
 
 	std::unique_ptr<InGameAdminModel::Server> MakeIga(IgaEnv& e)
@@ -54,6 +59,8 @@ namespace
 		env.now = [&e] { return e.now; };
 		env.audit = [&e](const std::string& line) { e.audit.push_back(line); };
 		env.storePath = e.path;
+		env.snapshot = e.snapshot;
+		env.runOps = e.runOps;
 		return std::make_unique<InGameAdminModel::Server>(env);
 	}
 
@@ -294,6 +301,241 @@ static void InGameAdminTests()
 		if (us != std::string::npos && us + 1 < wire.size()) wire[us + 1] = '9';
 		CHECK(IgaRole(IgaSendRaw(*s, 1, "p1", wire)) == "update");
 		std::filesystem::remove(path);
+	}
+}
+
+// ---- In-game admin: snapshot, ops, changed push, rate limit ----
+
+namespace
+{
+	// The raw replies for one message from a connection.
+	std::vector<std::string> IgaRaw(InGameAdminModel::Server& s, uint64_t conn, const std::string& id, const AdminWire::Message& m)
+	{
+		std::string wire;
+		AdminWire::Encode(m, wire);
+		return s.OnPacket(conn, id, id, reinterpret_cast<const uint8_t*>(wire.data()), wire.size());
+	}
+
+	std::vector<AdminWire::Message> IgaDecode(const std::vector<std::string>& raw)
+	{
+		std::vector<AdminWire::Message> out;
+		for (const std::string& r : raw)
+		{
+			AdminWire::Message d;
+			if (AdminWire::Decode(r, d) == AdminWire::Decoded::Ok) out.push_back(d);
+		}
+		return out;
+	}
+
+	// Pairs the connection with a fresh code; returns the raw replies to the pair message.
+	std::vector<std::string> IgaMakeProven(InGameAdminModel::Server& s, uint64_t conn, const std::string& id)
+	{
+		std::string code, err;
+		s.IssueCode(id, code, err);
+		IgaChallenge(s, conn, id);
+		return IgaRaw(s, conn, id, IgaPair(code, kSecretA));
+	}
+
+	AdminWire::Snapshot IgaState(int mods, int players)
+	{
+		AdminWire::Snapshot snap;
+		snap.defaultPolicy = "deny";
+		snap.message = "Welcome";
+		snap.rules.push_back({ "Best Builder.fast", "deny" });
+		snap.mins.push_back({ "", "1.27.0" });
+		snap.mins.push_back({ "Best Builder", "0.2.0" });
+		for (int i = 0; i < mods; ++i)
+		{
+			AdminWire::ModInfo m;
+			m.plugin = (i == 0) ? std::string("Best Builder") : "Mod" + std::to_string(i);
+			m.version = "1.0." + std::to_string(i);
+			for (int f = 0; f < 6; ++f)
+				m.features.push_back({ "feature" + std::to_string(f), "A feature title that is fairly long number " + std::to_string(f) });
+			snap.mods.push_back(m);
+		}
+		for (int i = 0; i < players; ++i)
+		{
+			AdminWire::PlayerInfo p;
+			p.id = "player" + std::to_string(i);
+			p.name = "Player " + std::to_string(i);
+			p.flags = "admin";
+			p.online = i % 2 == 0;
+			for (int k = 0; k < 8; ++k)
+				p.mods.push_back({ "Mod" + std::to_string(k), "1.0." + std::to_string(k) });
+			snap.players.push_back(p);
+		}
+		return snap;
+	}
+
+	AdminWire::Message IgaOps(uint32_t request, uint32_t base, std::vector<AdminWire::Op> ops)
+	{
+		AdminWire::Message m;
+		m.tag = AdminWire::Tag::Ops;
+		m.requestId = request;
+		m.baseRevision = base;
+		m.ops = std::move(ops);
+		return m;
+	}
+}
+
+static void InGameAdminOpsTests()
+{
+	using AdminWire::Tag;
+	const std::string path = (std::filesystem::temp_directory_path() / "su-iga-ops-test.txt").string();
+	std::filesystem::remove(path);
+
+	// A snapshot follows welcome admin, paged under 1 KB, carrying the revision.
+	{
+		IgaEnv e; e.path = path; e.admins = { "p1" };
+		e.snapshot = [] { return IgaState(30, 40); };
+		auto s = MakeIga(e);
+		const std::vector<std::string> raw = IgaMakeProven(*s, 1, "p1");
+		const auto msgs = IgaDecode(raw);
+		CHECK(raw.size() > 10 && msgs.size() == raw.size());
+		CHECK(!msgs.empty() && msgs[0].tag == Tag::Welcome && msgs[0].role == "admin");
+		CHECK(msgs.size() > 2 && msgs[1].tag == Tag::SnapBegin && msgs[1].revision == 7);
+		CHECK(!msgs.empty() && msgs.back().tag == Tag::SnapEnd && msgs.back().revision == 7);
+		CHECK(msgs.size() > 3 && msgs[2].tag == Tag::SnapPolicy);
+		size_t mods = 0, players = 0, rules = 0, mins = 0;
+		bool small = true, spaced = false;
+		for (size_t i = 0; i < raw.size(); ++i)
+		{
+			small = small && raw[i].size() < AdminWire::kMaxMessage;
+			if (msgs[i].tag == Tag::SnapMod && !msgs[i].cont) { ++mods; spaced = spaced || msgs[i].mod.plugin == "Best Builder"; }
+			if (msgs[i].tag == Tag::SnapPlayer && !msgs[i].cont) ++players;
+			if (msgs[i].tag == Tag::SnapRule) rules += msgs[i].rules.size();
+			if (msgs[i].tag == Tag::SnapMin) mins += msgs[i].mins.size();
+		}
+		CHECK(small);
+		CHECK(mods == 30 && players == 40 && rules == 1 && mins == 2);
+		CHECK(spaced);
+
+		// A snap request gets it again; a connection that is not proven gets nothing.
+		AdminWire::Message snap; snap.tag = Tag::Snap; snap.sections = "all";
+		const auto again = IgaDecode(IgaRaw(*s, 1, "p1", snap));
+		CHECK(again.size() == raw.size() - 1 && again[0].tag == Tag::SnapBegin);
+		IgaChallenge(*s, 2, "p1");
+		CHECK(IgaRaw(*s, 2, "p1", snap).empty());
+		CHECK(IgaRaw(*s, 3, "p1", snap).empty());
+
+		// The Admin flag is re-read on every message: lose it and the connection is dropped.
+		e.admins.clear();
+		CHECK(IgaRole(IgaDecode(IgaRaw(*s, 1, "p1", snap))) == "none");
+		CHECK(!s->IsProven(1));
+		CHECK(IgaRaw(*s, 1, "p1", snap).empty());
+		std::filesystem::remove(path);
+	}
+
+	// Ops: handed to the runner as the server-read caller, the result echoes the request id.
+	{
+		IgaEnv e; e.path = path; e.admins = { "p1" };
+		e.snapshot = [] { return IgaState(2, 2); };
+		std::string seenId, seenName; std::vector<AdminWire::Op> seenOps; uint32_t seenBase = 99;
+		int mode = 0;   // 0 ok, 1 stale, 2 error
+		e.runOps = [&](const std::string& id, const std::string& name, const std::vector<AdminWire::Op>& ops, uint32_t base)
+		{
+			seenId = id; seenName = name; seenOps = ops; seenBase = base;
+			InGameAdminModel::OpsOutcome o;
+			o.revision = 8;
+			if (mode == 0) { o.ok = true; o.text = "Saved"; }
+			else if (mode == 1) { o.stale = true; o.text = "Changed elsewhere, refreshed"; o.revision = 9; }
+			else { o.text = "that would remove the last Admin; use RCON for that"; }
+			return o;
+		};
+		auto s = MakeIga(e);
+		IgaMakeProven(*s, 1, "p1");
+
+		const auto ok = IgaDecode(IgaRaw(*s, 1, "p1", IgaOps(41, 7, { { "rule.set", { "Best Builder.fast", "allow" } },
+		                                                               { "player.kick", { "p7", "Be nice" } } })));
+		CHECK(ok.size() == 1 && ok[0].tag == Tag::Result && ok[0].status == "ok" && ok[0].requestId == 41 && ok[0].revision == 8);
+		CHECK(ok.size() == 1 && ok[0].text == "Saved");
+		CHECK(seenId == "p1" && seenBase == 7 && seenOps.size() == 2);
+		CHECK(seenOps.size() == 2 && seenOps[0].name == "rule.set" && seenOps[0].args[0] == "Best Builder.fast" && seenOps[1].args[1] == "Be nice");
+
+		mode = 1;
+		const auto stale = IgaDecode(IgaRaw(*s, 1, "p1", IgaOps(42, 3, { { "policy.default", { "deny" } } })));
+		CHECK(stale.size() > 2 && stale[0].tag == Tag::Result && stale[0].status == "changed" && stale[0].requestId == 42);
+		CHECK(stale.size() > 2 && stale[0].text == "Changed elsewhere, refreshed" && stale[1].tag == Tag::SnapBegin && stale.back().tag == Tag::SnapEnd);
+
+		mode = 2;
+		const auto err = IgaDecode(IgaRaw(*s, 1, "p1", IgaOps(43, 0, { { "player.remove", { "p1" } } })));
+		CHECK(err.size() == 1 && err[0].status == "error" && err[0].text.find("last Admin") != std::string::npos);
+
+		// Not proven, or no longer an Admin: nothing runs.
+		seenOps.clear();
+		IgaChallenge(*s, 2, "p1");
+		CHECK(IgaRaw(*s, 2, "p1", IgaOps(1, 0, { { "policy.default", { "allow" } } })).empty());
+		e.admins.clear();
+		CHECK(IgaRole(IgaDecode(IgaRaw(*s, 1, "p1", IgaOps(2, 0, { { "policy.default", { "allow" } } })))) == "none");
+		CHECK(seenOps.empty());
+		std::filesystem::remove(path);
+	}
+
+	// Rate limit: 20 ops messages a second per connection, then an error result and the op is dropped.
+	{
+		IgaEnv e; e.path = path; e.admins = { "p1", "p2" };
+		int ran = 0;
+		e.runOps = [&](const std::string&, const std::string&, const std::vector<AdminWire::Op>&, uint32_t)
+		{
+			++ran;
+			InGameAdminModel::OpsOutcome o; o.ok = true; o.revision = 7;
+			return o;
+		};
+		auto s = MakeIga(e);
+		IgaMakeProven(*s, 1, "p1");
+		IgaMakeProven(*s, 2, "p2");
+		int refused = 0;
+		for (uint32_t i = 1; i <= 25; ++i)
+		{
+			const auto r = IgaDecode(IgaRaw(*s, 1, "p1", IgaOps(i, 0, { { "policy.default", { "allow" } } })));
+			if (r.size() == 1 && r[0].status == "error" && r[0].requestId == i) ++refused;
+		}
+		CHECK(ran == 20 && refused == 5);
+		// Another connection has its own allowance; time refills this one.
+		CHECK(IgaDecode(IgaRaw(*s, 2, "p2", IgaOps(1, 0, { { "policy.default", { "allow" } } })))[0].status == "ok");
+		e.now += 1.0;
+		CHECK(IgaDecode(IgaRaw(*s, 1, "p1", IgaOps(99, 0, { { "policy.default", { "allow" } } })))[0].status == "ok");
+		std::filesystem::remove(path);
+	}
+
+	// Changed push: every proven admin connection, nobody else.
+	{
+		IgaEnv e; e.path = path; e.admins = { "p1", "p2", "p3" };
+		auto s = MakeIga(e);
+		IgaMakeProven(*s, 1, "p1");
+		IgaMakeProven(*s, 2, "p2");
+		IgaChallenge(*s, 3, "p3");   // not proven
+		const auto out = s->OnChanged("rules,players", 12);
+		CHECK(out.size() == 2);
+		for (const auto& o : out)
+		{
+			AdminWire::Message m;
+			CHECK(AdminWire::Decode(o.data, m) == AdminWire::Decoded::Ok);
+			CHECK(m.tag == Tag::Changed && m.revision == 12 && m.sections == "rules,players");
+			CHECK(o.conn == 1 || o.conn == 2);
+		}
+		e.admins.erase("p2");   // lost the flag since: no push
+		CHECK(s->OnChanged("all", 13).size() == 1);
+		s->OnDisconnect(1);
+		CHECK(s->OnChanged("all", 14).empty());
+		std::filesystem::remove(path);
+	}
+
+	// Plugin names with single inner spaces travel intact through the codec and the catalog.
+	{
+		AdminWire::Message m = IgaOps(5, 2, { { "min.mod", { "Best Builder", "wire" } }, { "rule.set", { "Best Builder.*", "deny" } } });
+		std::string wire; AdminWire::Message d;
+		CHECK(AdminWire::Encode(m, wire) && AdminWire::Decode(wire, d) == AdminWire::Decoded::Ok);
+		CHECK(d.ops.size() == 2 && d.ops[0].args[0] == "Best Builder" && d.ops[1].args[0] == "Best Builder.*");
+
+		KnownFeatures::Catalog cat;
+		for (const KnownFeatures::Report& r : KnownFeatures::ParseReportText("loader=1.2.3 interface=4\nBest Builder.fast=on\n", "b1"))
+			cat.Merge(r, "2026-11-23");
+		const auto entries = cat.Entries();
+		CHECK(entries.size() == 1 && entries[0].plugin == "Best Builder" && entries[0].id == "fast");
+		KnownFeatures::Catalog back;
+		back.Parse(cat.Serialize());
+		CHECK(back.Entries().size() == 1 && back.Entries()[0].plugin == "Best Builder");
 	}
 }
 
@@ -820,6 +1062,7 @@ int main()
 	}
 
 	InGameAdminTests();
+	InGameAdminOpsTests();
 	std::printf("%d checks, %d failed\n", g_checks, g_failed);
 	return g_failed ? 1 : 0;
 }

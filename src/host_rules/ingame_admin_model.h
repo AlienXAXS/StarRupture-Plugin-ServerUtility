@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "../admin_wire/admin_wire.h"
+
 // The server half of the in-game admin tool, apart from the game: the handshake
 // (hello, challenge, prove, welcome), admin pairing (codes, secrets, limits) and
 // the per-connection state. No game or SDK types, so it runs in unit tests.
@@ -23,6 +25,16 @@ namespace InGameAdminModel
 	constexpr int    kMaxWrongPerCode       = 5;
 	constexpr double kCodeLifetimeSeconds   = 600.0;   // 10 minutes
 	constexpr size_t kCodeLength            = 8;
+	constexpr double kOpsPerSecond          = 20;   // ops messages per connection
+
+	// What running a batch of ops came to (a caller-side copy of AdminOps::Result).
+	struct OpsOutcome
+	{
+		bool        ok    = false;
+		bool        stale = false;   // refused because the base revision was old
+		std::string text;
+		uint32_t    revision = 0;
+	};
 
 	struct Env
 	{
@@ -33,6 +45,11 @@ namespace InGameAdminModel
 		std::function<bool(size_t, std::vector<uint8_t>&)> random; // empty = the system generator
 		std::function<void(const std::string&)>        audit;      // one log line; never holds a code or secret
 		std::string                                    storePath;  // admin-pairing.txt
+		// Game thread. The full state for a snapshot (revision and sections set by the model).
+		std::function<AdminWire::Snapshot()>           snapshot;
+		// Game thread. Runs a batch as this player; applies the in-game guards.
+		std::function<OpsOutcome(const std::string& playerId, const std::string& name,
+		                         const std::vector<AdminWire::Op>& ops, uint32_t baseRevision)> runOps;
 	};
 
 	// A message for one connection.
@@ -41,11 +58,6 @@ namespace InGameAdminModel
 		ConnId      conn = 0;
 		std::string data;
 	};
-
-	// What a proven connection's other messages (snap, ops) are handed to (SA3b).
-	// Returns the messages to send back to that connection.
-	using ProvenHandler = std::function<std::vector<std::string>(ConnId, const std::string& playerId, const std::string& name,
-	                                                             const uint8_t* data, size_t size)>;
 
 	class Server
 	{
@@ -61,8 +73,6 @@ namespace InGameAdminModel
 		// to that same connection.
 		std::vector<std::string> OnPacket(ConnId conn, const std::string& playerId, const std::string& name,
 		                                  const uint8_t* data, size_t size);
-
-		void SetProvenHandler(ProvenHandler handler);
 
 		// A connection ended, or the world changed (travel): proven state is gone.
 		void OnDisconnect(ConnId conn);
@@ -95,6 +105,10 @@ namespace InGameAdminModel
 
 		bool HasSecret(const std::string& playerId) const;
 
+		// A change was made (from any front end): the `changed` message for every
+		// connection that is proven and whose ID still has the Admin flag.
+		std::vector<Out> OnChanged(const std::string& sections, uint32_t revision);
+
 	private:
 		struct Conn
 		{
@@ -104,6 +118,8 @@ namespace InGameAdminModel
 			bool        proven     = false;
 			bool        silent     = false;
 			int         wrongCodes = 0;
+			double      tokens     = kOpsPerSecond;   // ops rate limit
+			double      tokenTime  = 0;
 		};
 		struct Code
 		{
@@ -117,6 +133,10 @@ namespace InGameAdminModel
 		bool RandomHex(size_t bytes, std::string& out);
 		bool MakeChallengeLocked(Conn& c, std::string& message);
 		std::string Welcome(const char* role, uint32_t revision) const;
+		// snap-begin ... snap-end for a proven connection.
+		std::vector<std::string> SnapshotMessages(const std::string& sections) const;
+		// A proven connection's ops message.
+		std::vector<std::string> RunOps(const std::string& playerId, const std::string& name, const AdminWire::Message& m) const;
 		void UnproveIdLocked(const std::string& id);
 		void EraseClaimedLocked(const std::string& playerId);
 
@@ -128,6 +148,5 @@ namespace InGameAdminModel
 		std::map<std::string, Code>    codes_;         // player ID -> open pairing code
 		struct Claimed { std::string id; double expires = 0; };
 		std::map<ConnId, Claimed>      claimed_;       // connection that claimed -> claim shortcut
-		ProvenHandler                  proven_;
 	};
 }

@@ -170,7 +170,7 @@ No admins yet. Claim code: <code>
 
 A player gets 5 wrong tries, then is not asked again until restart; 5 wrong tries in total replace the code. "Not me" also stops the asking until restart. `[Policy] AdminPrompt=0` in `HostRules.ini` turns the asking off (the code still shows here). See the README for the full flow.
 
-- `admin pair <id|number>` makes a one-time code (8 characters, 10 minutes, one use) for that admin's in-game admin tool and prints it in the reply only; it is never logged. The player must already have the Admin flag. 5 wrong tries on one connection, or 5 in total, void the code. `[Policy] InGameAdmin=0` turns the tool off.
+- `admin pair <id|number>` makes a one-time code (8 characters, 10 minutes, one use) for that admin's in-game admin tool and prints it in the reply only; it is never logged. The player must already have the Admin flag. 5 wrong tries on one connection, or 5 in total, void the code. `[Policy] InGameAdmin=0` turns the tool off. A paired admin's tool is told to refresh whenever the rules or player list change over RCON, so a pairing code or an RCON change shows up in the open window at once.
 - `admin unpair <id|number>` forgets that admin's pairing; the tool must be paired again. Taking the Admin flag away does the same.
 
 ### `hostrules [list|allow|deny|unset|default|message|minversion|modmin|reload|who]`
