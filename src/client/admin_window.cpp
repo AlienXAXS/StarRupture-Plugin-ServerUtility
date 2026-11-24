@@ -496,28 +496,30 @@ namespace
 			return;
 		}
 		ResultLine(f);
-		// Leave one button row at the bottom for Apply and Revert.
-		const bool child = ui->BeginChild("##content", 0.0f, -ui->GetFrameHeightWithSpacing(), false);
-		if (child && ui->BeginTabBar("##admintabs", 0))
+		// The tab bar stays put; each tab scrolls inside its own child, which
+		// leaves one button row at the bottom for Apply and Revert.
+		if (ui->BeginTabBar("##admintabs", 0))
 		{
 			if (ui->BeginTabItem("Mods", nullptr, 0))
 			{
-				DrawModsTab(f);
+				if (ui->BeginChild("##modsbody", 0.0f, -ui->GetFrameHeightWithSpacing(), false)) DrawModsTab(f);
+				ui->EndChild();
 				ui->EndTabItem();
 			}
 			if (ui->BeginTabItem("Players", nullptr, 0))
 			{
-				DrawPlayersTab(f);
+				if (ui->BeginChild("##playersbody", 0.0f, -ui->GetFrameHeightWithSpacing(), false)) DrawPlayersTab(f);
+				ui->EndChild();
 				ui->EndTabItem();
 			}
 			if (ui->BeginTabItem("Versions", nullptr, 0))
 			{
-				DrawVersionsTab(f);
+				if (ui->BeginChild("##versionsbody", 0.0f, -ui->GetFrameHeightWithSpacing(), false)) DrawVersionsTab(f);
+				ui->EndChild();
 				ui->EndTabItem();
 			}
 			ui->EndTabBar();
 		}
-		ui->EndChild();
 		DrawApplyBar(f);
 	}
 
