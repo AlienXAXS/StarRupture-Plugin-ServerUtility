@@ -94,7 +94,7 @@ namespace AdminClient
 
 	private:
 		void Send(const AdminWire::Message& m);
-		void SendSnapReq();
+		void SendSnapReq(const char* sections = AdminWire::kSectionAll);
 		void CheckTimeout();
 		void HandleWelcome(const AdminWire::Message& m);
 		void HandleChallenge(const AdminWire::Message& m);

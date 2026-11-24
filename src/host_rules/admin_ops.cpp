@@ -217,15 +217,19 @@ namespace
 		return false;
 	}
 
-	void Bump(unsigned sections)
+	void Notify(uint64_t revision, unsigned sections)
 	{
-		const uint64_t revision = ++g_revision;
 		std::vector<AdminOps::Listener> copy;
 		{
 			std::lock_guard<std::mutex> lk(g_listenMutex);
 			for (const auto& l : g_listeners) copy.push_back(l.second);
 		}
 		for (const auto& l : copy) l(revision, sections);
+	}
+
+	void Bump(unsigned sections)
+	{
+		Notify(++g_revision, sections);
 	}
 }
 
@@ -365,5 +369,10 @@ namespace AdminOps
 	void NoteChanged(unsigned sections)
 	{
 		Bump(sections);
+	}
+
+	void NoteCatalogChanged()
+	{
+		Notify(g_revision.load(), kSectionMods);
 	}
 }

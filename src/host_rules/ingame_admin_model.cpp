@@ -136,6 +136,12 @@ namespace InGameAdminModel
 		AdminWire::Snapshot snap = env_.snapshot();
 		snap.revision = env_.revision ? env_.revision() : 0;
 		snap.sections = sections.empty() ? std::string(AdminWire::kSectionAll) : sections;
+		if (snap.sections == AdminWire::kSectionMods)   // the catalog alone: no rules, minimums or players
+		{
+			snap.rules.clear();
+			snap.mins.clear();
+			snap.players.clear();
+		}
 		return AdminWire::EncodeSnapshot(snap);
 	}
 

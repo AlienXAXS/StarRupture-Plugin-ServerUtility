@@ -204,11 +204,11 @@ namespace AdminClient
 		flush();
 	}
 
-	void Client::SendSnapReq()
+	void Client::SendSnapReq(const char* sections)
 	{
 		Message m;
 		m.tag = Tag::Snap;
-		m.sections = kSectionAll;
+		m.sections = sections;
 		Send(m);
 	}
 
@@ -304,7 +304,10 @@ namespace AdminClient
 		{
 		case Tag::Welcome: HandleWelcome(m); break;
 		case Tag::Challenge: HandleChallenge(m); break;
-		case Tag::Changed: if (status_ == Status::Ready) SendSnapReq(); break;
+		case Tag::Changed:
+			if (status_ == Status::Ready)
+				SendSnapReq(m.sections == kSectionMods ? kSectionMods : kSectionAll);   // the catalog alone, or everything
+			break;
 		case Tag::Result: HandleResult(m); break;
 		case Tag::SnapBegin: case Tag::SnapPolicy: case Tag::SnapRule: case Tag::SnapMin:
 		case Tag::SnapMod: case Tag::SnapPlayer: case Tag::SnapEnd:
@@ -452,6 +455,13 @@ namespace AdminClient
 				&& building_.rules.size() == m.ruleCount && building_.mins.size() == m.minCount
 				&& building_.mods.size() == m.modCount && building_.players.size() == m.playerCount)
 			{
+				if (building_.sections == kSectionMods)
+				{
+					// Only the mods list: the rules, the revision and any staged edits stay as they are.
+					snapshot_.mods = std::move(building_.mods);
+					building_ = Snapshot();
+					break;
+				}
 				snapshot_ = std::move(building_);
 				haveSnapshot_ = true;
 				snapshotRetried_ = false;

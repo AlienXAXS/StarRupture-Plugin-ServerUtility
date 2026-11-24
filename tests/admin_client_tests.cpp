@@ -473,6 +473,30 @@ int main()
 		CHECK(r.Count(Tag::Snap) == 1);
 	}
 
+	// A catalog change asks for the mods list alone; the revision and staged edits stay.
+	{
+		Rig r;
+		MakeReady(r);
+		FeedSnapshot(r, 6);
+		Op a; a.name = "rule.set"; a.args = { "k", "deny" };
+		r.client->Stage(a);
+		r.Clear();
+		Message ch; ch.tag = Tag::Changed; ch.revision = 6; ch.sections = kSectionMods;
+		r.Feed(ch);
+		CHECK(r.Count(Tag::Snap) == 1 && r.Last(Tag::Snap)->sections == kSectionMods);
+		Snapshot s;
+		s.revision = 6;
+		s.sections = kSectionMods;
+		ModInfo mi; mi.plugin = "Best Builder"; mi.version = "2.1";
+		s.mods.push_back(mi);
+		for (const std::string& page : EncodeSnapshot(s)) r.FeedRaw(page);
+		AdminClient::View v = r.View();
+		CHECK(v.snapshot.mods.size() == 1 && v.snapshot.revision == 6 && v.staged.size() == 1 && !v.lastResultIsError);
+		r.Clear();
+		CHECK(r.client->Apply());
+		CHECK(r.Last(Tag::Ops)->baseRevision == 6);
+	}
+
 	// Revert drops staged ops and re-snaps. Kick sends at once and leaves staged ops.
 	{
 		Rig r;

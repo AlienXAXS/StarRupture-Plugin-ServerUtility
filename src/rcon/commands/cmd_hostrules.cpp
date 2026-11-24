@@ -220,7 +220,7 @@ namespace Cmd_HostRules
 	void Register()
 	{
 		PluginCommands::Register("hostrules", nullptr,
-			"hostrules [list|allow|deny|unset|default|message|minversion|modmin|reload|who]",
+			"hostrules [list|known|allow|deny|unset|default|message|minversion|modmin|reload|who]",
 			"Show and edit the host's rules for mod features and versions",
 			Handle);
 	}

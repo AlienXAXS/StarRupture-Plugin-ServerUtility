@@ -64,6 +64,7 @@ namespace AdminOps
 		kSectionRules   = 1,   // [Policy] and [Rules]
 		kSectionMins    = 2,   // [MinVersions] and the loader minimum
 		kSectionPlayers = 4,   // [Players]
+		kSectionMods    = 8,   // the known-features catalog (not part of the ops revision)
 	};
 
 	// What the dispatcher needs from the host. The server's own set is made by
@@ -111,4 +112,9 @@ namespace AdminOps
 
 	// A change made without Apply (the admin claim adding the first admin).
 	void NoteChanged(unsigned sections);
+
+	// The known-features catalog changed. Listeners hear it with the current
+	// revision and kSectionMods; the revision does not move, so staged applies
+	// stay valid.
+	void NoteCatalogChanged();
 }

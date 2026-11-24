@@ -667,7 +667,7 @@ static void InGameAdminOpsTests()
 		{
 			++pushes;
 			if (KnownFeatures::NoteDeclaredRows(rows))
-				sp->OnChanged("catalog", 9);   // as the plugin does when the catalog changed
+				sp->OnChanged(AdminWire::kSectionMods, 9);   // as the plugin does when the catalog changed
 		};
 		auto s = MakeIga(e);
 		sp = s.get();
@@ -698,7 +698,7 @@ static void InGameAdminOpsTests()
 		{
 			AdminWire::Message a, b;
 			CHECK(AdminWire::Decode(out[0], a) == AdminWire::Decoded::Ok && a.tag == Tag::Result && a.requestId == 31);
-			CHECK(AdminWire::Decode(out[1], b) == AdminWire::Decoded::Ok && b.tag == Tag::Changed);
+			CHECK(AdminWire::Decode(out[1], b) == AdminWire::Decoded::Ok && b.tag == Tag::Changed && b.sections == "mods");
 		}
 		const KnownFeatures::Entry* en = find("Best Builder", "fast");
 		CHECK(en && en->title == "Fast build mode" && en->version == "2.1");
@@ -706,7 +706,7 @@ static void InGameAdminOpsTests()
 
 		// Past the per-report cap only the first rows are kept.
 		std::vector<std::string> many;
-		for (int i = 0; i < 70; ++i) many.push_back("Capped	1	f" + std::to_string(i) + "	on	T");
+		for (int i = 0; i < 70; ++i) many.push_back("Capped	1.0	f" + std::to_string(i) + "	on	T");
 		KnownFeatures::NoteDeclaredRows(many);   // the cap applies to one report, so call the catalog directly
 		int kept = 0;
 		for (const auto& x : KnownFeatures::Snapshot()) if (x.plugin == "Capped") ++kept;
@@ -1165,6 +1165,20 @@ int main()
 			CHECK(!Apply(f.be, rcon, { op("policy.default", { "deny" }) }, cur).ok);   // cur is now old
 		}
 
+		// A catalog change reaches listeners as the mods section and leaves the revision alone,
+		// so an apply staged before it is not stale.
+		{
+			Fake f;
+			const uint64_t cur = Revision();
+			int calls = 0; unsigned secs = 0; uint64_t seen = 0;
+			const int h = AddListener([&](uint64_t r, unsigned s) { ++calls; secs = s; seen = r; });
+			NoteCatalogChanged();
+			CHECK(calls == 1 && secs == kSectionMods && seen == cur && Revision() == cur);
+			RemoveListener(h);
+			const Result after = Apply(f.be, rcon, { op("policy.default", { "deny" }) }, cur);
+			CHECK(after.ok && !after.stale);
+		}
+
 		// The in-game caller is checked on every call.
 		{
 			Fake f;
@@ -1218,6 +1232,41 @@ int main()
 			return r;
 		};
 		const std::string d1 = "2026-11-20", d2 = "2026-11-23";
+
+		// Pushed rows: only a change a window shows counts; a newer lastSeen alone does not.
+		{
+			Catalog g;
+			bool shown = false;
+			Report r = rep("Best Builder", "fast", "2.1", "", false, "Fast build mode");
+			CHECK(g.Merge(r, d1, &shown) && shown);                     // new row
+			CHECK(!g.Merge(r, d1, &shown) && !shown);                   // same again
+			CHECK(g.Merge(r, d2, &shown) && !shown);                    // lastSeen only: saved, not shown
+			r.title = "Faster build mode";
+			CHECK(!g.Merge(r, d2, &shown) && !shown);                   // same version: title kept
+			r.version = "2.2";
+			CHECK(g.Merge(r, d2, &shown) && shown && g.Entries()[0].title == "Faster build mode");   // version and title change
+			// An off row pushed without a build is not recorded as off on "unknown".
+			Report o = rep("Best Builder", "other", "1.0", "", true, "Other");
+			o.recordOff = false;
+			CHECK(g.Merge(o, d2, &shown) && shown);
+			for (const auto& en : g.Entries()) if (en.id == "other") CHECK(en.offBuilds.empty());
+		}
+
+		// A long title is cut to 80 bytes on a UTF-8 boundary; a row with a junk version is dropped.
+		{
+			const std::string kb(4000, 'x');
+			std::string wide;
+			for (int i = 0; i < 100; ++i) wide += "Ã©";   // 2-byte characters
+			const auto rows = ParseDeclaredRows({ "P	1.0	long	on	" + kb, "P	1.0	wide	on	" + wide, "P	99999	junk	on	T", "P	abc	junk2	on	T", "P		blank	on	T" });
+			CHECK(rows.size() == 3);
+			CHECK(rows.size() == 3 && rows[0].title.size() == 80 && rows[0].id == "long");
+			CHECK(rows.size() == 3 && rows[1].title.size() == 80 && rows[1].title.back() == static_cast<char>(0xA9));
+			CHECK(rows.size() == 3 && rows[2].id == "blank");
+			Catalog g;
+			Report big = rep("P", "big", "1.0", "", false, kb.c_str());
+			CHECK(g.Merge(big, d1) && g.Entries()[0].title.size() == 80);
+			CHECK(!g.Merge(rep("P", "junk", "99999", "", false), d1) && g.Size() == 1);
+		}
 
 		// Names are checked and rows are capped.
 		{

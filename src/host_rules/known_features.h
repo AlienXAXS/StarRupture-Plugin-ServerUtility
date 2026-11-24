@@ -36,6 +36,7 @@ namespace KnownFeatures
 		std::string plugin, id, title, version;
 		std::string build;                 // game build of the reporter; empty = unknown
 		bool        off = false;
+		bool        recordOff = true;      // false: keep the state out of offBuilds (no known build)
 		std::string source;                // empty = reported
 	};
 
@@ -55,9 +56,12 @@ namespace KnownFeatures
 	class Catalog
 	{
 	public:
-		// True when the catalog changed. Rows with a bad plugin name or feature id,
-		// and new rows past kMaxRows, are refused. today is YYYY-MM-DD.
-		bool Merge(const Report& r, const std::string& today);
+		// True when the catalog changed. Rows with a bad plugin name, feature id or
+		// version, and new rows past kMaxRows, are refused; a title is cut to 80
+		// bytes. today is YYYY-MM-DD. *visible, when given, is set when something a
+		// window shows changed (a new row, version, title or off build) - a newer
+		// lastSeen alone is a change to save, not to show.
+		bool Merge(const Report& r, const std::string& today, bool* visible = nullptr);
 		// Sorted by plugin, then id (case ignored).
 		std::vector<Entry> Entries() const;
 		size_t Size() const { return m_rows.size(); }
@@ -96,7 +100,8 @@ namespace KnownFeatures
 	void Init(const std::wstring& path);
 	// Merge a mod loader's feature text (game thread: where reports arrive).
 	void NoteReportText(const std::string& text);
-	// Merge rows pushed by an admin client's mod loader. True when the catalog changed.
+	// Merge rows pushed by an admin client's mod loader. True when something a
+	// window shows changed (not for a newer lastSeen alone).
 	bool NoteDeclaredRows(const std::vector<std::string>& rows);
 	// Write the file when something changed and 10 s passed. Call from the tick;
 	// it does no I/O unless a write is due.

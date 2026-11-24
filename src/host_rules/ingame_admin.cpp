@@ -235,6 +235,7 @@ namespace InGameAdmin
 			if (sections & AdminOps::kSectionRules) add("rules");
 			if (sections & AdminOps::kSectionMins) add("mins");
 			if (sections & AdminOps::kSectionPlayers) add("players");
+			if (sections & AdminOps::kSectionMods) add("mods");
 			return text.empty() ? std::string(AdminWire::kSectionAll) : text;
 		}
 
@@ -329,7 +330,7 @@ namespace InGameAdmin
 		env.catalogPush = [](const std::vector<std::string>& rows)
 		{
 			if (KnownFeatures::NoteDeclaredRows(rows))
-				AdminOps::NoteChanged(0);   // every section: the mods list changed
+				AdminOps::NoteCatalogChanged();   // the mods list only; the ops revision stays
 		};
 
 		auto model = std::make_unique<InGameAdminModel::Server>(env);

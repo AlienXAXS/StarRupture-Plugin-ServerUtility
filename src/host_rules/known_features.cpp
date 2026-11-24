@@ -2,6 +2,7 @@
 
 #include "rules_model.h"
 #include "ini_file.h"
+#include "../admin_wire/admin_wire.h"
 
 #include <algorithm>
 #include <cctype>
@@ -41,6 +42,18 @@ namespace KnownFeatures
 			return out;
 		}
 
+		constexpr size_t kMaxTitle = 80;
+
+		// The row as the catalog keeps it: a title cut to kMaxTitle bytes on a UTF-8
+		// boundary, and false when a version is given that is not a version.
+		bool Fit(Report& r)
+		{
+			if (!r.version.empty() && !RulesModel::ValidVersion(Clean(r.version)))
+				return false;
+			r.title = AdminWire::CleanText(r.title, kMaxTitle);
+			return true;
+		}
+
 		// Numbers of a version, at most four; empty when it has none.
 		std::vector<long> Numbers(const std::string& v)
 		{
@@ -67,19 +80,6 @@ namespace KnownFeatures
 			for (size_t i = 0; i < 10; ++i)
 				if (i == 4 || i == 7 ? d[i] != '-' : !std::isdigit(static_cast<unsigned char>(d[i]))) return false;
 			return true;
-		}
-
-		std::vector<std::string> Split(const std::string& s, char sep)
-		{
-			std::vector<std::string> parts;
-			size_t start = 0;
-			for (;;)
-			{
-				const size_t at = s.find(sep, start);
-				parts.push_back(s.substr(start, at == std::string::npos ? std::string::npos : at - start));
-				if (at == std::string::npos) return parts;
-				start = at + 1;
-			}
 		}
 
 		std::string Today()
@@ -138,25 +138,24 @@ namespace KnownFeatures
 		for (const std::string& row : rows)
 		{
 			if (out.size() >= kMaxRowsPerReport) break;
-			std::vector<std::string> f;
-			size_t start = 0;
-			for (;;)
-			{
-				const size_t tab = row.find('	', start);
-				if (tab == std::string::npos) { f.push_back(row.substr(start)); break; }
-				f.push_back(row.substr(start, tab - start));
-				start = tab + 1;
-			}
+			const std::vector<std::string> f = AdminWire::Split(row, '	');
 			if (f.size() != 5 || (f[3] != "on" && f[3] != "off")) continue;
 			Report r;
 			r.plugin = f[0]; r.version = f[1]; r.id = f[2]; r.off = f[3] == "off"; r.title = f[4];
+			r.recordOff = false;   // the push carries no game build
+			if (!Fit(r)) continue;
 			out.push_back(std::move(r));
 		}
 		return out;
 	}
 
-	bool Catalog::Merge(const Report& r, const std::string& today)
+	bool Catalog::Merge(const Report& rIn, const std::string& today, bool* visible)
 	{
+		Report r = rIn;
+		bool seen = false;
+		bool& shown = visible ? *visible : seen;
+		shown = false;
+		if (!Fit(r)) return false;
 		Entry e;
 		e.plugin = Clean(r.plugin);
 		e.id = Clean(r.id);
@@ -164,7 +163,7 @@ namespace KnownFeatures
 			return false;
 		e.title = Clean(r.title);
 		e.version = Clean(r.version);
-		if (r.off)
+		if (r.off && r.recordOff)
 			e.offBuilds.insert(r.build.empty() ? kUnknownBuild : CleanBuild(r.build));
 		e.lastSeen = today;
 		e.source = r.source.empty() ? kSourceReported : Clean(r.source);
@@ -176,6 +175,7 @@ namespace KnownFeatures
 			if (m_rows.size() >= kMaxRows)
 				return false;
 			m_rows.emplace(key, std::move(e));
+			shown = true;
 			return true;
 		}
 
@@ -185,19 +185,19 @@ namespace KnownFeatures
 		if (cmp > 0)
 		{
 			cur.version = e.version;
-			changed = true;
+			changed = shown = true;
 		}
 		if (!e.title.empty() && e.title != cur.title && (cmp > 0 || cur.title.empty()))
 		{
 			cur.title = e.title;
-			changed = true;
+			changed = shown = true;
 		}
 		for (const std::string& b : e.offBuilds)
-			changed |= cur.offBuilds.insert(b).second;
+			if (cur.offBuilds.insert(b).second) changed = shown = true;
 		if (e.lastSeen > cur.lastSeen)
 		{
 			cur.lastSeen = e.lastSeen;
-			changed = true;
+			changed = true;   // kept on disk, but nothing a window shows
 		}
 		return changed;
 	}
@@ -238,7 +238,7 @@ namespace KnownFeatures
 			if (first) { first = false; if (line.rfind("known-features", 0) == 0) continue; }
 			if (line.empty()) continue;
 
-			const std::vector<std::string> f = Split(line, '\t');
+			const std::vector<std::string> f = AdminWire::Split(line, '\t');
 			if (f.size() != 8 || f[0] != "feature" || f[1].empty() || f[3].empty() || !ValidDate(f[6]) || f[7].empty())
 			{
 				++skipped;
@@ -250,7 +250,7 @@ namespace KnownFeatures
 			if (f[5].empty())
 				Merge(r, f[6]);
 			else
-				for (const std::string& b : Split(f[5], ','))
+				for (const std::string& b : AdminWire::Split(f[5], ','))
 				{
 					r.off = true;
 					r.build = b;
@@ -352,12 +352,15 @@ namespace KnownFeatures
 	{
 		const std::vector<Report> reports = ParseDeclaredRows(rows);
 		const std::string today = Today();
-		bool changed = false;
+		bool shown = false;
 		std::lock_guard<std::mutex> lk(g_mutex);
 		for (const Report& r : reports)
-			changed |= g_catalog.Merge(r, today);
-		g_dirty |= changed;
-		return changed;
+		{
+			bool one = false;
+			g_dirty |= g_catalog.Merge(r, today, &one);
+			shown |= one;
+		}
+		return shown;
 	}
 
 	void Tick(uint64_t nowMs)

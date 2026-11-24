@@ -49,6 +49,7 @@ namespace AdminWire
 	constexpr const char* kResultChanged = "changed"; // base revision stale: "Changed elsewhere"
 	constexpr const char* kResultError   = "error";
 	constexpr const char* kSectionAll = "all";        // also mods, players, versions
+	constexpr const char* kSectionMods = "mods";      // Snap: only the mods list. Changed: the catalog changed, the revision did not
 
 	struct Rule      { std::string key, value; };            // value: allow | deny
 	struct MinEntry  { std::string plugin, version; };       // plugin empty = the loader; version may be "wire"
