@@ -24,6 +24,7 @@ namespace InGameAdminModel
 	constexpr int    kMaxWrongPerConnection = 5;
 	constexpr int    kMaxWrongPerCode       = 5;
 	constexpr double kCodeLifetimeSeconds   = 600.0;   // 10 minutes
+	constexpr double kNonceLifetimeSeconds  = 30.0;    // a challenge is good for one proof, this long
 	constexpr size_t kCodeLength            = 8;
 	constexpr double kOpsPerSecond          = 20;   // refill rate per connection: one token per op, one per other message
 	constexpr double kOpsBurst              = 100;  // bucket size: at least the ops one packet can hold
@@ -117,6 +118,7 @@ namespace InGameAdminModel
 		{
 			std::string id;          // the server-read ID at the last packet
 			std::string nonce;       // hex, one challenge
+			double      nonceExpires = 0;
 			bool        challenged = false;
 			bool        proven     = false;
 			bool        silent     = false;

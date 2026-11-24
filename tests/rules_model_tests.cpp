@@ -207,6 +207,45 @@ static void InGameAdminTests()
 		CHECK(IgaRole(IgaSend(*s, 5, "p1", prove)) == "pair");
 		CHECK(!s->IsProven(5));
 
+		// A challenge is good for one proof, on its own connection, for 30 seconds.
+		{
+			const auto proveFor = [&](const std::string& n)
+			{
+				AdminWire::Message p; p.tag = Tag::Prove;
+				AdminCrypto::MakeProof(kSecretA, n, sid, p.proof);
+				return p;
+			};
+			// A proof replayed on another connection fails; on its own it still works.
+			const std::string n6 = IgaChallenge(*s, 6, "p1");
+			IgaChallenge(*s, 7, "p1");
+			const AdminWire::Message p6 = proveFor(n6);
+			CHECK(IgaRole(IgaSend(*s, 7, "p1", p6)) == "pair" && !s->IsProven(7));
+			CHECK(IgaRole(IgaSend(*s, 6, "p1", p6)) == "admin" && s->IsProven(6));
+			// A reused nonce fails like a wrong proof.
+			CHECK(IgaRole(IgaSend(*s, 6, "p1", p6)) == "pair");
+			const std::string n8 = IgaChallenge(*s, 8, "p1");
+			prove.proof = std::string(64, '0');
+			IgaSend(*s, 8, "p1", prove);   // a wrong proof uses the nonce up
+			CHECK(IgaRole(IgaSend(*s, 8, "p1", proveFor(n8))) == "pair" && !s->IsProven(8));
+			// A fresh challenge replaces the older nonce.
+			const std::string n9 = IgaChallenge(*s, 9, "p1");
+			const std::string n9b = IgaChallenge(*s, 9, "p1");
+			CHECK(n9 != n9b);
+			CHECK(IgaRole(IgaSend(*s, 9, "p1", proveFor(n9))) == "pair" && !s->IsProven(9));
+			// 29 seconds is in time, 31 is not.
+			const std::string n10 = IgaChallenge(*s, 10, "p1");
+			const std::string n11 = IgaChallenge(*s, 11, "p1");
+			e.now += 29;
+			CHECK(IgaRole(IgaSend(*s, 10, "p1", proveFor(n10))) == "admin" && s->IsProven(10));
+			e.now += 2;
+			CHECK(IgaRole(IgaSend(*s, 11, "p1", proveFor(n11))) == "pair" && !s->IsProven(11));
+			// A connection whose player ID changes after the proof loses proven status.
+			AdminWire::Message snap; snap.tag = Tag::Snap; snap.sections = "all";
+			CHECK(s->IsProven(6));
+			IgaSend(*s, 6, "p2", snap);
+			CHECK(!s->IsProven(6));
+		}
+
 		// A restart keeps the secret and the server id.
 		auto again = MakeIga(e);
 		CHECK(again->ServerId() == sid);

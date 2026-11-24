@@ -129,6 +129,7 @@ namespace InGameAdminModel
 			c.nonce.clear();
 			return false;
 		}
+		c.nonceExpires = (env_.now ? env_.now() : 0) + kNonceLifetimeSeconds;
 		c.challenged = true;
 		c.proven = false;
 		AdminWire::Message m;
@@ -299,8 +300,9 @@ namespace InGameAdminModel
 			{
 				const std::string nonce = c.nonce;
 				c.nonce.clear();   // one proof per challenge
+				const bool fresh = (env_.now ? env_.now() : 0) < c.nonceExpires;
 				const auto it = secrets_.find(playerId);
-				if (m.proof.empty() || nonce.empty() || it == secrets_.end())
+				if (m.proof.empty() || nonce.empty() || !fresh || it == secrets_.end())
 				{
 					out.push_back(Welcome(kRolePair, revision));
 					return out;
