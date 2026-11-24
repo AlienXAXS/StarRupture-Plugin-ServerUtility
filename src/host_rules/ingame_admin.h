@@ -30,6 +30,5 @@ namespace InGameAdmin
 	bool Enabled();
 
 	// Sending to one connection (game thread).
-	InGameAdminModel::Server* Model();
 	bool SendToConnection(InGameAdminModel::ConnId conn, const std::string& message);
 }

@@ -30,6 +30,8 @@ namespace PlayerList
 	// Pure helpers (no file or engine access).
 	bool        ParseLine(const std::string& line, Entry& out);
 	std::string FormatLine(const Entry& entry);
+	// "<name>=a;b", or <name>="a b.x;c" when a key holds a space; empty when there are no usable keys.
+	std::string SectionsFlag(const char* name, const std::vector<std::string>& keys);
 	// Apply "admin -exemptversion sections=a;b label=Some Name". A label= runs to
 	// the end of the text. Returns false and sets error for an unknown flag.
 	bool        ApplyFlags(Entry& entry, const std::string& flags, std::string& error);

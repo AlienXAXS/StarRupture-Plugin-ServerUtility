@@ -188,6 +188,20 @@ namespace PlayerList
 		return true;
 	}
 
+	std::string SectionsFlag(const char* name, const std::vector<std::string>& keys)
+	{
+		std::string list;
+		for (const std::string& s : keys)
+		{
+			if (!RulesModel::ValidSectionKey(s)) continue;   // never write a key that could break the line
+			if (!list.empty()) list += ';';
+			list += s;
+		}
+		if (list.empty()) return std::string();
+		// A key with a space (a mod name like "Best Builder") needs the quotes to stay one word.
+		return std::string(name) + "=" + (list.find(' ') == std::string::npos ? list : "\"" + list + "\"");
+	}
+
 	std::string FormatLine(const Entry& e)
 	{
 		std::string flags;
@@ -195,18 +209,8 @@ namespace PlayerList
 		if (e.admin)         add("Admin");
 		if (e.exemptVersion) add("ExemptVersion");
 		if (e.exemptRules)   add("ExemptRules");
-		if (!e.sections.empty())
-		{
-			std::string list;
-			for (const std::string& s : e.sections)
-			{
-				if (!RulesModel::ValidSectionKey(s)) continue;   // never write a key that could break the line
-				if (!list.empty()) list += ';';
-				list += s;
-			}
-			// A key with a space (a mod name like "Best Builder") needs the quotes to stay one word.
-			if (!list.empty()) add(list.find(' ') == std::string::npos ? "Sections=" + list : "Sections=\"" + list + "\"");
-		}
+		const std::string sections = SectionsFlag("Sections", e.sections);
+		if (!sections.empty()) add(sections);
 		return e.id + "=" + e.label + (flags.empty() ? "" : "|" + flags);
 	}
 

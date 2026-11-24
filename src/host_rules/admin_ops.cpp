@@ -258,7 +258,7 @@ namespace AdminOps
 		}
 
 		if (ops.empty()) return fail("nothing to do");
-		if (baseRevision != 0 && baseRevision != Revision()) return fail("Changed elsewhere, refreshed");
+		if (baseRevision != 0 && baseRevision != Revision()) { fail(kStaleText); r.stale = true; return r; }
 
 		// A reload re-reads a file and stands alone.
 		for (const Op& op : ops)

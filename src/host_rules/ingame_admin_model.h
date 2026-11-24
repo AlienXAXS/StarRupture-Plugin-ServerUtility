@@ -25,7 +25,8 @@ namespace InGameAdminModel
 	constexpr int    kMaxWrongPerCode       = 5;
 	constexpr double kCodeLifetimeSeconds   = 600.0;   // 10 minutes
 	constexpr size_t kCodeLength            = 8;
-	constexpr double kOpsPerSecond          = 20;   // ops messages per connection
+	constexpr double kOpsPerSecond          = 20;   // refill rate per connection: one token per op, one per other message
+	constexpr double kOpsBurst              = 100;  // bucket size: at least the ops one packet can hold
 
 	// What running a batch of ops came to (a caller-side copy of AdminOps::Result).
 	struct OpsOutcome
@@ -94,7 +95,9 @@ namespace InGameAdminModel
 
 		// The player list changed: an ID that lost the Admin flag loses its secret,
 		// its code and its proven connections.
-		void OnPlayersChanged();
+		// A connection that was told "none" and now holds the Admin flag is taken out of
+		// silence and gets a challenge: those are returned to send, as OnClaimed does.
+		std::vector<Out> OnPlayersChanged();
 
 		// The connection `claimant` completed the admin claim as this ID: that
 		// connection alone may pair without a code, for 10 minutes or until it
@@ -118,8 +121,10 @@ namespace InGameAdminModel
 			bool        proven     = false;
 			bool        silent     = false;
 			int         wrongCodes = 0;
-			double      tokens     = kOpsPerSecond;   // ops rate limit
+			int         wrongProofs = 0;
+			double      tokens     = kOpsBurst;   // rate limit for every message
 			double      tokenTime  = 0;
+			bool        limitLogged = false;
 		};
 		struct Code
 		{

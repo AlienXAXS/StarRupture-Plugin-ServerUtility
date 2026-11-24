@@ -443,7 +443,7 @@ static void InGameAdminOpsTests()
 			InGameAdminModel::OpsOutcome o;
 			o.revision = 8;
 			if (mode == 0) { o.ok = true; o.text = "Saved"; }
-			else if (mode == 1) { o.stale = true; o.text = "Changed elsewhere, refreshed"; o.revision = 9; }
+			else if (mode == 1) { o.stale = true; o.text = AdminOps::kStaleText; o.revision = 9; }
 			else { o.text = "that would remove the last Admin; use RCON for that"; }
 			return o;
 		};
@@ -460,7 +460,7 @@ static void InGameAdminOpsTests()
 		mode = 1;
 		const auto stale = IgaDecode(IgaRaw(*s, 1, "p1", IgaOps(42, 3, { { "policy.default", { "deny" } } })));
 		CHECK(stale.size() > 2 && stale[0].tag == Tag::Result && stale[0].status == "changed" && stale[0].requestId == 42);
-		CHECK(stale.size() > 2 && stale[0].text == "Changed elsewhere, refreshed" && stale[1].tag == Tag::SnapBegin && stale.back().tag == Tag::SnapEnd);
+		CHECK(stale.size() > 2 && stale[0].text == AdminOps::kStaleText && stale[1].tag == Tag::SnapBegin && stale.back().tag == Tag::SnapEnd);
 
 		mode = 2;
 		const auto err = IgaDecode(IgaRaw(*s, 1, "p1", IgaOps(43, 0, { { "player.remove", { "p1" } } })));
@@ -893,6 +893,15 @@ int main()
 			CHECK(Apply(f.be, rcon, { op("player.set", { "ply2", "label=Joe" }) }).ok && f.Has("ply2"));
 			CHECK(!Apply(f.be, rcon, { op("player.set", { "ply2", "bogus" }) }).ok);
 			CHECK(!Apply(f.be, rcon, { op("player.set", { "bad id", "admin" }) }).ok);
+
+			// A spaced section key goes through the real flag parser and the file formatter untouched.
+			f.be.applyFlags = [](PlayerList::Entry& e, const std::string& flags, std::string& err) { return PlayerList::ApplyFlags(e, flags, err); };
+			CHECK(Apply(f.be, rcon, { op("player.set", { "ply1", "sections=\"Best Builder.x;Other.y\"" }) }).ok);
+			PlayerList::Entry sp;
+			for (auto& x : f.list) if (x.id == "ply1") sp = x;
+			CHECK(sp.sections.size() == 2 && sp.sections[0] == "Best Builder.x" && sp.sections[1] == "Other.y");
+			PlayerList::Entry spBack;
+			CHECK(PlayerList::ParseLine(PlayerList::FormatLine(sp), spBack) && spBack.sections == sp.sections);
 			CHECK(Apply(f.be, rcon, { op("player.remove", { "ply2" }) }).ok && !f.Has("ply2"));
 			CHECK(!Apply(f.be, rcon, { op("player.remove", { "ply2" }) }).ok);
 			CHECK(Apply(f.be, rcon, { op("player.kick", { "ply1", "bye" }) }).ok && f.kicks == 1);
@@ -929,7 +938,7 @@ int main()
 			Fake f;
 			const uint64_t cur = Revision();
 			const Result stale = Apply(f.be, rcon, { op("policy.default", { "deny" }) }, cur - 1);
-			CHECK(!stale.ok && stale.text == "Changed elsewhere, refreshed" && f.commits == 0);
+			CHECK(!stale.ok && stale.stale && stale.text == AdminOps::kStaleText && f.commits == 0);
 			CHECK(Apply(f.be, rcon, { op("policy.default", { "deny" }) }, cur).ok);
 			CHECK(Apply(f.be, rcon, { op("policy.default", { "allow" }) }, 0).ok);
 			CHECK(!Apply(f.be, rcon, { op("policy.default", { "deny" }) }, cur).ok);   // cur is now old

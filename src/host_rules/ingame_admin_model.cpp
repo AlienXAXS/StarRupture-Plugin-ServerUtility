@@ -240,6 +240,26 @@ namespace InGameAdminModel
 			if (c.proven && !admin)
 				c.proven = false;
 
+			// Every decoded message takes tokens: one, or one per op in an ops message.
+			// Over the limit it is dropped with no reply, and logged once per burst.
+			{
+				const double now = env_.now ? env_.now() : 0;
+				c.tokens = std::min(kOpsBurst, c.tokens + (now - c.tokenTime) * kOpsPerSecond);
+				c.tokenTime = now;
+				double cost = 1;
+				if (decoded == Decoded::Ok && m.tag == Tag::Ops && m.ops.size() > 1)
+					cost = std::min(kOpsBurst, static_cast<double>(m.ops.size()));
+				if (c.tokens < cost)
+				{
+					if (!c.limitLogged && env_.audit)
+						env_.audit("[Admin] '" + who + "' sent too many requests; dropping them");
+					c.limitLogged = true;
+					return out;
+				}
+				c.tokens -= cost;
+				c.limitLogged = false;
+			}
+
 			if (decoded == Decoded::WrongProtocol)
 			{
 				if (m.tag == Tag::Hello)
@@ -294,7 +314,8 @@ namespace InGameAdminModel
 					lk.unlock();   // the snapshot runs game-thread work, outside the model lock
 					return WithSnapshot(std::move(out));
 				}
-				if (env_.audit) env_.audit("[Admin] '" + who + "' proof failed");
+				if (++c.wrongProofs <= kMaxWrongPerConnection && env_.audit)
+					env_.audit("[Admin] '" + who + "' proof failed");
 				out.push_back(Welcome(kRolePair, revision));
 				return out;
 			}
@@ -310,7 +331,7 @@ namespace InGameAdminModel
 
 				if (c.wrongCodes >= kMaxWrongPerConnection)
 				{
-					refuse("too many wrong codes");
+					out.push_back(Welcome(kRolePair, revision));   // no further log lines
 					return out;
 				}
 
@@ -389,26 +410,6 @@ namespace InGameAdminModel
 				return out;
 			if (m.tag != Tag::Snap && m.tag != Tag::Ops)
 				return out;
-			if (m.tag == Tag::Ops)
-			{
-				// 20 ops messages a second per connection: a token bucket.
-				const double now = env_.now ? env_.now() : 0;
-				c.tokens = std::min(kOpsPerSecond, c.tokens + (now - c.tokenTime) * kOpsPerSecond);
-				c.tokenTime = now;
-				if (c.tokens < 1)
-				{
-					Message r;
-					r.tag = Tag::Result;
-					r.requestId = m.requestId;
-					r.status = kResultError;
-					r.text = "Too many requests, slow down";
-					r.revision = revision;
-					std::string wire;
-					if (Encode(r, wire)) out.push_back(wire);
-					return out;
-				}
-				c.tokens -= 1;
-			}
 		}
 
 		// The game-thread work runs outside the model lock.
@@ -522,25 +523,37 @@ namespace InGameAdminModel
 		return did;
 	}
 
-	void Server::OnPlayersChanged()
+	std::vector<Out> Server::OnPlayersChanged()
 	{
 		// Look the flags up before taking the lock.
-		std::vector<std::string> ids;
+		std::vector<std::string> ids, silentIds;
 		{
 			std::lock_guard<std::mutex> lk(mutex_);
 			for (const auto& kv : secrets_) ids.push_back(kv.first);
 			for (const auto& kv : codes_) ids.push_back(kv.first);
 			for (const auto& kv : claimed_) ids.push_back(kv.second.id);
-			for (const auto& kv : conns_) if (kv.second.proven) ids.push_back(kv.second.id);
+			for (const auto& kv : conns_)
+			{
+				if (kv.second.proven) ids.push_back(kv.second.id);
+				if (kv.second.silent) silentIds.push_back(kv.second.id);
+			}
 		}
 		std::sort(ids.begin(), ids.end());
 		ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+		std::sort(silentIds.begin(), silentIds.end());
+		silentIds.erase(std::unique(silentIds.begin(), silentIds.end()), silentIds.end());
 
-		std::vector<std::string> lost;
+		std::vector<std::string> lost, gained;
 		for (const std::string& id : ids)
 			if (!env_.isAdmin || !env_.isAdmin(id))
 				lost.push_back(id);
-		if (lost.empty()) return;
+		const bool on = env_.enabled && env_.enabled() && Ready();
+		for (const std::string& id : silentIds)
+			if (on && !Blank(id) && env_.isAdmin && env_.isAdmin(id))
+				gained.push_back(id);
+
+		std::vector<Out> out;
+		if (lost.empty() && gained.empty()) return out;
 
 		std::lock_guard<std::mutex> lk(mutex_);
 		bool changed = false;
@@ -557,6 +570,18 @@ namespace InGameAdminModel
 			UnproveIdLocked(id);
 		}
 		if (changed) SaveLocked();
+
+		// Gained the flag while told "none": out of silence, with a challenge.
+		for (auto& kv : conns_)
+		{
+			Conn& c = kv.second;
+			if (!c.silent || !std::binary_search(gained.begin(), gained.end(), c.id)) continue;
+			c.silent = false;
+			std::string challenge;
+			if (MakeChallengeLocked(c, challenge))
+				out.push_back({ kv.first, challenge });
+		}
+		return out;
 	}
 
 	void Server::EraseClaimedLocked(const std::string& playerId)

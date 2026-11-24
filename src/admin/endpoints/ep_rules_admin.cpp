@@ -58,7 +58,7 @@ namespace
 		     << ",\"revision\":" << r.revision
 		     << ",\"state\":" << StateJson() << "}";
 		body = json.str();
-		SendBody(resp, r.ok ? 200 : (r.text == "Changed elsewhere, refreshed" ? 409 : 400), body);
+		SendBody(resp, r.ok ? 200 : (r.stale ? 409 : 400), body);
 	}
 
 	uint64_t BaseRevision(const PluginHttpRequest* req)

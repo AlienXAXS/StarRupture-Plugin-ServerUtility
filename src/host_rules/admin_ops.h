@@ -52,7 +52,11 @@ namespace AdminOps
 		bool        ok       = false;
 		std::string text;       // the reason when refused, a short note when applied
 		uint64_t    revision = 0;   // the server's revision after the call
+		bool        stale    = false;   // refused because the base revision was old
 	};
+
+	// The refusal text for a stale base revision. Callers read Result::stale, not this text.
+	constexpr const char* kStaleText = "Changed elsewhere, refreshed";
 
 	// Which parts of the state a change touched.
 	enum Section : unsigned
@@ -85,7 +89,7 @@ namespace AdminOps
 	// Check the caller, validate every op, then apply them all (nothing is
 	// applied when one is refused). baseRevision 0 means "no base"; any other
 	// value that is not the current revision is refused with
-	// "Changed elsewhere, refreshed". Call on the game thread.
+	// kStaleText (and Result::stale). Call on the game thread.
 	Result Apply(Backend& backend, const Caller& caller, const std::vector<Op>& ops, uint64_t baseRevision = 0);
 
 	// The same on the server: hops to the game thread, uses the real rules,

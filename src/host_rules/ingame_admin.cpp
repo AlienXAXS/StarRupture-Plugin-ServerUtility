@@ -43,7 +43,7 @@ namespace InGameAdmin
 		};
 
 		std::mutex                                g_mutex;   // the model pointer and the connection list
-		std::unique_ptr<InGameAdminModel::Server> g_model;
+		std::shared_ptr<InGameAdminModel::Server> g_model;
 		std::vector<Connection>                   g_conns;
 		ConnId                                    g_nextConn = 1;
 		int                                       g_listener = 0;
@@ -56,10 +56,12 @@ namespace InGameAdmin
 			return duration<double>(steady_clock::now().time_since_epoch()).count();
 		}
 
-		InGameAdminModel::Server* ModelPtr()
+		// A copy of the owning pointer: a thread that is inside the model (RCON, the panel)
+		// keeps it alive, so Shutdown cannot free it under that call.
+		std::shared_ptr<InGameAdminModel::Server> ModelPtr()
 		{
 			std::lock_guard<std::mutex> lk(g_mutex);
-			return g_model.get();
+			return g_model;
 		}
 
 		// Game thread. The connection number for this controller (made on first sight);
@@ -100,7 +102,6 @@ namespace InGameAdmin
 		}
 
 		constexpr int kMaxControllers = 128;
-		const char* const kStaleText = "Changed elsewhere, refreshed";
 
 		std::string FlagsText(const PlayerList::Entry& e)
 		{
@@ -109,12 +110,8 @@ namespace InGameAdmin
 			if (e.admin) add("admin");
 			if (e.exemptVersion) add("exemptversion");
 			if (e.exemptRules) add("exemptrules");
-			if (!e.sections.empty())
-			{
-				std::string keys;
-				for (const std::string& k : e.sections) keys += (keys.empty() ? "" : ";") + k;
-				add("sections=" + keys);
-			}
+			const std::string sections = PlayerList::SectionsFlag("sections", e.sections);
+			if (!sections.empty()) add(sections);
 			return flags;
 		}
 
@@ -209,7 +206,7 @@ namespace InGameAdmin
 			const AdminOps::Result r = AdminOps::Run(AdminOps::Caller::FromPlayer(id, name), ops, baseRevision);
 			InGameAdminModel::OpsOutcome out;
 			out.ok = r.ok;
-			out.stale = !r.ok && r.text == kStaleText;
+			out.stale = r.stale;
 			out.text = r.text;
 			out.revision = static_cast<uint32_t>(r.revision);
 			return out;
@@ -226,20 +223,22 @@ namespace InGameAdmin
 		}
 
 		// Game thread: a change was made, tell every proven admin connection.
-		void PushChanged(uint32_t revision, unsigned sections)
+		void PushChanged(uint32_t revision, unsigned sections, const std::vector<InGameAdminModel::Out>& challenges)
 		{
-			InGameAdminModel::Server* model = ModelPtr();
+			const std::shared_ptr<InGameAdminModel::Server> model = ModelPtr();
 			if (!model) return;
+			for (const InGameAdminModel::Out& out : challenges)
+				SendToConnection(out.conn, out.data);
 			for (const InGameAdminModel::Out& out : model->OnChanged(SectionsText(sections), revision))
 				SendToConnection(out.conn, out.data);
 		}
 
-		struct ChangedJob { uint32_t revision; unsigned sections; };
+		struct ChangedJob { uint32_t revision; unsigned sections; std::vector<InGameAdminModel::Out> challenges; };
 
 		void ChangedOnGameThread(void* context)
 		{
 			std::unique_ptr<ChangedJob> job(static_cast<ChangedJob*>(context));
-			PushChanged(job->revision, job->sections);
+			PushChanged(job->revision, job->sections, job->challenges);
 		}
 
 		std::string NameOf(const std::string& id)
@@ -257,7 +256,7 @@ namespace InGameAdmin
 			auto* hooks = GetHooks();
 			if (!hooks || !hooks->Engine || !hooks->Engine->IsGameThread() || !sender || !data)
 				return;
-			InGameAdminModel::Server* model = ModelPtr();
+			const std::shared_ptr<InGameAdminModel::Server> model = ModelPtr();
 			if (!model)
 				return;
 
@@ -276,7 +275,7 @@ namespace InGameAdmin
 		void OnWorldEnd(SDK::UWorld*, const char*)
 		{
 			// Travel: proven state and connection numbers start over.
-			if (InGameAdminModel::Server* model = ModelPtr())
+			if (const auto model = ModelPtr())
 				model->OnWorldEnd();
 			std::lock_guard<std::mutex> lk(g_mutex);
 			g_conns.clear();
@@ -333,21 +332,22 @@ namespace InGameAdmin
 
 		g_listener = AdminOps::AddListener([](uint64_t revision, unsigned sections)
 		{
+			std::vector<InGameAdminModel::Out> challenges;
 			if (sections & AdminOps::kSectionPlayers)
-				if (InGameAdminModel::Server* m = ModelPtr())
-					m->OnPlayersChanged();
+				if (const auto m = ModelPtr())
+					challenges = m->OnPlayersChanged();
 
 			// The push touches the controllers, so it runs on the game thread.
 			auto* hooks = GetHooks();
 			if (!hooks || !hooks->Engine) return;
 			if (hooks->Engine->IsGameThread())
-				PushChanged(static_cast<uint32_t>(revision), sections);
+				PushChanged(static_cast<uint32_t>(revision), sections, challenges);
 			else
-				hooks->Engine->PostToGameThread(&ChangedOnGameThread, new ChangedJob{ static_cast<uint32_t>(revision), sections });
+				hooks->Engine->PostToGameThread(&ChangedOnGameThread, new ChangedJob{ static_cast<uint32_t>(revision), sections, std::move(challenges) });
 		});
 
 		// An ID that lost the Admin flag while the server was down loses its secret now.
-		if (InGameAdminModel::Server* m = ModelPtr())
+		if (const auto m = ModelPtr())
 			m->OnPlayersChanged();
 
 		if (!Enabled())
@@ -377,7 +377,7 @@ namespace InGameAdmin
 
 	bool IssueCode(const std::string& playerId, std::string& code, std::string& error)
 	{
-		InGameAdminModel::Server* model = ModelPtr();
+		const std::shared_ptr<InGameAdminModel::Server> model = ModelPtr();
 		if (!model) { error = "The in-game admin tool is not running on this server"; return false; }
 		if (!Enabled()) { error = "The in-game admin tool is off ([Policy] InGameAdmin=0)"; return false; }
 		return model->IssueCode(playerId, code, error);
@@ -385,13 +385,13 @@ namespace InGameAdmin
 
 	bool Unpair(const std::string& playerId)
 	{
-		InGameAdminModel::Server* model = ModelPtr();
+		const std::shared_ptr<InGameAdminModel::Server> model = ModelPtr();
 		return model && model->Unpair(playerId);
 	}
 
 	void OnClaimed(void* playerController, const std::string& playerId)
 	{
-		InGameAdminModel::Server* model = ModelPtr();
+		const std::shared_ptr<InGameAdminModel::Server> model = ModelPtr();
 		if (!model || !playerController) return;
 		std::vector<ConnId> dropped;
 		const ConnId claimant = ConnectionFor(static_cast<SDK::APlayerController*>(playerController), dropped);
@@ -403,7 +403,7 @@ namespace InGameAdmin
 
 	void PlayerLeft(void* playerController)
 	{
-		InGameAdminModel::Server* model = ModelPtr();
+		const std::shared_ptr<InGameAdminModel::Server> model = ModelPtr();
 		if (!model || !playerController) return;
 		const ObjectRef<SDK::APlayerController> ref(static_cast<SDK::APlayerController*>(playerController));
 		ConnId gone = 0;
@@ -418,11 +418,6 @@ namespace InGameAdmin
 				}
 		}
 		if (gone) model->OnDisconnect(gone);
-	}
-
-	InGameAdminModel::Server* Model()
-	{
-		return ModelPtr();
 	}
 
 	// Game thread. Looks the controller up again; nothing is sent when it is gone.
