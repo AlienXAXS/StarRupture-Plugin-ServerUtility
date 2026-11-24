@@ -2,8 +2,52 @@
 // touches no UObjects; it only exchanges plugin packets with the server half.
 #include "plugin.h"
 #include "plugin_helpers.h"
+#include "client/admin_client.h"
+#include "admin_wire/admin_wire.h"
+
+#include <chrono>
+#include <filesystem>
+#include <memory>
+#include <windows.h>
 
 static IPluginSelf* g_self = nullptr;
+static std::unique_ptr<AdminClient::Client> g_client;
+
+// The state model for the window code (render callback): GetView() copies it out under its lock.
+AdminClient::Client* GetAdminClient() { return g_client.get(); }
+
+static double NowSeconds()
+{
+	using namespace std::chrono;
+	return duration<double>(steady_clock::now().time_since_epoch()).count();
+}
+
+// Plugins\ServerUtilitydmin-pairing.txt, next to this DLL.
+static std::string PairingStorePath()
+{
+	HMODULE self = nullptr;
+	if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+	                        reinterpret_cast<LPCWSTR>(&PairingStorePath), &self))
+		return std::string();
+	wchar_t module[MAX_PATH] = {};
+	if (GetModuleFileNameW(self, module, MAX_PATH) == 0) return std::string();
+	return (std::filesystem::path(module).parent_path() / L"ServerUtility" / L"admin-pairing.txt").string();
+}
+
+static void OnAdminPacket(const char*, const char*, const uint8_t* data, size_t size)
+{
+	if (g_client) g_client->OnPacket(data, size);
+}
+
+static void OnServerReady(const char*)
+{
+	if (g_client) g_client->OnServerReady();   // hello only once the server can receive it
+}
+
+static void OnWorldEnd(SDK::UWorld*, const char*)
+{
+	if (g_client) g_client->OnWorldEnd();
+}
 
 // Used by the LOG_* macros in plugin_helpers.h
 IPluginSelf* GetSelf() { return g_self; }
@@ -44,12 +88,46 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 	if (self->hooks && self->hooks->Engine && self->hooks->Engine->GetSdkGlobals)
 		self->hooks->Engine->GetSdkGlobals();
 
+	if (!self->hooks || !self->hooks->Network || !self->hooks->World)
+	{
+		LOG_ERROR("Admin client: network or world interface missing");
+		return false;
+	}
+
+	AdminClient::Env env;
+	env.send = [](const std::string& msg)
+	{
+		IPluginSelf* s = g_self;
+		if (s && s->hooks && s->hooks->Network)
+			s->hooks->Network->SendPacketToServer(s, AdminWire::kPacketTag,
+				reinterpret_cast<const uint8_t*>(msg.data()), msg.size());
+	};
+	env.now = &NowSeconds;
+	env.storePath = PairingStorePath();
+	g_client = std::make_unique<AdminClient::Client>(env);
+
+	self->hooks->Network->RegisterMessageHandler(self, AdminWire::kPacketTag, &OnAdminPacket);
+	self->hooks->World->RegisterOnAfterWorldEndPlay(&OnWorldEnd);
+	// Fires at once when the server is already ready (hot reload).
+	self->hooks->Network->RegisterServerReadyCallback(self, &OnServerReady);
+
 	LOG_INFO("Admin client initialising...");
 	return true;
 }
 
 __declspec(dllexport) void PluginShutdown()
 {
+	IPluginSelf* self = g_self;
+	if (self && self->hooks)
+	{
+		if (self->hooks->Network)
+		{
+			self->hooks->Network->UnregisterServerReadyCallback(self, &OnServerReady);
+			self->hooks->Network->UnregisterMessageHandler(self, AdminWire::kPacketTag, &OnAdminPacket);
+		}
+		if (self->hooks->World) self->hooks->World->UnregisterOnAfterWorldEndPlay(&OnWorldEnd);
+	}
+	g_client.reset();
 	g_self = nullptr;
 }
 }
