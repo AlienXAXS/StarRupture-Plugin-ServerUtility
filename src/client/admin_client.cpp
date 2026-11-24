@@ -1,6 +1,7 @@
 #include "client/admin_client.h"
 #include "admin_wire/admin_crypto.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 
@@ -65,8 +66,18 @@ namespace AdminClient
 	void Client::Send(const Message& m)
 	{
 		std::string enc;
-		if (!Encode(m, enc) || !env_.send) return;
-		env_.send(enc);
+		if (Encode(m, enc)) outbox_.push_back(std::move(enc));
+	}
+
+	void Client::Flush()
+	{
+		std::vector<std::string> out;
+		{
+			std::lock_guard<std::mutex> lock(mu_);
+			out.swap(outbox_);
+		}
+		if (env_.send)
+			for (const std::string& msg : out) env_.send(msg);
 	}
 
 	void Client::SendSnapReq()
@@ -81,13 +92,18 @@ namespace AdminClient
 	{
 		status_ = Status::Waiting;
 		helloSent_ = false;
+		outbox_.clear();
 		serverId_.clear();
 		pendingSecret_.clear();
+		wrongCodes_ = 0;
 		assembling_ = false;
+		snapshotRetried_ = false;
 		building_ = Snapshot();
 		haveSnapshot_ = false;
 		snapshot_ = Snapshot();
 		staged_.clear();
+		rebaseOnSnapshot_ = false;
+		applyCount_ = 0;
 		applyReqId_ = 0;
 		lastResult_.clear();
 		lastResultIsError_ = false;
@@ -112,8 +128,11 @@ namespace AdminClient
 
 	void Client::CheckTimeout()
 	{
-		if (status_ == Status::Waiting && helloSent_ && env_.now && env_.now() - helloAt_ >= kHelloTimeoutSeconds)
+		if (!env_.now) return;
+		const double now = env_.now();
+		if (status_ == Status::Waiting && helloSent_ && now - helloAt_ >= kHelloTimeoutSeconds)
 			status_ = Status::NoInGameAdmin;
+		if (assembling_ && now - assemblyAt_ >= kSnapshotTimeoutSeconds) AbortSnapshot();
 	}
 
 	void Client::GetView(View& out)
@@ -127,6 +146,7 @@ namespace AdminClient
 		out.lastResult = lastResult_;
 		out.lastResultIsError = lastResultIsError_;
 		out.applyPending = applyReqId_ != 0;
+		out.pairPending = !pendingSecret_.empty();
 	}
 
 	void Client::OnPacket(const uint8_t* data, size_t size)
@@ -144,7 +164,7 @@ namespace AdminClient
 		case Tag::Result: HandleResult(m); break;
 		case Tag::SnapBegin: case Tag::SnapPolicy: case Tag::SnapRule: case Tag::SnapMin:
 		case Tag::SnapMod: case Tag::SnapPlayer: case Tag::SnapEnd:
-			HandleSnapshotPart(m); break;
+			HandleSnapshotPart(m, size); break;
 		default: break;
 		}
 	}
@@ -173,9 +193,15 @@ namespace AdminClient
 				lastResultIsError_ = true;
 			}
 			pendingSecret_.clear();
-			status_ = Status::Ready;
-			SendSnapReq();
+			status_ = Status::Ready;   // the server pushes the snapshot with this welcome
 			return;
+		}
+		if (m.role == kRolePair && !pendingSecret_.empty())
+		{
+			lastResult_ = ++wrongCodes_ >= kMaxWrongCodes
+				? "Too many wrong codes. Reconnect, or ask the host for a new code"
+				: "Wrong code, try again";
+			lastResultIsError_ = true;
 		}
 		pendingSecret_.clear();
 		if (m.role == kRoleNone) status_ = Status::NotAdmin;
@@ -183,7 +209,26 @@ namespace AdminClient
 		else if (m.role == kRolePair) status_ = Status::PairNeeded;
 	}
 
-	void Client::HandleSnapshotPart(const Message& m)
+	void Client::AbortSnapshot()
+	{
+		assembling_ = false;
+		building_ = Snapshot();
+		if (status_ != Status::Ready) return;
+		if (!snapshotRetried_)
+		{
+			snapshotRetried_ = true;
+			lastResult_ = kRefreshing;
+			lastResultIsError_ = false;
+			SendSnapReq();
+		}
+		else
+		{
+			lastResult_ = "The server's settings could not be loaded. Press Revert to try again";
+			lastResultIsError_ = true;
+		}
+	}
+
+	void Client::HandleSnapshotPart(const Message& m, size_t bytes)
 	{
 		if (m.tag == Tag::SnapBegin)
 		{
@@ -191,9 +236,18 @@ namespace AdminClient
 			building_.revision = m.revision;
 			building_.sections = m.sections;
 			assembling_ = true;
+			assemblyAt_ = env_.now ? env_.now() : 0;
+			assemblyParts_ = 0;
+			assemblyBytes_ = 0;
 			return;
 		}
 		if (!assembling_) return;
+		assemblyBytes_ += bytes;
+		if (++assemblyParts_ > kMaxSnapshotParts || assemblyBytes_ > kMaxSnapshotBytes)
+		{
+			AbortSnapshot();
+			return;
+		}
 		switch (m.tag)
 		{
 		case Tag::SnapPolicy:
@@ -230,7 +284,20 @@ namespace AdminClient
 			{
 				snapshot_ = std::move(building_);
 				haveSnapshot_ = true;
+				snapshotRetried_ = false;
+				if (lastResult_ == kRefreshing) lastResult_.clear();
+				if (!staged_.empty())
+				{
+					if (rebaseOnSnapshot_) stagedBase_ = snapshot_.revision;
+					else if (snapshot_.revision != stagedBase_)
+					{
+						lastResult_ = "The server changed since you started editing. Apply will check your edits.";
+						lastResultIsError_ = true;
+					}
+				}
+				rebaseOnSnapshot_ = false;
 			}
+			else AbortSnapshot();
 			building_ = Snapshot();
 			break;
 		default: break;
@@ -240,18 +307,25 @@ namespace AdminClient
 	void Client::HandleResult(const Message& m)
 	{
 		const bool isApply = applyReqId_ != 0 && m.requestId == applyReqId_;
-		if (isApply) applyReqId_ = 0;
+		const size_t sent = isApply ? applyCount_ : 0;
+		if (isApply) { applyReqId_ = 0; applyCount_ = 0; }
 		if (m.status == kResultOk)
 		{
 			lastResult_ = m.text;
 			lastResultIsError_ = false;
-			if (isApply) staged_.clear();
+			if (isApply)
+			{
+				// Only the ops that went out; edits made while the Apply was pending stay.
+				staged_.erase(staged_.begin(), staged_.begin() + std::min(sent, staged_.size()));
+				rebaseOnSnapshot_ = !staged_.empty();   // the refresh that follows is our own change
+			}
 			return;
 		}
 		lastResultIsError_ = true;
 		if (m.status == kResultChanged)
 		{
-			lastResult_ = m.text.empty() ? "Changed elsewhere" : m.text;   // staged ops stay
+			lastResult_ = m.text.empty() ? "Changed elsewhere" : m.text;   // staged ops stay, on the refreshed revision
+			rebaseOnSnapshot_ = true;
 			if (status_ == Status::Ready) SendSnapReq();
 		}
 		else lastResult_ = m.text;
@@ -275,6 +349,7 @@ namespace AdminClient
 		trial.push_back(op);
 		std::string enc;
 		if (!EncodeBatch(trial, 0, snapshot_.revision, enc)) return false;
+		if (staged_.empty()) stagedBase_ = snapshot_.revision;
 		staged_ = std::move(trial);
 		return true;
 	}
@@ -282,7 +357,9 @@ namespace AdminClient
 	void Client::Unstage(size_t index)
 	{
 		std::lock_guard<std::mutex> lock(mu_);
-		if (index < staged_.size()) staged_.erase(staged_.begin() + index);
+		if (index >= staged_.size()) return;
+		staged_.erase(staged_.begin() + index);
+		if (index < applyCount_) --applyCount_;
 	}
 
 	bool Client::Apply()
@@ -291,10 +368,11 @@ namespace AdminClient
 		if (status_ != Status::Ready || !haveSnapshot_ || staged_.empty() || applyReqId_ != 0) return false;
 		std::string enc;
 		const uint32_t id = nextReqId_;
-		if (!EncodeBatch(staged_, id, snapshot_.revision, enc) || !env_.send) return false;
+		if (!EncodeBatch(staged_, id, stagedBase_, enc)) return false;
 		++nextReqId_;
 		applyReqId_ = id;
-		env_.send(enc);
+		applyCount_ = staged_.size();
+		outbox_.push_back(std::move(enc));
 		return true;
 	}
 
@@ -302,6 +380,8 @@ namespace AdminClient
 	{
 		std::lock_guard<std::mutex> lock(mu_);
 		staged_.clear();
+		applyCount_ = 0;
+		snapshotRetried_ = false;
 		lastResult_.clear();
 		lastResultIsError_ = false;
 		if (status_ == Status::Ready) SendSnapReq();
@@ -310,21 +390,21 @@ namespace AdminClient
 	bool Client::Kick(const std::string& playerId, const std::string& reason)
 	{
 		std::lock_guard<std::mutex> lock(mu_);
-		if (status_ != Status::Ready || !env_.send) return false;
+		if (status_ != Status::Ready) return false;
 		Op op;
 		op.name = "player.kick";
 		op.args = { playerId, reason };
 		std::string enc;
 		if (!EncodeBatch({ op }, nextReqId_, snapshot_.revision, enc)) return false;
 		++nextReqId_;
-		env_.send(enc);
+		outbox_.push_back(std::move(enc));
 		return true;
 	}
 
 	bool Client::Pair(const std::string& code)
 	{
 		std::lock_guard<std::mutex> lock(mu_);
-		if (status_ != Status::PairNeeded) return false;
+		if (status_ != Status::PairNeeded || !pendingSecret_.empty() || wrongCodes_ >= kMaxWrongCodes) return false;
 		AdminCrypto::Bytes raw;
 		if (!AdminCrypto::RandomBytes(32, raw)) return false;
 		Message m;
@@ -332,9 +412,9 @@ namespace AdminClient
 		m.code = code;
 		m.secret = AdminCrypto::ToHex(raw);
 		std::string enc;
-		if (!Encode(m, enc) || !env_.send) return false;
+		if (!Encode(m, enc)) return false;
 		pendingSecret_ = m.secret;
-		env_.send(enc);
+		outbox_.push_back(std::move(enc));
 		return true;
 	}
 }

@@ -6,6 +6,7 @@
 #include "client/client_config.h"
 #include "plugin_helpers.h"
 
+#include <atomic>
 #include <cctype>
 #include <cfloat>
 #include <cstdio>
@@ -31,7 +32,7 @@ namespace
 
 	IPluginSelf* g_self = nullptr;
 	PanelHandle g_panel = nullptr;
-	bool g_panelOpen = false;
+	std::atomic<bool> g_panelOpen{ false };
 
 	// Window state that lives between frames.
 	struct UiState
@@ -40,7 +41,7 @@ namespace
 		bool tooManyChanges = false;
 
 		// Mods tab. The message box is re-filled only when the effective message changes.
-		char message[512] = {};
+		char message[AdminWire::kMaxMessageText + 1] = {};
 		std::string messageSynced;
 		char modFilter[64] = {};
 
@@ -88,12 +89,14 @@ namespace
 		ui->SameLine(0, -1);
 		ui->InputText("##paircode", g_ui.pairCode, sizeof(g_ui.pairCode));
 		ui->SameLine(0, -1);
+		ui->BeginDisabled(f.view.pairPending);
 		if (ui->Button("Pair"))
 		{
 			std::string code = g_ui.pairCode;
 			for (char& c : code) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
 			f.client->Pair(code);
 		}
+		ui->EndDisabled();
 		ResultLine(f);
 	}
 

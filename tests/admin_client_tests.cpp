@@ -57,8 +57,11 @@ namespace
 
 		Status St() { AdminClient::View v; client->GetView(v); return v.status; }
 		AdminClient::View View() { AdminClient::View v; client->GetView(v); return v; }
-		size_t Count(Tag t) { size_t n = 0; for (const Message& m : sent) if (m.tag == t) ++n; return n; }
-		const Message* Last(Tag t) { for (size_t i = sent.size(); i-- > 0;) if (sent[i].tag == t) return &sent[i]; return nullptr; }
+		// What went out: the game-thread tick (Flush) is what sends, so every read ticks first.
+		const std::vector<Message>& Sent() { client->Flush(); return sent; }
+		void Clear() { client->Flush(); sent.clear(); }
+		size_t Count(Tag t) { size_t n = 0; for (const Message& m : Sent()) if (m.tag == t) ++n; return n; }
+		const Message* Last(Tag t) { Sent(); for (size_t i = sent.size(); i-- > 0;) if (sent[i].tag == t) return &sent[i]; return nullptr; }
 	};
 
 	Message Welcome(const char* role) { Message m; m.tag = Tag::Welcome; m.role = role; return m; }
@@ -94,10 +97,10 @@ int main()
 	// Hello only after the server-ready callback.
 	{
 		Rig r;
-		CHECK(r.sent.empty());
+		CHECK(r.Sent().empty());
 		CHECK(r.St() == Status::Waiting);
 		r.client->OnServerReady();
-		CHECK(r.sent.size() == 1 && r.sent[0].tag == Tag::Hello);
+		CHECK(r.Sent().size() == 1 && r.sent[0].tag == Tag::Hello);
 	}
 
 	// 5 s without an answer: no-in-game-admin; a late welcome recovers.
@@ -156,7 +159,7 @@ int main()
 		CHECK(p && p->proof == expect && expect.size() == 64);
 		r.Feed(Welcome(kRoleAdmin));
 		CHECK(r.St() == Status::Ready);
-		CHECK(r.Count(Tag::Snap) == 1);
+		CHECK(r.Count(Tag::Snap) == 0);                     // the server pushes the snapshot with the welcome
 	}
 
 	// Challenge without a stored secret: empty proof, then welcome pair.
@@ -176,7 +179,7 @@ int main()
 		r.client->OnServerReady();
 		r.Feed(Challenge());
 		r.Feed(Welcome(kRolePair));
-		r.sent.clear();
+		r.Clear();
 		CHECK(r.client->Pair("ABCD2345"));
 		const Message* pm = r.Last(Tag::Pair);
 		CHECK(pm && pm->code == "ABCD2345" && pm->secret.size() == 64);
@@ -195,7 +198,7 @@ int main()
 		std::getline(in, line);
 		CHECK(line == kServerId + " " + secret);
 		// A new client reads it once at start and proves with it.
-		r.sent.clear();
+		r.Clear();
 		r.Start();
 		r.client->OnServerReady();
 		r.Feed(Challenge());
@@ -254,11 +257,11 @@ int main()
 		r.client->Unstage(1);
 		CHECK(r.View().staged.size() == 1);
 		CHECK(r.client->Stage(b));
-		r.sent.clear();
+		r.Clear();
 		CHECK(r.client->Apply());
 		const Message* o = r.Last(Tag::Ops);
 		CHECK(o && o->baseRevision == 5 && o->ops.size() == 2);
-		CHECK(r.sent.size() == 1);
+		CHECK(r.Sent().size() == 1);
 		CHECK(!r.client->Apply());                          // one batch at a time
 		CHECK(r.View().applyPending);
 		r.Feed(Result(o->requestId, kResultOk, "Applied"));
@@ -286,22 +289,22 @@ int main()
 		FeedSnapshot(r, 5);
 		Op a; a.name = "rule.set"; a.args = { "k", "deny" };
 		CHECK(r.client->Stage(a));
-		r.sent.clear();
+		r.Clear();
 		CHECK(r.client->Apply());
 		uint32_t id = r.Last(Tag::Ops)->requestId;
-		r.sent.clear();
+		r.Clear();
 		r.Feed(Result(id, kResultChanged));
 		AdminClient::View v = r.View();
 		CHECK(v.staged.size() == 1 && v.lastResultIsError && v.lastResult == "Changed elsewhere" && !v.applyPending);
 		CHECK(r.Count(Tag::Snap) == 1);
 		FeedSnapshot(r, 6);
 		CHECK(r.View().snapshot.revision == 6 && r.View().staged.size() == 1);
-		r.sent.clear();
+		r.Clear();
 		CHECK(r.client->Apply());
 		CHECK(r.Last(Tag::Ops)->baseRevision == 6);
 
 		Message ch; ch.tag = Tag::Changed; ch.revision = 9; ch.sections = kSectionAll;
-		r.sent.clear();
+		r.Clear();
 		r.Feed(ch);
 		CHECK(r.Count(Tag::Snap) == 1);
 	}
@@ -313,14 +316,14 @@ int main()
 		FeedSnapshot(r, 2);
 		Op a; a.name = "rule.set"; a.args = { "k", "deny" };
 		r.client->Stage(a);
-		r.sent.clear();
+		r.Clear();
 		CHECK(r.client->Kick("76561198000000001", "bye"));
 		const Message* o = r.Last(Tag::Ops);
 		CHECK(o && o->ops.size() == 1 && o->ops[0].name == "player.kick" && o->baseRevision == 2);
 		CHECK(r.View().staged.size() == 1);
 		r.Feed(Result(o->requestId, kResultOk, "Kicked"));
 		CHECK(r.View().staged.size() == 1);                 // a kick result does not clear a batch
-		r.sent.clear();
+		r.Clear();
 		r.client->Revert();
 		CHECK(r.View().staged.empty() && r.Count(Tag::Snap) == 1);
 	}
@@ -337,9 +340,193 @@ int main()
 		CHECK(v.status == Status::Waiting && !v.haveSnapshot && v.staged.empty() && v.snapshot.rules.empty());
 		r.clock += 30;
 		CHECK(r.St() == Status::Waiting);                    // no hello pending, no timeout
-		r.sent.clear();
+		r.Clear();
 		r.client->OnServerReady();
 		CHECK(r.Count(Tag::Hello) == 1);
+	}
+
+	// Nothing leaves until the game-thread tick: Apply, Revert, Kick and Pair only queue.
+	{
+		Rig r;
+		MakeReady(r);
+		FeedSnapshot(r, 5);
+		r.Clear();
+		Op a; a.name = "rule.set"; a.args = { "k", "deny" };
+		CHECK(r.client->Stage(a));
+		CHECK(r.client->Apply());
+		CHECK(r.client->Kick("76561198000000001", "bye"));
+		r.client->Revert();
+		CHECK(r.sent.empty());
+		r.client->Flush();
+		CHECK(r.Count(Tag::Ops) == 2 && r.Count(Tag::Snap) == 1);
+		const size_t after = r.sent.size();
+		r.client->Flush();
+		CHECK(r.sent.size() == after);                      // drained once
+		Rig p;
+		p.client->OnServerReady();
+		p.Feed(Challenge());
+		p.Feed(Welcome(kRolePair));
+		p.Clear();
+		CHECK(p.client->Pair("ABCD2345"));
+		CHECK(p.sent.empty());
+		p.client->Flush();
+		CHECK(p.Count(Tag::Pair) == 1);
+	}
+
+	// Edits made while an Apply is pending survive its ok result.
+	{
+		Rig r;
+		MakeReady(r);
+		FeedSnapshot(r, 5);
+		Op a; a.name = "rule.set"; a.args = { "k", "deny" };
+		Op b; b.name = "policy.default"; b.args = { "deny" };
+		Op c; c.name = "rule.set"; c.args = { "j", "allow" };
+		CHECK(r.client->Stage(a) && r.client->Stage(b));
+		CHECK(r.client->Apply());
+		uint32_t id = r.Last(Tag::Ops)->requestId;
+		CHECK(r.client->Stage(c));
+		r.Feed(Result(id, kResultOk, "Applied"));
+		AdminClient::View v = r.View();
+		CHECK(v.staged.size() == 1 && v.staged[0].args[0] == "j");
+		// Unstaging an op that is in flight leaves the later edit alone too.
+		Rig u;
+		MakeReady(u);
+		FeedSnapshot(u, 5);
+		CHECK(u.client->Stage(a) && u.client->Stage(b));
+		CHECK(u.client->Apply());
+		uint32_t uid = u.Last(Tag::Ops)->requestId;
+		u.client->Unstage(0);
+		CHECK(u.client->Stage(c));
+		u.Feed(Result(uid, kResultOk, "Applied"));
+		CHECK(u.View().staged.size() == 1 && u.View().staged[0].args[0] == "j");
+	}
+
+	// A refused pairing code says so; five refusals say the lockout; a second Pair press waits.
+	{
+		Rig r;
+		r.client->OnServerReady();
+		r.Feed(Challenge());
+		r.Feed(Welcome(kRolePair));
+		CHECK(r.View().lastResult.empty());
+		CHECK(r.client->Pair("AAAA2222"));
+		CHECK(!r.client->Pair("BBBB3333") && r.View().pairPending);   // answer awaited
+		r.Feed(Welcome(kRolePair));
+		AdminClient::View v = r.View();
+		CHECK(!v.pairPending && v.lastResultIsError && v.lastResult == "Wrong code, try again");
+		for (int i = 1; i < AdminClient::kMaxWrongCodes; ++i)
+		{
+			CHECK(r.client->Pair("AAAA2222"));
+			r.Feed(Welcome(kRolePair));
+		}
+		CHECK(r.View().lastResult == "Too many wrong codes. Reconnect, or ask the host for a new code");
+		r.Clear();
+		CHECK(!r.client->Pair("AAAA2222") && r.Count(Tag::Pair) == 0);
+		r.client->OnServerReady();                          // a new connection starts clean
+		r.Feed(Challenge());
+		r.Feed(Welcome(kRolePair));
+		CHECK(r.client->Pair("AAAA2222"));
+
+		// The saved secret is the one in the single pair message that went out.
+		Rig d;
+		d.client->OnServerReady();
+		d.Feed(Challenge());
+		d.Feed(Welcome(kRolePair));
+		d.Clear();
+		CHECK(d.client->Pair("AAAA2222"));
+		CHECK(!d.client->Pair("AAAA2222"));
+		CHECK(d.Count(Tag::Pair) == 1);
+		std::string sentSecret = d.Last(Tag::Pair)->secret;
+		d.Feed(Welcome(kRoleAdmin));
+		std::ifstream in(d.store);
+		std::string line;
+		std::getline(in, line);
+		CHECK(line == kServerId + " " + sentSecret);
+	}
+
+	// Staged edits keep the revision they were made on, so the server can refuse them.
+	{
+		Rig r;
+		MakeReady(r);
+		FeedSnapshot(r, 5);
+		Op a; a.name = "rule.set"; a.args = { "k", "deny" };
+		CHECK(r.client->Stage(a));
+		Message ch; ch.tag = Tag::Changed; ch.revision = 6; ch.sections = kSectionAll;
+		r.Feed(ch);
+		FeedSnapshot(r, 6);
+		AdminClient::View v = r.View();
+		CHECK(v.snapshot.revision == 6 && v.staged.size() == 1);
+		CHECK(v.lastResultIsError && v.lastResult == "The server changed since you started editing. Apply will check your edits.");
+		r.Clear();
+		CHECK(r.client->Apply());
+		const Message* o = r.Last(Tag::Ops);
+		CHECK(o && o->baseRevision == 5);                   // the old base: the server answers changed
+		r.Feed(Result(o->requestId, kResultChanged));
+		CHECK(r.View().lastResult == "Changed elsewhere");
+		FeedSnapshot(r, 7);
+		r.Clear();
+		CHECK(r.client->Apply());
+		CHECK(r.Last(Tag::Ops)->baseRevision == 7);         // told once, then re-based
+	}
+
+	// Our own Apply moves the revision: leftover edits follow it without a warning.
+	{
+		Rig r;
+		MakeReady(r);
+		FeedSnapshot(r, 5);
+		Op a; a.name = "rule.set"; a.args = { "k", "deny" };
+		Op c; c.name = "rule.set"; c.args = { "j", "allow" };
+		CHECK(r.client->Stage(a) && r.client->Apply());
+		uint32_t id = r.Last(Tag::Ops)->requestId;
+		CHECK(r.client->Stage(c));
+		r.Feed(Result(id, kResultOk, "Applied"));
+		FeedSnapshot(r, 6);
+		CHECK(r.View().lastResult == "Applied");
+		r.Clear();
+		CHECK(r.client->Apply());
+		CHECK(r.Last(Tag::Ops)->baseRevision == 6);
+	}
+
+	// Snapshot reassembly is capped, and a bad or stalled one is dropped and asked for again once.
+	{
+		Rig r;
+		MakeReady(r);
+		FeedSnapshot(r, 5);
+		r.Clear();
+		Message begin; begin.tag = Tag::SnapBegin; begin.revision = 6; begin.sections = kSectionAll;
+		Message rule; rule.tag = Tag::SnapRule; rule.rules.push_back({ "a", "allow" });
+		r.Feed(begin);
+		for (size_t i = 0; i <= AdminClient::kMaxSnapshotParts; ++i) r.Feed(rule);
+		AdminClient::View v = r.View();
+		CHECK(v.lastResult == AdminClient::kRefreshing && v.snapshot.revision == 5);
+		CHECK(r.Count(Tag::Snap) == 1);
+		r.Feed(begin);                                      // the retry fails the same way
+		for (size_t i = 0; i <= AdminClient::kMaxSnapshotParts; ++i) r.Feed(rule);
+		v = r.View();
+		CHECK(v.lastResultIsError && v.lastResult != AdminClient::kRefreshing);
+		CHECK(r.Count(Tag::Snap) == 1);                     // no second automatic request
+
+		// A missing page: snap-end does not match what arrived.
+		Rig m;
+		MakeReady(m);
+		Snapshot s;
+		s.revision = 4;
+		s.rules.push_back({ "a", "allow" });
+		s.rules.push_back({ "b", "deny" });
+		std::vector<std::string> pages = EncodeSnapshot(s);
+		for (size_t i = 0; i < pages.size(); ++i) if (i != pages.size() - 2) m.FeedRaw(pages[i]);
+		CHECK(!m.View().haveSnapshot && m.View().lastResult == AdminClient::kRefreshing);
+		CHECK(m.Count(Tag::Snap) == 1);
+		FeedSnapshot(m, 4);                                 // the refresh arrives
+		CHECK(m.View().haveSnapshot && m.View().lastResult.empty());
+
+		// A stall: no snap-end within the timeout.
+		Rig t;
+		MakeReady(t);
+		t.Feed(begin);
+		t.Clear();
+		t.clock += AdminClient::kSnapshotTimeoutSeconds + 0.1;
+		CHECK(t.View().lastResult == AdminClient::kRefreshing);
+		CHECK(t.Count(Tag::Snap) == 1);
 	}
 
 	std::printf("%d checks, %d failed\n", g_checks, g_failed);
