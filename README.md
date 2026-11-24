@@ -99,13 +99,13 @@ The in-game admin is a window in the admin's own game. It shows the server's rul
 
 Setup, once per admin:
 
-1. Build the client configuration (`Client Release`) and put its `ServerUtility.dll` in the Plugins folder of the admin's game, like any other client plugin. It needs a mod loader with plugin interface 80 or newer <!-- update to the loader release number at release -->. On an older loader the window says the loader needs updating.
+1. Build the client configuration (`Client Release`) and put its `ServerUtility.dll` in the Plugins folder of the admin's game, like any other client plugin. It needs a mod loader with plugin interface 80 or newer <!-- update to the loader release number at release -->. The client declares plugin interface 80, so on an older loader it does not load, and the loader's log says why. The server DLL is unchanged and still loads on older loaders. Feature titles and mod versions in the window come from the admin's own loader; the client sends them to the server once per proven connection, and the server remembers them.
 2. Join the server. The host runs `admin pair <id|number>` in RCON, which prints an 8-character code (one use, valid 10 minutes, 5 wrong tries per connection and 5 in total, then the code is void). The code is shown only in the RCON reply and is never written to the log.
 3. Press F8 to open the window and type the code. The client remembers the pairing for that server. (A player who has just claimed admin with the claim code above is paired on that same connection with no code.)
 
-The pairing is tied to the server address the admin's game connected to. If the server's address changes, or the admin joins by a different route (server list versus direct IP), the admin pairs again. `ToggleKey` in the `[Window]` section of the client's config changes the key.
+The pairing is tied to the server address the admin's game connected to, which the client reads from the loader. On a game build where the loader cannot read that address, pairing is refused. If the server's address changes, or the admin joins by a different route (server list versus direct IP), the admin pairs again. `ToggleKey` in the `[Window]` section of the client's config changes the key.
 
-The client keeps its secret in `Plugins\ServerUtilitydmin-pairing.txt`, which needs the same protection as the server ini that holds the RCON password. `admin unpair <id|number>` forgets a pairing, and so does taking the Admin flag away. The server answers only players who have the Admin flag in the player list; anyone else gets one "no access" answer and then silence. To turn it off, set `InGameAdmin=0` in `[Policy]` of `HostRules.ini` (default on).
+The client keeps its secret in `Plugins\ServerUtilitydmin-pairing.txt`, which is as sensitive as the RCON password and should be protected like the server's config folder. `admin unpair <id|number>` forgets a pairing, and so does taking the Admin flag away. The server answers only players who have the Admin flag in the player list; anyone else gets one "no access" answer and then silence. To turn it off, set `InGameAdmin=0` in `[Policy]` of `HostRules.ini` (default on).
 
 The admin panel has matching endpoints (`/rules/players`, below), but the panel is off in this build, so RCON is the way to manage the list for now.
 
