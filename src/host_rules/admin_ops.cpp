@@ -354,11 +354,6 @@ namespace AdminOps
 		return r;
 	}
 
-	Result Run(const Caller& caller, const Op& op)
-	{
-		return Run(caller, std::vector<Op>{ op }, 0);
-	}
-
 	uint64_t Revision() { return g_revision.load(); }
 
 	int AddListener(Listener listener)

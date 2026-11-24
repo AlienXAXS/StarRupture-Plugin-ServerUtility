@@ -4,6 +4,7 @@
 //   rules_model_tests.exe
 #include "host_rules/rules_model.h"
 #include "host_rules/claim_model.h"
+#include "host_rules/admin_ops.h"
 #include "admin/url_match.h"
 
 #include <cstdio>
@@ -277,6 +278,181 @@ int main()
 		CHECK(!UrlEndsWith("/ServerUtility/api/players/blist/", "/list"));
 		CHECK(!UrlEndsWith("/ServerUtility/api/players/listx/", "/list"));
 		CHECK(!UrlEndsWith("/ServerUtility/api/players/lis/", "/list"));
+	}
+
+	// AdminOps: one dispatcher for RCON, the panel and the in-game tool.
+	{
+		using namespace AdminOps;
+
+		struct Fake
+		{
+			RulesModel::Model model;
+			std::vector<PlayerList::Entry> list;
+			std::set<std::string> online;
+			int commits = 0, refreshes = 0, kicks = 0;
+			std::vector<std::string> audit;
+			Backend be;
+
+			Fake()
+			{
+				PlayerList::Entry a; a.id = "adm1"; a.admin = true; list.push_back(a);
+				PlayerList::Entry p; p.id = "ply1"; list.push_back(p);
+				online = { "adm1", "ply1", "ply2" };
+				be.getModel = [this] { return model; };
+				be.commitModel = [this](const RulesModel::Model& m, std::string&) { model = m; ++commits; return true; };
+				be.players = [this] { return list; };
+				be.validId = [](const std::string& id) { return !id.empty() && id.find(' ') == std::string::npos; };
+				be.applyFlags = [](PlayerList::Entry& e, const std::string& flags, std::string& err)
+				{
+					if (flags == "admin") e.admin = true;
+					else if (flags == "-admin") e.admin = false;
+					else if (flags.rfind("label=", 0) == 0) e.label = flags.substr(6);
+					else { err = "unknown flag"; return false; }
+					return true;
+				};
+				be.setPlayer = [this](const std::string& id, const std::string& flags, std::string& err)
+				{
+					PlayerList::Entry e; e.id = id;
+					for (auto& x : list) if (x.id == id) e = x;
+					if (!be.applyFlags(e, flags, err)) return false;
+					bool found = false;
+					for (auto& x : list) if (x.id == id) { x = e; found = true; }
+					if (!found) list.push_back(e);
+					return true;
+				};
+				be.removePlayer = [this](const std::string& id, std::string&)
+				{
+					for (size_t i = 0; i < list.size(); ++i) if (list[i].id == id) { list.erase(list.begin() + i); return true; }
+					return false;
+				};
+				be.clearAdmins = [this](int& n, std::string&) { n = 0; for (auto& e : list) if (e.admin) { e.admin = false; ++n; } return true; };
+				be.refreshPlayers = [this] { ++refreshes; };
+				be.reloadRules = [](std::string&) { return true; };
+				be.reloadPlayers = [](std::string&) { return true; };
+				be.connected = [this](const std::string& id) { return online.count(id) != 0; };
+				be.kick = [this](const std::string&, const std::string&, std::string&) { ++kicks; return true; };
+				be.audit = [this](const std::string& line) { audit.push_back(line); };
+			}
+			bool IsAdmin(const std::string& id) const { for (auto& e : list) if (e.id == id) return e.admin; return false; }
+			bool Has(const std::string& id) const { for (auto& e : list) if (e.id == id) return true; return false; }
+		};
+		auto op = [](const char* n, std::vector<std::string> a = {}) { return Op{ n, std::move(a) }; };
+		const Caller rcon = Caller::FromRcon();
+		const Caller adm = Caller::FromPlayer("adm1", "Boss");
+
+		// Each rules op, valid and invalid.
+		{
+			Fake f;
+			CHECK(Apply(f.be, rcon, { op("rule.set", { "Codex.map", "deny" }) }).ok);
+			CHECK(f.model.rules.size() == 1 && f.model.rules[0].deny);
+			CHECK(Apply(f.be, rcon, { op("rule.set", { "Codex.map", "unset" }) }).ok && f.model.rules.empty());
+			CHECK(!Apply(f.be, rcon, { op("rule.set", { "Codex.map", "maybe" }) }).ok);
+			CHECK(!Apply(f.be, rcon, { op("rule.set", { "nodot", "deny" }) }).ok);
+			CHECK(!Apply(f.be, rcon, { op("rule.set", { "Codex.map" }) }).ok);
+			CHECK(Apply(f.be, rcon, { op("policy.default", { "deny" }) }).ok && f.model.defaultDeny);
+			CHECK(!Apply(f.be, rcon, { op("policy.default", { "sometimes" }) }).ok);
+			CHECK(Apply(f.be, rcon, { op("policy.message", { "Hello there" }) }).ok && f.model.message == "Hello there");
+			CHECK(Apply(f.be, rcon, { op("policy.message", { "off" }) }).ok && f.model.message.empty());
+			CHECK(Apply(f.be, rcon, { op("min.loader", { "1.2.3" }) }).ok && f.model.minLoaderVersion == "1.2.3");
+			CHECK(Apply(f.be, rcon, { op("min.loader", { "off" }) }).ok && f.model.minLoaderVersion.empty());
+			CHECK(!Apply(f.be, rcon, { op("min.loader", { "not a version" }) }).ok);
+			CHECK(Apply(f.be, rcon, { op("min.mod", { "Codex", "1.0.0" }) }).ok && f.model.modMins.size() == 1);
+			CHECK(Apply(f.be, rcon, { op("min.mod", { "Codex", "off" }) }).ok && f.model.modMins.empty());
+			CHECK(!Apply(f.be, rcon, { op("min.mod", { "Codex", "x.y" }) }).ok);
+			CHECK(!Apply(f.be, rcon, { op("no.such.op") }).ok);
+			CHECK(!Apply(f.be, rcon, {}).ok);
+		}
+
+		// Each player op, valid and invalid.
+		{
+			Fake f;
+			CHECK(Apply(f.be, rcon, { op("player.set", { "ply2", "label=Joe" }) }).ok && f.Has("ply2"));
+			CHECK(!Apply(f.be, rcon, { op("player.set", { "ply2", "bogus" }) }).ok);
+			CHECK(!Apply(f.be, rcon, { op("player.set", { "bad id", "admin" }) }).ok);
+			CHECK(Apply(f.be, rcon, { op("player.remove", { "ply2" }) }).ok && !f.Has("ply2"));
+			CHECK(!Apply(f.be, rcon, { op("player.remove", { "ply2" }) }).ok);
+			CHECK(Apply(f.be, rcon, { op("player.kick", { "ply1", "bye" }) }).ok && f.kicks == 1);
+			CHECK(!Apply(f.be, rcon, { op("player.kick", { "gone", "" }) }).ok && f.kicks == 1);
+			const Result c = Apply(f.be, rcon, { op("admin.clear") });
+			CHECK(c.ok && c.text == "Took Admin off 1 entries." && !f.IsAdmin("adm1"));
+			CHECK(Apply(f.be, rcon, { op("rules.reload") }).ok && Apply(f.be, rcon, { op("players.reload") }).ok);
+			CHECK(!Apply(f.be, rcon, { op("rules.reload"), op("policy.default", { "deny" }) }).ok);
+		}
+
+		// A batch is one commit, one refresh, one listener call; a refused op applies nothing.
+		{
+			Fake f;
+			int calls = 0; unsigned secs = 0; uint64_t rev = 0;
+			const int h = AddListener([&](uint64_t r, unsigned s) { ++calls; secs = s; rev = r; });
+			const uint64_t before = Revision();
+			const Result r = Apply(f.be, rcon, { op("rule.set", { "Codex.map", "deny" }), op("policy.default", { "deny" }),
+			                                     op("min.loader", { "1.0.0" }), op("player.set", { "ply2", "label=A" }),
+			                                     op("player.set", { "ply1", "label=B" }) });
+			CHECK(r.ok && f.commits == 1 && f.refreshes == 1);
+			CHECK(calls == 1 && secs == (kSectionRules | kSectionMins | kSectionPlayers));
+			CHECK(Revision() == before + 1 && r.revision == before + 1 && rev == before + 1);
+			CHECK(f.audit.size() == 5);
+
+			const Result bad = Apply(f.be, rcon, { op("rule.set", { "Codex.x", "deny" }), op("player.set", { "ply2", "bogus" }) });
+			CHECK(!bad.ok && f.commits == 1 && calls == 1 && f.model.rules.size() == 1 && Revision() == before + 1);
+			RemoveListener(h);
+			Apply(f.be, rcon, { op("policy.default", { "allow" }) });
+			CHECK(calls == 1);
+		}
+
+		// A stale base revision is refused; the current one and 0 are accepted.
+		{
+			Fake f;
+			const uint64_t cur = Revision();
+			const Result stale = Apply(f.be, rcon, { op("policy.default", { "deny" }) }, cur - 1);
+			CHECK(!stale.ok && stale.text == "Changed elsewhere, refreshed" && f.commits == 0);
+			CHECK(Apply(f.be, rcon, { op("policy.default", { "deny" }) }, cur).ok);
+			CHECK(Apply(f.be, rcon, { op("policy.default", { "allow" }) }, 0).ok);
+			CHECK(!Apply(f.be, rcon, { op("policy.default", { "deny" }) }, cur).ok);   // cur is now old
+		}
+
+		// The in-game caller is checked on every call.
+		{
+			Fake f;
+			CHECK(Apply(f.be, adm, { op("policy.default", { "deny" }) }).ok);
+			CHECK(!Apply(f.be, Caller::FromPlayer("ply1", "Joe"), { op("policy.default", { "allow" }) }).ok);   // not an admin
+			CHECK(!Apply(f.be, Caller::FromPlayer("nobody", "X"), { op("policy.default", { "allow" }) }).ok);   // not listed
+			const Result unread = Apply(f.be, Caller::FromPlayer("", "X"), { op("policy.default", { "allow" }) });
+			CHECK(!unread.ok && unread.text == "your player ID cannot be read yet" && f.model.defaultDeny);
+			f.list[0].admin = false;   // demoted between two calls
+			CHECK(!Apply(f.be, adm, { op("policy.default", { "allow" }) }).ok);
+		}
+
+		// In-game guards: last Admin, kicking an admin, RCON-only ops. RCON is not limited.
+		{
+			Fake f;
+			CHECK(!Apply(f.be, adm, { op("player.set", { "adm1", "-admin" }) }).ok && f.IsAdmin("adm1"));
+			CHECK(!Apply(f.be, adm, { op("player.remove", { "adm1" }) }).ok && f.Has("adm1"));
+			CHECK(!Apply(f.be, adm, { op("player.kick", { "adm1", "" }) }).ok && f.kicks == 0);
+			CHECK(!Apply(f.be, adm, { op("admin.clear") }).ok);
+			CHECK(!Apply(f.be, adm, { op("rules.reload") }).ok && !Apply(f.be, adm, { op("players.reload") }).ok);
+			CHECK(Apply(f.be, adm, { op("player.kick", { "ply1", "x" }) }).ok && f.kicks == 1);
+			// With a second Admin the first may step down.
+			CHECK(Apply(f.be, adm, { op("player.set", { "ply1", "admin" }) }).ok);
+			CHECK(Apply(f.be, adm, { op("player.set", { "adm1", "-admin" }) }).ok && !f.IsAdmin("adm1"));
+
+			Fake g;
+			CHECK(Apply(g.be, rcon, { op("player.set", { "adm1", "-admin" }) }).ok && !g.IsAdmin("adm1"));
+			Fake h;
+			CHECK(Apply(h.be, rcon, { op("player.remove", { "adm1" }) }).ok);
+			Fake k;
+			CHECK(Apply(k.be, rcon, { op("player.kick", { "adm1", "" }) }).ok);
+		}
+
+		// An edit made outside Apply counts as a change.
+		{
+			int calls = 0; unsigned secs = 0;
+			const int h = AddListener([&](uint64_t, unsigned s) { ++calls; secs = s; });
+			const uint64_t before = Revision();
+			NoteChanged(kSectionPlayers);
+			CHECK(Revision() == before + 1 && calls == 1 && secs == kSectionPlayers);
+			RemoveListener(h);
+		}
 	}
 
 	std::printf("%d checks, %d failed\n", g_checks, g_failed);

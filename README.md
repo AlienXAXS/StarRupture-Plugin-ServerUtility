@@ -330,9 +330,39 @@ Response:
 
 ---
 
+##### The host rules
+
+These routes make the same changes as the `hostrules` RCON command. Every one is a `POST` with `session_token`.
+
+| Route | Body | What it does |
+|---|---|---|
+| `/rules/catalog` | none | The mods and features that connected players reported, and how many players listed each |
+| `/rules/get` | none | The current rules and minimums |
+| `/rules/set` | `key`, `value` | `key` is `Plugin.feature` (or `Plugin.*`); `value` is `allow`, `deny` or `unset` |
+| `/rules/policy` | `default` and/or `message` | `default` is `allow` or `deny`; `message` is the line players see (`off` clears it) |
+| `/rules/minversion` | `version` | Minimum mod loader version (`off` clears it) |
+| `/rules/modmin` | `plugin`, `version` | Minimum version of one mod (`wire` or `off` also work). With no `version` it only reads |
+
+Every answer carries `revision` (a number that goes up with each change made by RCON, the panel or an in-game admin) and `state` (the rules after the call). A change can carry `base_revision`, the `revision` the page last saw. If something else changed the rules since, the call is refused with `409` and `{"ok": false, "error": "Changed elsewhere, refreshed", ...}`, and `state` holds the current rules so the page can redraw. Leave `base_revision` out to skip the check.
+
+```bash
+curl -s -X POST http://localhost:7777/ServerUtility/api/rules/set \
+  -H "Content-Type: application/json" \
+  -d '{"session_token": "abc123...", "key": "BetterCheats.movement", "value": "deny", "base_revision": 12}'
+```
+
+Response:
+```json
+{"ok": true, "text": "Saved.", "revision": 13, "state": {"default": "allow", "message": "", "rules": [{"key": "BetterCheats.movement", "value": "deny"}], "min_loader": "", "mod_mins": [], "loader_receives": true, "push_status": "...", "minimums_status": "..."}}
+```
+
+`/rules/players` accepts `base_revision` the same way.
+
+---
+
 #### Error responses
 
-All endpoints return `{"ok": false, "error": "<reason>"}` on failure, with an appropriate HTTP status code (`400` for bad input, `401` for missing/invalid session token, `404` for an unknown `players`, `wave` or `rules` route, `403` for a non-`POST` request).
+All endpoints return `{"ok": false, "error": "<reason>"}` on failure, with an appropriate HTTP status code (`400` for bad input, `401` for missing/invalid session token, `404` for an unknown `players`, `wave` or `rules` route, `409` when `base_revision` is out of date, `403` for a non-`POST` request).
 
 ---
 

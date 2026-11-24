@@ -221,6 +221,10 @@ Player 76561198000000001(Alice): the mod loader reported its features 2 time(s),
 Player 76561198000000002(Bob): no report (vanilla or older loader)
 ```
 
+### Admin panel routes for the rules
+
+The admin panel (off in this build) makes the same changes as `hostrules`, `player` and `admin`, through the same code, so a change made by RCON, the panel or an in-game admin is checked, saved and logged the same way. The routes under `/ServerUtility/api/rules/` are `catalog`, `get`, `set` (`key`, `value`), `policy` (`default`, `message`), `minversion` (`version`), `modmin` (`plugin`, `version`) and `players`. Every answer has `revision` and `state`. A change may send `base_revision`; if the rules changed since then, the answer is `409` with `Changed elsewhere, refreshed` and the current `state`. See the Admin API section of the README for the details.
+
 ### `save` / `savegame` / `forcesave`
 
 Force an immediate world save by calling `UCrSaveSubsystem::SaveNextSaveGame`. The save runs synchronously on the game thread; the RCON response is returned after it completes.

@@ -109,4 +109,9 @@ namespace AdminOps
 		timeout.revision = Revision();
 		return timeout;
 	}
+
+	Result Run(const Caller& caller, const Op& op)
+	{
+		return Run(caller, std::vector<Op>{ op }, 0);
+	}
 }
