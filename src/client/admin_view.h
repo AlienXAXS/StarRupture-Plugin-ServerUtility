@@ -67,4 +67,6 @@ namespace AdminView
 	std::vector<size_t> PlayerOrder(const AdminWire::Snapshot& s, const std::string& filter);
 	// Plugins the Versions tab lists: every catalog mod, then plugins that only have a minimum.
 	std::vector<std::string> MinPlugins(const AdminWire::Snapshot& s);
+	// "1 mod", "2 mods": the noun takes an "s" unless the count is one.
+	std::string CountLabel(size_t count, const char* noun);
 }

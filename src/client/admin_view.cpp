@@ -321,4 +321,9 @@ namespace AdminView
 		for (const MinEntry& e : s.mins) if (!e.plugin.empty() && seen.insert(e.plugin).second) r.push_back(e.plugin);
 		return r;
 	}
+
+	std::string CountLabel(size_t count, const char* noun)
+	{
+		return std::to_string(count) + " " + noun + (count == 1 ? "" : "s");
+	}
 }

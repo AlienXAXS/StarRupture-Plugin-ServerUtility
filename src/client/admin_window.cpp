@@ -21,6 +21,8 @@ namespace
 {
 	// ImGui values the plugin SDK header does not carry (imgui.h, 1.92).
 	constexpr int kTableResizable = 1 << 0;
+	constexpr int kTableSizingFixedFit = 1 << 13;
+	constexpr int kTableScrollX = 1 << 24;
 	constexpr int kTableRowBg = 1 << 6;
 	constexpr int kTableBordersInnerH = 1 << 7;
 	constexpr int kTableBordersInnerV = 1 << 9;
@@ -324,10 +326,9 @@ namespace
 	void DrawPlayerMods(Frame& f, const PlayerInfo& p)
 	{
 		IModLoaderImGui* ui = f.ui;
-		char label[32];
-		std::snprintf(label, sizeof(label), "%zu mods##mods", p.mods.size());
+		const std::string label = AdminView::CountLabel(p.mods.size(), "mod") + "##mods";
 		ui->BeginDisabled(p.mods.empty());
-		if (ui->SmallButton(label)) ui->OpenPopup("##modspopup", 0);
+		if (ui->SmallButton(label.c_str())) ui->OpenPopup("##modspopup", 0);
 		ui->EndDisabled();
 		if (ui->BeginPopup("##modspopup", 0))
 		{
@@ -394,27 +395,8 @@ namespace
 		IModLoaderImGui* ui = f.ui;
 		ui->SetNextItemWidth(-FLT_MIN);
 		ui->InputTextWithHint("##playerfilter", "Filter players", g_ui.playerFilter, sizeof(g_ui.playerFilter));
-		const std::vector<size_t> order = AdminView::PlayerOrder(f.eff, g_ui.playerFilter);
-		if (order.empty())
-			ui->TextDisabled(f.eff.players.empty() ? "No players known yet." : "No player matches the filter.");
-		else if (ui->BeginTable("##players", 7, kTableFlags))
-		{
-			ui->TableSetupColumn("Player", kColumnWidthStretch, 3.0f);
-			ui->TableSetupColumn("Admin", kColumnWidthStretch, 1.0f);
-			ui->TableSetupColumn("Exempt version", kColumnWidthStretch, 1.5f);
-			ui->TableSetupColumn("Exempt rules", kColumnWidthStretch, 1.5f);
-			ui->TableSetupColumn("Sections", kColumnWidthStretch, 2.0f);
-			ui->TableSetupColumn("Mods", kColumnWidthStretch, 1.5f);
-			ui->TableSetupColumn("Actions", kColumnWidthStretch, 2.0f);
-			ui->TableHeadersRow();
-			for (size_t i : order) DrawPlayerRow(f, f.eff.players[i]);
-			ui->EndTable();
-		}
 		ui->Separator();
-		ui->AlignTextToFramePadding();
-		ui->Text("Add a player by ID");
-		ui->SameLine(0, -1);
-		ui->InputText("##addid", g_ui.addId, sizeof(g_ui.addId));
+		ui->InputTextWithHint("##addid", "Add a player by ID", g_ui.addId, sizeof(g_ui.addId));
 		ui->SameLine(0, -1);
 		ui->BeginDisabled(g_ui.addId[0] == '\0');
 		if (ui->Button("Add"))
@@ -423,6 +405,23 @@ namespace
 			g_ui.addId[0] = '\0';
 		}
 		ui->EndDisabled();
+		ui->Separator();
+		const std::vector<size_t> order = AdminView::PlayerOrder(f.eff, g_ui.playerFilter);
+		if (order.empty())
+			ui->TextDisabled(f.eff.players.empty() ? "No players known yet." : "No player matches the filter.");
+		else if (ui->BeginTable("##players", 7, kTableFlags | kTableSizingFixedFit | kTableScrollX))
+		{
+			ui->TableSetupColumn("Player", 0, 0.0f);
+			ui->TableSetupColumn("Admin", 0, 0.0f);
+			ui->TableSetupColumn("Exempt version", 0, 0.0f);
+			ui->TableSetupColumn("Exempt rules", 0, 0.0f);
+			ui->TableSetupColumn("Sections", 0, 0.0f);
+			ui->TableSetupColumn("Mods", 0, 0.0f);
+			ui->TableSetupColumn("Actions", 0, 0.0f);
+			ui->TableHeadersRow();
+			for (size_t i : order) DrawPlayerRow(f, f.eff.players[i]);
+			ui->EndTable();
+		}
 		DrawKickPopup(f);
 	}
 

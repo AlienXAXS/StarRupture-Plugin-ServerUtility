@@ -183,6 +183,9 @@ int main()
 		CHECK(p.size() == 3 && p[0] == "Alpha" && p[1] == "Beta" && p[2] == "Gone");
 	}
 
+	// Count labels: singular only for one.
+	CHECK(CountLabel(0, "mod") == "0 mods" && CountLabel(1, "mod") == "1 mod" && CountLabel(2, "mod") == "2 mods");
+
 	std::printf("%d checks, %d failed\n", g_checks, g_failed);
 	return g_failed ? 1 : 0;
 }
