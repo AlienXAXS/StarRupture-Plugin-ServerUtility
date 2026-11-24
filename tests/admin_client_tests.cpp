@@ -20,6 +20,10 @@ namespace
 {
 	const std::string kSecret(64, 'a');
 	const std::string kServerId = "0123456789abcdef";
+	const std::string kAddr = "10.0.0.1:7777";
+	const std::string kOtherAddr = "10.0.0.2:7777";
+	const char* const kMismatchText = "This server's address doesn't match the one you paired with. Ask the host for a new code.";
+	const char* const kLoaderText = "The in-game admin needs a newer mod loader.";
 
 	struct Rig
 	{
@@ -45,6 +49,7 @@ namespace
 			env.now = [this]() { return clock; };
 			env.storePath = store;
 			client.reset(new AdminClient::Client(env));
+			client->SetServerAddress(kAddr);
 		}
 
 		void Feed(const Message& m)
@@ -149,7 +154,7 @@ int main()
 
 	// Challenge answered with a proof from the stored secret.
 	{
-		Rig r(kServerId + " " + kSecret + "\n", "withsecret");
+		Rig r(kServerId + " " + kAddr + " " + kSecret + "\n", "withsecret");
 		r.client->OnServerReady();
 		r.Feed(Challenge());
 		const Message* p = r.Last(Tag::Prove);
@@ -196,7 +201,7 @@ int main()
 		std::ifstream in(r.store);
 		std::string line;
 		std::getline(in, line);
-		CHECK(line == kServerId + " " + secret);
+		CHECK(line == kServerId + " " + kAddr + " " + secret);
 		// A new client reads it once at start and proves with it.
 		r.Clear();
 		r.Start();
@@ -206,6 +211,81 @@ int main()
 		std::string expect;
 		AdminCrypto::MakeProof(secret, "00ff00ff00ff00ff", kServerId, expect);
 		CHECK(p && p->proof == expect);
+	}
+
+	// The secret is pinned to the connection address: a challenge from another address gets no answer.
+	{
+		Rig r(kServerId + " " + kAddr + " " + kSecret + "\n", "pinned");
+		r.client->SetServerAddress(kOtherAddr);
+		r.client->OnServerReady();
+		r.Clear();
+		r.Feed(Challenge());
+		CHECK(r.Count(Tag::Prove) == 0);
+		AdminClient::View v = r.View();
+		CHECK(v.status == Status::PairNeeded && v.lastResultIsError && v.lastResult == kMismatchText);
+		r.client->SetServerAddress(kAddr);
+		r.Feed(Challenge());
+		CHECK(r.Count(Tag::Prove) == 1 && !r.Last(Tag::Prove)->proof.empty());
+	}
+
+	// An unknown address blocks both pairing and proving.
+	{
+		Rig r(kServerId + " " + kAddr + " " + kSecret + "\n", "unknownaddr");
+		r.client->SetServerAddress(AdminClient::kUnknownAddress);
+		r.client->OnServerReady();
+		r.Clear();
+		r.Feed(Challenge());
+		CHECK(r.Count(Tag::Prove) == 0);
+		AdminClient::View v = r.View();
+		CHECK(v.status == Status::PairNeeded && v.lastResult == kLoaderText);
+
+		Rig q;
+		q.client->SetServerAddress("");
+		q.client->OnServerReady();
+		q.Feed(Challenge());
+		q.Feed(Welcome(kRolePair));
+		q.Clear();
+		CHECK(!q.client->Pair("ABCD2345"));
+		CHECK(q.Count(Tag::Pair) == 0 && !q.View().pairPending);
+		CHECK(q.View().lastResultIsError && q.View().lastResult == kLoaderText);
+	}
+
+	// Two servers each keep their own pin, and the pin is the address at pairing time.
+	{
+		const std::string id2 = "fedcba9876543210", secret2(64, 'b');
+		Rig r(kServerId + " " + kAddr + " " + kSecret + "\n" + id2 + " " + kOtherAddr + " " + secret2 + "\n", "twopins");
+		r.client->OnServerReady();
+		r.Clear();
+		r.Feed(Challenge());                                // server 1 on its own address
+		std::string expect;
+		AdminCrypto::MakeProof(kSecret, "00ff00ff00ff00ff", kServerId, expect);
+		CHECK(r.Count(Tag::Prove) == 1 && r.Last(Tag::Prove)->proof == expect);
+		r.client->SetServerAddress(kOtherAddr);
+		r.Clear();
+		Message c2 = Challenge();
+		c2.serverId = id2;
+		r.Feed(c2);                                         // server 2 on its own address
+		AdminCrypto::MakeProof(secret2, "00ff00ff00ff00ff", id2, expect);
+		CHECK(r.Count(Tag::Prove) == 1 && r.Last(Tag::Prove)->proof == expect);
+		r.Clear();
+		r.Feed(Challenge());                                // server 1 id on server 2's address
+		CHECK(r.Count(Tag::Prove) == 0);
+	}
+
+	// No answer to a pair message in 10 s: Pair is enabled again with a note; a late answer changes nothing saved.
+	{
+		Rig r;
+		r.client->OnServerReady();
+		r.Feed(Challenge());
+		r.Feed(Welcome(kRolePair));
+		CHECK(r.client->Pair("ABCD2345"));
+		r.clock += AdminClient::kPairTimeoutSeconds - 0.1;
+		CHECK(r.View().pairPending && r.View().lastResult.empty());
+		r.clock += 0.2;
+		AdminClient::View v = r.View();
+		CHECK(!v.pairPending && v.lastResultIsError && v.lastResult == "No answer from the server. Try again.");
+		CHECK(v.status == Status::PairNeeded);
+		CHECK(r.client->Pair("ABCD2345"));
 	}
 
 	// Snapshot assembly: continuation records merge, swapped in only at snap-end.
@@ -440,7 +520,7 @@ int main()
 		std::ifstream in(d.store);
 		std::string line;
 		std::getline(in, line);
-		CHECK(line == kServerId + " " + sentSecret);
+		CHECK(line == kServerId + " " + kAddr + " " + sentSecret);
 	}
 
 	// Staged edits keep the revision they were made on, so the server can refuse them.

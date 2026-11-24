@@ -11,6 +11,8 @@ namespace AdminClient
 {
 	namespace
 	{
+		const char* const kNeedsLoader = "The in-game admin needs a newer mod loader.";
+
 		bool IsHexOfLength(const std::string& s, size_t n)
 		{
 			if (s.size() != n) return false;
@@ -25,7 +27,7 @@ namespace AdminClient
 		LoadSecrets();
 	}
 
-	// Store format: one line per server, "<serverId> <secret hex>".
+	// Store format: one line per server, "<serverId> <address> <secret hex>".
 	void Client::LoadSecrets()
 	{
 		if (env_.storePath.empty()) return;
@@ -36,14 +38,16 @@ namespace AdminClient
 			if (!line.empty() && line.back() == '\r') line.pop_back();
 			size_t sp = line.find(' ');
 			if (sp == std::string::npos || sp == 0) continue;
-			std::string id = line.substr(0, sp), secret = line.substr(sp + 1);
-			if (IsHexOfLength(secret, 64)) secrets_[id] = secret;
+			size_t sp2 = line.find(' ', sp + 1);
+			if (sp2 == std::string::npos || sp2 == sp + 1) continue;
+			std::string id = line.substr(0, sp), addr = line.substr(sp + 1, sp2 - sp - 1), secret = line.substr(sp2 + 1);
+			if (IsHexOfLength(secret, 64)) secrets_[id] = Pin{ addr, secret };
 		}
 	}
 
-	bool Client::SaveSecret(const std::string& serverId, const std::string& secretHex)
+	bool Client::SaveSecret(const std::string& serverId, const std::string& address, const std::string& secretHex)
 	{
-		secrets_[serverId] = secretHex;
+		secrets_[serverId] = Pin{ address, secretHex };
 		if (env_.storePath.empty()) return false;
 		namespace fs = std::filesystem;
 		std::error_code ec;
@@ -54,7 +58,7 @@ namespace AdminClient
 		{
 			std::ofstream out(tmp, std::ios::trunc);
 			if (!out) return false;
-			for (const auto& kv : secrets_) out << kv.first << ' ' << kv.second << '\n';
+			for (const auto& kv : secrets_) out << kv.first << ' ' << kv.second.address << ' ' << kv.second.secretHex << '\n';
 			out.flush();
 			if (!out) return false;
 		}
@@ -95,6 +99,7 @@ namespace AdminClient
 		outbox_.clear();
 		serverId_.clear();
 		pendingSecret_.clear();
+		pendingAddress_.clear();
 		wrongCodes_ = 0;
 		assembling_ = false;
 		snapshotRetried_ = false;
@@ -124,6 +129,13 @@ namespace AdminClient
 	{
 		std::lock_guard<std::mutex> lock(mu_);
 		ResetSession();
+		address_ = kUnknownAddress;
+	}
+
+	void Client::SetServerAddress(const std::string& address)
+	{
+		std::lock_guard<std::mutex> lock(mu_);
+		address_ = address.empty() ? std::string(kUnknownAddress) : address;
 	}
 
 	void Client::CheckTimeout()
@@ -133,6 +145,13 @@ namespace AdminClient
 		if (status_ == Status::Waiting && helloSent_ && now - helloAt_ >= kHelloTimeoutSeconds)
 			status_ = Status::NoInGameAdmin;
 		if (assembling_ && now - assemblyAt_ >= kSnapshotTimeoutSeconds) AbortSnapshot();
+		if (!pendingSecret_.empty() && now - pairAt_ >= kPairTimeoutSeconds)
+		{
+			pendingSecret_.clear();
+			pendingAddress_.clear();
+			lastResult_ = "No answer from the server. Try again.";
+			lastResultIsError_ = true;
+		}
 	}
 
 	void Client::GetView(View& out)
@@ -177,8 +196,24 @@ namespace AdminClient
 		auto it = secrets_.find(m.serverId);
 		if (it != secrets_.end())
 		{
+			// The server id comes from the server, so it proves nothing: answer only on the
+			// address the secret was paired on, or a hostile server could relay a challenge.
+			if (!AddressKnown())
+			{
+				lastResult_ = kNeedsLoader;
+				lastResultIsError_ = true;
+				status_ = Status::PairNeeded;
+				return;
+			}
+			if (it->second.address != address_)
+			{
+				lastResult_ = "This server's address doesn't match the one you paired with. Ask the host for a new code.";
+				lastResultIsError_ = true;
+				status_ = Status::PairNeeded;
+				return;
+			}
 			std::string proof;
-			if (AdminCrypto::MakeProof(it->second, m.nonce, m.serverId, proof)) p.proof = proof;
+			if (AdminCrypto::MakeProof(it->second.secretHex, m.nonce, m.serverId, proof)) p.proof = proof;
 		}
 		Send(p);
 	}
@@ -187,12 +222,13 @@ namespace AdminClient
 	{
 		if (m.role == kRoleAdmin)
 		{
-			if (!pendingSecret_.empty() && !serverId_.empty() && !SaveSecret(serverId_, pendingSecret_))
+			if (!pendingSecret_.empty() && !serverId_.empty() && !SaveSecret(serverId_, pendingAddress_, pendingSecret_))
 			{
 				lastResult_ = "Paired, but the secret could not be saved on this PC";
 				lastResultIsError_ = true;
 			}
 			pendingSecret_.clear();
+			pendingAddress_.clear();
 			status_ = Status::Ready;   // the server pushes the snapshot with this welcome
 			return;
 		}
@@ -204,6 +240,7 @@ namespace AdminClient
 			lastResultIsError_ = true;
 		}
 		pendingSecret_.clear();
+		pendingAddress_.clear();
 		if (m.role == kRoleNone) status_ = Status::NotAdmin;
 		else if (m.role == kRoleUpdate) status_ = Status::UpdateClient;
 		else if (m.role == kRolePair) status_ = Status::PairNeeded;
@@ -405,6 +442,12 @@ namespace AdminClient
 	{
 		std::lock_guard<std::mutex> lock(mu_);
 		if (status_ != Status::PairNeeded || !pendingSecret_.empty() || wrongCodes_ >= kMaxWrongCodes) return false;
+		if (!AddressKnown())
+		{
+			lastResult_ = kNeedsLoader;
+			lastResultIsError_ = true;
+			return false;
+		}
 		AdminCrypto::Bytes raw;
 		if (!AdminCrypto::RandomBytes(32, raw)) return false;
 		Message m;
@@ -414,6 +457,8 @@ namespace AdminClient
 		std::string enc;
 		if (!Encode(m, enc)) return false;
 		pendingSecret_ = m.secret;
+		pendingAddress_ = address_;
+		pairAt_ = env_.now ? env_.now() : 0;
 		outbox_.push_back(std::move(enc));
 		return true;
 	}
