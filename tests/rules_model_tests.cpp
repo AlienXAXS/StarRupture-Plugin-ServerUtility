@@ -10,6 +10,7 @@
 #include "host_rules/ingame_admin_model.h"
 #include "admin_wire/admin_wire.h"
 #include "admin_wire/admin_crypto.h"
+#include "rcon/commands/word_split.h"
 
 #include <cstdio>
 #include <cstring>
@@ -1066,6 +1067,74 @@ int main()
 
 	InGameAdminTests();
 	InGameAdminOpsTests();
+
+	// Mod names with single inner spaces, as the mod loader allows them.
+	{
+		std::string plugin, id, err;
+		CHECK(ParseKey("Best Builder.some_feature", plugin, id, err) && plugin == "Best Builder" && id == "some_feature");
+		CHECK(ParseKey("A_b-1 C.*", plugin, id, err) && plugin == "A_b-1 C" && id == "*");
+		CHECK(!ParseKey(" Best.x", plugin, id, err));
+		CHECK(!ParseKey("Best .x", plugin, id, err));
+		CHECK(!ParseKey("Best  Builder.x", plugin, id, err));
+		CHECK(!ParseKey("Best Builder.some feature", plugin, id, err));
+		CHECK(!ParseKey("Best.Builder.x", plugin, id, err));
+		CHECK(ParseKey((std::string(64, 'a') + ".x").c_str(), plugin, id, err));
+		CHECK(!ParseKey((std::string(65, 'a') + ".x").c_str(), plugin, id, err));
+
+		Model sp;
+		std::string e;
+		CHECK(SetRule(sp, "Best Builder.some_feature", true, e) && SetRule(sp, "best builder.some_feature", false, e) && sp.rules.size() == 1);
+		CHECK(SetRule(sp, "Best Builder.other", true, e));
+		CHECK(SetModMin(sp, "Best Builder", "1.2.0", e) && SetModMin(sp, "best builder", "1.3.0", e) && sp.modMins.size() == 1);
+		CHECK(!SetModMin(sp, " Best", "1.0.0", e) && !SetModMin(sp, "Best ", "1.0.0", e) && !SetModMin(sp, "Best  Builder", "1.0.0", e));
+		CHECK(!SetModMin(sp, std::string(65, 'a'), "1.0.0", e) && SetModMin(sp, std::string(64, 'a'), "1.0.0", e));
+		CHECK(!SetModMin(sp, "Best.Builder", "1.0.0", e));
+		CHECK(SetModMin(sp, std::string(64, 'a'), "", e));
+		CHECK(RulesText(sp) == "default=allow\nBest Builder.some_feature=allow\nBest Builder.other=deny\n");
+		CHECK(VersionMinimumsText(sp) == "Best Builder=1.3.0\n");
+
+		// The file round trip: written rows read back the same, outer spaces trimmed.
+		std::vector<std::string> file = { "[Rules]" };
+		for (const std::string& l : RuleLines(sp)) file.push_back("  " + l + "  ");
+		file.push_back("[MinVersions]");
+		for (const std::string& l : ModMinLines(sp)) file.push_back("  " + l + "  ");
+		std::vector<std::string> warn;
+		Model back = ParseText(file, warn);
+		CHECK(warn.empty() && back.rules.size() == 2 && back.rules[0].plugin == "Best Builder" && back.rules[1].id == "other" && back.rules[1].deny);
+		CHECK(back.modMins.size() == 1 && back.modMins[0].plugin == "Best Builder" && back.modMins[0].version == "1.3.0");
+		CHECK(RuleLines(back) == RuleLines(sp) && ModMinLines(back) == ModMinLines(sp));
+
+		// A row with a bad name stays in the file and warns.
+		std::vector<std::string> bad = { "[Rules]", "Best  Builder.x=deny", "[MinVersions]", "Best  Builder=1.0.0" };
+		std::vector<std::string> bw;
+		Model bm = ParseText(bad, bw);
+		CHECK(bw.size() == 2 && bm.rules.empty() && bm.modMins.empty() && bm.rulesKept.size() == 1 && bm.modMinKept.size() == 1);
+	}
+
+	// Console words: a double-quoted part may hold spaces.
+	{
+		std::string rest = "deny \"Best Builder.some_feature\"  extra";
+		CHECK(WordSplit::TakeWord(rest) == "deny");
+		CHECK(WordSplit::TakeWord(rest) == "Best Builder.some_feature" && rest == "extra");
+		CHECK(WordSplit::TakeWord(rest) == "extra" && rest.empty());
+		CHECK(WordSplit::TakeWord(rest).empty());
+
+		rest = "  modmin \"Best Builder\" 1.2.0";
+		CHECK(WordSplit::TakeWord(rest) == "modmin");
+		CHECK(WordSplit::TakeWord(rest) == "Best Builder" && rest == "1.2.0");
+
+		rest = "\"Best Builder\".feature tail";
+		CHECK(WordSplit::TakeWord(rest) == "Best Builder.feature" && rest == "tail");
+
+		rest = "RuptureTimer 0.11.0";
+		CHECK(WordSplit::TakeWord(rest) == "RuptureTimer" && rest == "0.11.0");
+
+		rest = "\"unterminated name";
+		CHECK(WordSplit::TakeWord(rest) == "unterminated name" && rest.empty());
+		rest = "   ";
+		CHECK(WordSplit::TakeWord(rest).empty() && rest.empty());
+	}
+
 	std::printf("%d checks, %d failed\n", g_checks, g_failed);
 	return g_failed ? 1 : 0;
 }

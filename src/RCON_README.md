@@ -190,6 +190,8 @@ Show and edit the host's rules for mod features: the `[Policy]`, `[Rules]` and `
 | `hostrules reload` | Re-read the file after a hand edit |
 | `hostrules who <id\|number>` | What a connected player's mod loader reported: its version and each mod's features, on or off. A 1-3 digit argument is the number from `player ids`; anything else is an ID |
 
+A mod name with a space goes in double quotes: `hostrules deny "Best Builder.some_feature"`, `hostrules modmin "Best Builder" 1.2.0`. Feature names never hold spaces. In `HostRules.ini` the name is written without quotes.
+
 A version is `0.11.0`, `v0.11.0` or `1.27.0-dev.1`: at least major.minor, up to four numbers. A player below a minimum is sent to the main menu with the mod loader's reason (for example "This server needs ModLoader ... or newer") and the log shows `[HostRules] Player 'X' removed: <reason>`. Nothing is removed while both minimums are off. Players with `ExemptVersion` or `Admin` in the player list are kept; players without the mod loader, on a development build, or without the named mod are never reported, so never removed. The minimums are sent to the mod loader after every change; the last line of `hostrules` is `version minimums: sent`, or `not sent: <why>`.
 
 `who` shows the player's ID, how many times their mod loader reported its features and when it last did, then the mod loader version and each mod's features. For a player whose mod loader sent nothing it shows `no report (vanilla or older loader)`; for a player who is not connected, `not connected`.

@@ -255,6 +255,9 @@
     <ClInclude Include="rcon\commands\cmd_args.h">
       <Filter>rcon\commands</Filter>
     </ClInclude>
+    <ClInclude Include="rcon\commands\word_split.h">
+      <Filter>rcon\commands</Filter>
+    </ClInclude>
     <ClInclude Include="admin\endpoints\ep_rules_players.h">
       <Filter>admin\endpoints</Filter>
     </ClInclude>

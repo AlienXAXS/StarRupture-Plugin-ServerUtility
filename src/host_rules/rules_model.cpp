@@ -10,6 +10,7 @@ namespace RulesModel
 		constexpr size_t kMaxRules     = 2047;
 		constexpr size_t kMaxMessage   = 200;
 		constexpr size_t kMaxNameBytes = 128;
+		constexpr size_t kMaxPluginNameBytes = 64;
 		constexpr int    kMaxVersionDigits = 9;   // keeps each number inside 32 bits
 
 		std::string Lower(std::string s)
@@ -38,11 +39,27 @@ namespace RulesModel
 			       && s.find_first_of(" =") == std::string::npos;
 		}
 
+		// A mod name, as the mod loader allows it: letters, digits, '_' and '-',
+		// with single spaces between words ("Best Builder"), 1 to 64 bytes.
+		bool ValidPluginName(const std::string& s)
+		{
+			if (s.empty() || s.size() > kMaxPluginNameBytes || s.front() == ' ' || s.back() == ' ')
+				return false;
+			for (size_t i = 0; i < s.size(); ++i)
+			{
+				const unsigned char c = static_cast<unsigned char>(s[i]);
+				const bool word = (c < 0x80 && std::isalnum(c)) || c == '_' || c == '-';
+				if (!word && !(c == ' ' && s[i - 1] != ' '))
+					return false;
+			}
+			return true;
+		}
+
 		// A mod name for a minimum row. "loader" is the loader's own row in the
 		// text the loader takes, so no mod can use it.
 		bool ValidModMinName(const std::string& s)
 		{
-			return ValidName(s) && !SamePlugin(s, "loader");
+			return ValidPluginName(s) && !SamePlugin(s, "loader");
 		}
 
 		// "wire" is stored in lower case, as the loader's text spells it.
@@ -86,7 +103,7 @@ namespace RulesModel
 			error = "'" + key + "' has more than one dot; a rule key splits at the first dot, so a mod name with a dot cannot be used";
 			return false;
 		}
-		if (!ValidName(plugin)) { error = "'" + plugin + "' is not a usable mod name"; return false; }
+		if (!ValidPluginName(plugin)) { error = "'" + plugin + "' is not a usable mod name"; return false; }
 		if (!ValidName(id))     { error = "'" + id + "' is not a usable feature name"; return false; }
 		return true;
 	}
