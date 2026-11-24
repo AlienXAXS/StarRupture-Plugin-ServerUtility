@@ -23,6 +23,9 @@ namespace AdminWire
 	constexpr char kUS = '\x1F';
 	constexpr char kRS = '\x1E';
 
+	// Splits on every `sep` and keeps empty parts: "a\t\tb" on a tab gives three.
+	std::vector<std::string> Split(const std::string& s, char sep);
+
 	// Text limits applied by the encoder (bytes, cut on a UTF-8 boundary).
 	constexpr size_t kMaxName    = 64;    // plugin, version, id, key
 	constexpr size_t kMaxLabel   = 96;

@@ -26,7 +26,18 @@ namespace
 	const std::string kAddr = "10.0.0.1:7777";
 	const std::string kOtherAddr = "10.0.0.2:7777";
 	const char* const kMismatchText = "This server's address doesn't match the one you paired with. Ask the host for a new code.";
+	const char* const kNoAddressText = "Couldn't read this server's address, so pairing is off for now.";
 	const char* const kLoaderText = "The in-game admin needs a newer mod loader.";
+
+	// A loader read that returns `text` (its full length; copies what fits when given a buffer).
+	std::function<int(char*, size_t)> FakeRead(const std::string& text)
+	{
+		return [text](char* b, size_t n) -> int
+		{
+			if (b && n) { const size_t k = std::min(n - 1, text.size()); std::memcpy(b, text.data(), k); b[k] = '\0'; }
+			return static_cast<int>(text.size());
+		};
+	}
 
 	struct Rig
 	{
@@ -34,8 +45,9 @@ namespace
 		double clock = 100.0;
 		std::string store;
 		std::unique_ptr<AdminClient::Client> client;
-		std::function<int(char*, size_t)> addrFn, featFn;   // the fake loader reads; null reads as -1
+		std::function<int(char*, size_t)> addrFn, featFn;   // the fake loader reads; addrFn defaults to kAddr, featFn null reads as -1
 		int addrCalls = 0, featCalls = 0;
+		bool addrNull = false;                              // the loader has no GetServerAddress
 
 		explicit Rig(const std::string& storeContents = std::string(), const char* name = "store")
 		{
@@ -53,10 +65,10 @@ namespace
 			env.send = [this](const std::string& s) { Message m; if (Decode(s, m) == Decoded::Ok) sent.push_back(m); };
 			env.now = [this]() { return clock; };
 			env.storePath = store;
-			env.readAddress = [this](char* b, size_t n) { ++addrCalls; return addrFn ? addrFn(b, n) : -1; };
+			if (!addrFn) addrFn = FakeRead(kAddr);
+			if (!addrNull) env.readAddress = [this](char* b, size_t n) { ++addrCalls; return addrFn(b, n); };
 			env.readDeclaredFeatures = [this](char* b, size_t n) { ++featCalls; return featFn ? featFn(b, n) : -1; };
 			client.reset(new AdminClient::Client(env));
-			client->SetServerAddress(kAddr);
 		}
 
 		void Feed(const Message& m)
@@ -67,6 +79,7 @@ namespace
 		}
 		void FeedRaw(const std::string& s) { client->OnPacket(reinterpret_cast<const uint8_t*>(s.data()), s.size()); }
 
+		void Ready() { client->OnServerReady(); client->Tick(); }   // server ready, then the game-thread tick reads the address
 		Status St() { AdminClient::View v; client->GetView(v); return v.status; }
 		AdminClient::View View() { AdminClient::View v; client->GetView(v); return v; }
 		// What went out: the game-thread tick (Flush) is what sends, so every read ticks first.
@@ -75,16 +88,6 @@ namespace
 		size_t Count(Tag t) { size_t n = 0; for (const Message& m : Sent()) if (m.tag == t) ++n; return n; }
 		const Message* Last(Tag t) { Sent(); for (size_t i = sent.size(); i-- > 0;) if (sent[i].tag == t) return &sent[i]; return nullptr; }
 	};
-
-	// A loader read that returns `text` (its full length; copies what fits when given a buffer).
-	std::function<int(char*, size_t)> FakeRead(const std::string& text)
-	{
-		return [text](char* b, size_t n) -> int
-		{
-			if (b && n) { const size_t k = std::min(n - 1, text.size()); std::memcpy(b, text.data(), k); b[k] = '\0'; }
-			return static_cast<int>(text.size());
-		};
-	}
 
 	const std::string kDeclared =
 		"format\t1\n"
@@ -103,7 +106,7 @@ namespace
 	// Admin handshake with a stored secret, ends Ready with a first snapshot requested.
 	void MakeReady(Rig& r)
 	{
-		r.client->OnServerReady();
+		r.Ready();
 		r.Feed(Challenge());
 		r.Feed(Welcome(kRoleAdmin));
 	}
@@ -131,14 +134,14 @@ int main()
 		Rig r;
 		CHECK(r.Sent().empty());
 		CHECK(r.St() == Status::Waiting);
-		r.client->OnServerReady();
+		r.Ready();
 		CHECK(r.Sent().size() == 1 && r.sent[0].tag == Tag::Hello);
 	}
 
 	// 5 s without an answer: no-in-game-admin; a late welcome recovers.
 	{
 		Rig r;
-		r.client->OnServerReady();
+		r.Ready();
 		r.clock += 4.9;
 		CHECK(r.St() == Status::Waiting);
 		r.clock += 0.2;
@@ -150,7 +153,7 @@ int main()
 	// An answer within 5 s never times out.
 	{
 		Rig r;
-		r.client->OnServerReady();
+		r.Ready();
 		r.Feed(Welcome(kRoleNone));
 		r.clock += 60;
 		CHECK(r.St() == Status::NotAdmin);
@@ -159,13 +162,13 @@ int main()
 	// Welcome update, wrong protocol, garbage.
 	{
 		Rig r;
-		r.client->OnServerReady();
+		r.Ready();
 		r.Feed(Welcome(kRoleUpdate));
 		CHECK(r.St() == Status::UpdateClient);
 	}
 	{
 		Rig r;
-		r.client->OnServerReady();
+		r.Ready();
 		std::string s;
 		Message m = Welcome(kRoleAdmin);
 		Encode(m, s);
@@ -174,7 +177,7 @@ int main()
 		r.FeedRaw(s);
 		CHECK(r.St() == Status::UpdateClient);
 		Rig g;
-		g.client->OnServerReady();
+		g.Ready();
 		g.FeedRaw("junk");
 		CHECK(g.St() == Status::Waiting);
 	}
@@ -182,7 +185,7 @@ int main()
 	// Challenge answered with a proof from the stored secret.
 	{
 		Rig r(kServerId + " " + kAddr + " " + kSecret + "\n", "withsecret");
-		r.client->OnServerReady();
+		r.Ready();
 		r.Feed(Challenge());
 		const Message* p = r.Last(Tag::Prove);
 		CHECK(p != nullptr);
@@ -197,7 +200,7 @@ int main()
 	// Challenge without a stored secret: empty proof, then welcome pair.
 	{
 		Rig r;
-		r.client->OnServerReady();
+		r.Ready();
 		r.Feed(Challenge());
 		const Message* p = r.Last(Tag::Prove);
 		CHECK(p && p->proof.empty());
@@ -208,7 +211,7 @@ int main()
 	// Pair saves the secret only after welcome admin.
 	{
 		Rig r;
-		r.client->OnServerReady();
+		r.Ready();
 		r.Feed(Challenge());
 		r.Feed(Welcome(kRolePair));
 		r.Clear();
@@ -232,7 +235,7 @@ int main()
 		// A new client reads it once at start and proves with it.
 		r.Clear();
 		r.Start();
-		r.client->OnServerReady();
+		r.Ready();
 		r.Feed(Challenge());
 		const Message* p = r.Last(Tag::Prove);
 		std::string expect;
@@ -243,51 +246,105 @@ int main()
 	// The secret is pinned to the connection address: a challenge from another address gets no answer.
 	{
 		Rig r(kServerId + " " + kAddr + " " + kSecret + "\n", "pinned");
-		r.client->SetServerAddress(kOtherAddr);
-		r.client->OnServerReady();
+		r.addrFn = FakeRead(kOtherAddr);
+		r.Ready();
 		r.Clear();
 		r.Feed(Challenge());
 		CHECK(r.Count(Tag::Prove) == 0);
 		AdminClient::View v = r.View();
 		CHECK(v.status == Status::PairNeeded && v.lastResultIsError && v.lastResult == kMismatchText);
-		r.client->SetServerAddress(kAddr);
+		r.addrFn = FakeRead(kAddr);
+		r.Ready();                                          // a new connection, back on the paired address
 		r.Feed(Challenge());
 		CHECK(r.Count(Tag::Prove) == 1 && !r.Last(Tag::Prove)->proof.empty());
 	}
 
-	// An unknown address blocks both pairing and proving.
+	// A challenge before the address is read is held, then answered once the tick reads the address.
 	{
-		Rig r(kServerId + " " + kAddr + " " + kSecret + "\n", "unknownaddr");
-		r.client->SetServerAddress(AdminClient::kUnknownAddress);
-		r.client->OnServerReady();
+		Rig r(kServerId + " " + kAddr + " " + kSecret + "\n", "heldchallenge");
+		r.addrFn = [](char*, size_t) { return -1; };
+		r.Ready();
 		r.Clear();
 		r.Feed(Challenge());
-		CHECK(r.Count(Tag::Prove) == 0);
+		CHECK(r.Count(Tag::Prove) == 0 && r.View().status == Status::Waiting);
+		r.addrFn = FakeRead(kAddr);
+		r.client->Tick();
+		const Message* p = r.Last(Tag::Prove);
+		std::string expect;
+		AdminCrypto::MakeProof(kSecret, "00ff00ff00ff00ff", kServerId, expect);
+		CHECK(r.Count(Tag::Prove) == 1 && p && p->proof == expect);
+	}
+
+	// The address never arrives: the held challenge is refused after the pair timeout, and pairing says why.
+	{
+		Rig r(kServerId + " " + kAddr + " " + kSecret + "\n", "unknownaddr");
+		r.addrFn = [](char*, size_t) { return -1; };
+		r.Ready();
+		r.Clear();
+		r.Feed(Challenge());
+		r.clock += AdminClient::kPairTimeoutSeconds - 0.1;
+		CHECK(r.View().status == Status::Waiting && r.View().lastResult.empty());
+		r.clock += 0.2;
 		AdminClient::View v = r.View();
-		CHECK(v.status == Status::PairNeeded && v.lastResult == kLoaderText);
+		CHECK(r.Count(Tag::Prove) == 0);
+		CHECK(v.status == Status::PairNeeded && v.lastResultIsError && v.lastResult == kNoAddressText);
+		r.addrFn = FakeRead(kAddr);
+		r.client->Tick();                                   // a late address does not revive the refused challenge
+		CHECK(r.Count(Tag::Prove) == 0);
 
 		Rig q;
-		q.client->SetServerAddress("");
-		q.client->OnServerReady();
+		q.addrFn = [](char*, size_t) { return -1; };
+		q.Ready();
 		q.Feed(Challenge());
 		q.Feed(Welcome(kRolePair));
 		q.Clear();
 		CHECK(!q.client->Pair("ABCD2345"));
 		CHECK(q.Count(Tag::Pair) == 0 && !q.View().pairPending);
-		CHECK(q.View().lastResultIsError && q.View().lastResult == kLoaderText);
+		CHECK(q.View().lastResultIsError && q.View().lastResult == kNoAddressText);
+	}
+
+	// A second server-ready without a world end, with the read failing, forgets the previous server's address.
+	{
+		Rig r(kServerId + " " + kAddr + " " + kSecret + "\n", "addrreset");
+		r.Ready();
+		r.Clear();
+		r.Feed(Challenge());
+		CHECK(r.Count(Tag::Prove) == 1);
+		r.addrFn = [](char*, size_t) { return -1; };
+		r.Ready();
+		r.Clear();
+		r.Feed(Challenge());
+		CHECK(r.Count(Tag::Prove) == 0);
+		r.clock += AdminClient::kPairTimeoutSeconds + 0.1;
+		AdminClient::View v = r.View();
+		CHECK(r.Count(Tag::Prove) == 0 && v.status == Status::PairNeeded && v.lastResult == kNoAddressText);
+	}
+
+	// A loader without the call (null pointer) says it needs a newer loader.
+	{
+		Rig r(kServerId + " " + kAddr + " " + kSecret + "\n", "noloadercall");
+		r.addrNull = true;
+		r.Start();
+		r.Ready();
+		r.Clear();
+		r.Feed(Challenge());
+		CHECK(r.Count(Tag::Prove) == 0);
+		AdminClient::View v = r.View();
+		CHECK(v.status == Status::PairNeeded && v.lastResult == kLoaderText);
 	}
 
 	// Two servers each keep their own pin, and the pin is the address at pairing time.
 	{
 		const std::string id2 = "fedcba9876543210", secret2(64, 'b');
 		Rig r(kServerId + " " + kAddr + " " + kSecret + "\n" + id2 + " " + kOtherAddr + " " + secret2 + "\n", "twopins");
-		r.client->OnServerReady();
+		r.Ready();
 		r.Clear();
 		r.Feed(Challenge());                                // server 1 on its own address
 		std::string expect;
 		AdminCrypto::MakeProof(kSecret, "00ff00ff00ff00ff", kServerId, expect);
 		CHECK(r.Count(Tag::Prove) == 1 && r.Last(Tag::Prove)->proof == expect);
-		r.client->SetServerAddress(kOtherAddr);
+		r.addrFn = FakeRead(kOtherAddr);
+		r.Ready();
 		r.Clear();
 		Message c2 = Challenge();
 		c2.serverId = id2;
@@ -302,7 +359,7 @@ int main()
 	// No answer to a pair message in 10 s: Pair is enabled again with a note; a late answer changes nothing saved.
 	{
 		Rig r;
-		r.client->OnServerReady();
+		r.Ready();
 		r.Feed(Challenge());
 		r.Feed(Welcome(kRolePair));
 		CHECK(r.client->Pair("ABCD2345"));
@@ -448,7 +505,7 @@ int main()
 		r.clock += 30;
 		CHECK(r.St() == Status::Waiting);                    // no hello pending, no timeout
 		r.Clear();
-		r.client->OnServerReady();
+		r.Ready();
 		CHECK(r.Count(Tag::Hello) == 1);
 	}
 
@@ -470,7 +527,7 @@ int main()
 		r.client->Flush();
 		CHECK(r.sent.size() == after);                      // drained once
 		Rig p;
-		p.client->OnServerReady();
+		p.Ready();
 		p.Feed(Challenge());
 		p.Feed(Welcome(kRolePair));
 		p.Clear();
@@ -511,7 +568,7 @@ int main()
 	// A refused pairing code says so; five refusals say the lockout; a second Pair press waits.
 	{
 		Rig r;
-		r.client->OnServerReady();
+		r.Ready();
 		r.Feed(Challenge());
 		r.Feed(Welcome(kRolePair));
 		CHECK(r.View().lastResult.empty());
@@ -528,14 +585,14 @@ int main()
 		CHECK(r.View().lastResult == "Too many wrong codes. Reconnect, or ask the host for a new code");
 		r.Clear();
 		CHECK(!r.client->Pair("AAAA2222") && r.Count(Tag::Pair) == 0);
-		r.client->OnServerReady();                          // a new connection starts clean
+		r.Ready();                          // a new connection starts clean
 		r.Feed(Challenge());
 		r.Feed(Welcome(kRolePair));
 		CHECK(r.client->Pair("AAAA2222"));
 
 		// The saved secret is the one in the single pair message that went out.
 		Rig d;
-		d.client->OnServerReady();
+		d.Ready();
 		d.Feed(Challenge());
 		d.Feed(Welcome(kRolePair));
 		d.Clear();
@@ -655,7 +712,7 @@ int main()
 	{
 		Rig r;
 		r.featFn = FakeRead(kDeclared);
-		r.client->OnServerReady();
+		r.Ready();
 		r.client->Tick();
 		CHECK(r.featCalls == 0);   // not proven yet: no read, no push
 		r.Feed(Challenge());
@@ -670,7 +727,7 @@ int main()
 
 		// A new connection pushes again, once.
 		r.Clear();
-		r.client->OnServerReady();
+		r.Ready();
 		r.Feed(Challenge());
 		r.Feed(Welcome(kRoleAdmin));
 		r.Clear();
@@ -680,7 +737,7 @@ int main()
 
 		// A -1 read pushes nothing; a later good read does.
 		Rig q;
-		q.client->OnServerReady();
+		q.Ready();
 		q.Feed(Challenge());
 		q.Feed(Welcome(kRoleAdmin));
 		q.Clear();
@@ -694,28 +751,24 @@ int main()
 		// A connection that is not an admin never pushes.
 		Rig n;
 		n.featFn = FakeRead(kDeclared);
-		n.client->OnServerReady();
+		n.Ready();
 		n.Feed(Challenge());
 		n.Feed(Welcome(kRoleNone));
 		n.client->Tick();
 		CHECK(n.Count(Tag::Ops) == 0);
 	}
 
-	// The server address is fed from the loader read; -1 leaves it unknown.
+	// The server address is read until the loader answers, then not again.
 	{
 		Rig r(kServerId + " " + kOtherAddr + " " + kSecret + "\n", "addrfeed");
-		r.client->SetServerAddress(AdminClient::kUnknownAddress);
 		r.addrFn = [](char*, size_t) { return -1; };
-		r.client->OnServerReady();
-		r.client->Tick();
+		r.Ready();
 		r.Clear();
 		r.Feed(Challenge());
-		CHECK(r.addrCalls >= 1 && r.Count(Tag::Prove) == 0);   // still unknown: no proving
-		CHECK(r.View().lastResult == kLoaderText);
+		CHECK(r.addrCalls >= 1 && r.Count(Tag::Prove) == 0);   // still unknown: held, no proving
 
 		r.addrFn = FakeRead(kOtherAddr);
 		r.client->Tick();
-		r.Feed(Challenge());
 		CHECK(r.Count(Tag::Prove) == 1);
 		const int calls = r.addrCalls;
 		r.client->Tick();

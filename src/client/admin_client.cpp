@@ -12,6 +12,7 @@ namespace AdminClient
 	namespace
 	{
 		const char* const kNeedsLoader = "The in-game admin needs a newer mod loader.";
+		const char* const kNoAddress = "Couldn't read this server's address, so pairing is off for now.";
 
 		// Measure, then read. False for -1 or an empty text.
 		bool ReadLoaderText(const std::function<int(char*, size_t)>& fn, std::string& out)
@@ -24,19 +25,6 @@ namespace AdminClient
 			if (got <= 0) return false;
 			out.assign(buf.c_str(), std::min(static_cast<size_t>(got), static_cast<size_t>(n)));
 			return true;
-		}
-
-		std::vector<std::string> SplitTabs(const std::string& line)
-		{
-			std::vector<std::string> f;
-			size_t start = 0;
-			for (;;)
-			{
-				const size_t tab = line.find('\t', start);
-				if (tab == std::string::npos) { f.push_back(line.substr(start)); return f; }
-				f.push_back(line.substr(start, tab - start));
-				start = tab + 1;
-			}
 		}
 
 		bool IsHexOfLength(const std::string& s, size_t n)
@@ -61,7 +49,7 @@ namespace AdminClient
 			std::string line = text.substr(pos, eol - pos);
 			pos = eol + 1;
 			if (!line.empty() && line.back() == '\r') line.pop_back();
-			const std::vector<std::string> f = SplitTabs(line);   // split on tabs only: names can hold a space
+			const std::vector<std::string> f = Split(line, '\t');   // split on tabs only: names can hold a space
 			if (f[0] == "plugin" && f.size() >= 3)
 				versions[f[1]] = f[2];
 			else if (f[0] == "feature" && f.size() >= 5)
@@ -164,6 +152,11 @@ namespace AdminClient
 			std::lock_guard<std::mutex> lock(mu_);
 			address_ = text;
 			addressRead_ = true;
+			if (haveHeldChallenge_)
+			{
+				haveHeldChallenge_ = false;
+				HandleChallenge(heldChallenge_);
+			}
 		}
 		text.clear();
 		if (wantCatalog && ReadLoaderText(env_.readDeclaredFeatures, text))
@@ -224,6 +217,8 @@ namespace AdminClient
 		status_ = Status::Waiting;
 		helloSent_ = false;
 		addressRead_ = false;
+		address_ = kUnknownAddress;
+		haveHeldChallenge_ = false;
 		catalogSent_ = false;
 		catalogReqIds_.clear();
 		outbox_.clear();
@@ -259,22 +254,22 @@ namespace AdminClient
 	{
 		std::lock_guard<std::mutex> lock(mu_);
 		ResetSession();
-		address_ = kUnknownAddress;
-	}
-
-	void Client::SetServerAddress(const std::string& address)
-	{
-		std::lock_guard<std::mutex> lock(mu_);
-		address_ = address.empty() ? std::string(kUnknownAddress) : address;
 	}
 
 	void Client::CheckTimeout()
 	{
 		if (!env_.now) return;
 		const double now = env_.now();
-		if (status_ == Status::Waiting && helloSent_ && now - helloAt_ >= kHelloTimeoutSeconds)
+		if (status_ == Status::Waiting && helloSent_ && !haveHeldChallenge_ && now - helloAt_ >= kHelloTimeoutSeconds)
 			status_ = Status::NoInGameAdmin;
 		if (assembling_ && now - assemblyAt_ >= kSnapshotTimeoutSeconds) AbortSnapshot();
+		if (haveHeldChallenge_ && now - heldAt_ >= kPairTimeoutSeconds)
+		{
+			haveHeldChallenge_ = false;
+			lastResult_ = kNoAddress;
+			lastResultIsError_ = true;
+			status_ = Status::PairNeeded;
+		}
 		if (!pendingSecret_.empty() && now - pairAt_ >= kPairTimeoutSeconds)
 		{
 			pendingSecret_.clear();
@@ -330,6 +325,14 @@ namespace AdminClient
 			// address the secret was paired on, or a hostile server could relay a challenge.
 			if (!AddressKnown())
 			{
+				if (env_.readAddress)
+				{
+					// The address is read on the game thread's next tick: answer then, or give up after the timeout.
+					heldChallenge_ = m;
+					haveHeldChallenge_ = true;
+					heldAt_ = env_.now ? env_.now() : 0;
+					return;
+				}
 				lastResult_ = kNeedsLoader;
 				lastResultIsError_ = true;
 				status_ = Status::PairNeeded;
@@ -575,7 +578,7 @@ namespace AdminClient
 		if (status_ != Status::PairNeeded || !pendingSecret_.empty() || wrongCodes_ >= kMaxWrongCodes) return false;
 		if (!AddressKnown())
 		{
-			lastResult_ = kNeedsLoader;
+			lastResult_ = env_.readAddress ? kNoAddress : kNeedsLoader;
 			lastResultIsError_ = true;
 			return false;
 		}

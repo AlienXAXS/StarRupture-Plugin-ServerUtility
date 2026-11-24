@@ -82,9 +82,6 @@ namespace AdminClient
 		// Game-thread tick, before Flush: reads the server address once the server is ready
 		// (until the loader gives one), and pushes the declared features once the connection is proven.
 		void Tick();
-		// Game-thread tick, after the server is ready: the address of the client's own connection
-		// as lower-case "ip:port", or kUnknownAddress (or empty) when the loader cannot give it.
-		void SetServerAddress(const std::string& address);
 
 		// Render thread.
 		void GetView(View& out);                           // also applies the hello timeout
@@ -118,11 +115,14 @@ namespace AdminClient
 			std::string secretHex;
 		};
 		std::map<std::string, Pin> secrets_;           // server id -> pin (loaded once)
+		AdminWire::Message heldChallenge_;             // a challenge that came before the address was read
+		bool haveHeldChallenge_ = false;
+		double heldAt_ = 0;
 		bool addressRead_ = false;                     // the loader gave an address on this connection
 		bool catalogSent_ = false;                     // catalog.push went out on this connection
 		std::set<uint32_t> catalogReqIds_;             // their results are not shown
 		void QueueCatalog(const std::vector<std::string>& rows);
-		std::string address_ = kUnknownAddress;        // current connection address, fed by SetServerAddress
+		std::string address_ = kUnknownAddress;        // current connection address, read in Tick through Env::readAddress
 
 		Status status_ = Status::Waiting;
 		bool helloSent_ = false;

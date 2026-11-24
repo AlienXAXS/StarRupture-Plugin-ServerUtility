@@ -6,6 +6,20 @@
 
 namespace AdminWire
 {
+	std::vector<std::string> Split(const std::string& s, char sep)
+	{
+		std::vector<std::string> r;
+		size_t start = 0;
+		for (;;)
+		{
+			size_t p = s.find(sep, start);
+			if (p == std::string::npos) { r.push_back(s.substr(start)); break; }
+			r.push_back(s.substr(start, p - start));
+			start = p + 1;
+		}
+		return r;
+	}
+
 namespace
 {
 	using Fields = std::vector<std::string>;
@@ -62,20 +76,6 @@ namespace
 		size_t n = f.empty() ? 0 : f.size() - 1;
 		for (const std::string& s : f) n += s.size();
 		return n;
-	}
-
-	std::vector<std::string> Split(const std::string& s, char sep)
-	{
-		std::vector<std::string> r;
-		size_t start = 0;
-		for (;;)
-		{
-			size_t p = s.find(sep, start);
-			if (p == std::string::npos) { r.push_back(s.substr(start)); break; }
-			r.push_back(s.substr(start, p - start));
-			start = p + 1;
-		}
-		return r;
 	}
 
 	bool IsHex(const std::string& s, size_t minLen, size_t maxLen)

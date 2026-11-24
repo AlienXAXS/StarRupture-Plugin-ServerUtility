@@ -114,13 +114,14 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 			s->hooks->Network->SendPacketToServer(s, AdminWire::kPacketTag,
 				reinterpret_cast<const uint8_t*>(msg.data()), msg.size());
 	};
-	// Loader interface 80. A v79 loader never loads this DLL, so both exist when this runs.
-	env.readAddress = [](char* buf, size_t size) -> int
-	{
-		IPluginSelf* s = g_self;
-		if (!s || !s->hooks || !s->hooks->Network || !s->hooks->Network->GetServerAddress) return -1;
-		return s->hooks->Network->GetServerAddress(buf, size);
-	};
+	// Loader interface 80 always has the call; a null pointer leaves readAddress empty, which the client reports as an old loader.
+	if (self->hooks->Network->GetServerAddress)
+		env.readAddress = [](char* buf, size_t size) -> int
+		{
+			IPluginSelf* s = g_self;
+			if (!s || !s->hooks || !s->hooks->Network || !s->hooks->Network->GetServerAddress) return -1;
+			return s->hooks->Network->GetServerAddress(buf, size);
+		};
 	env.readDeclaredFeatures = [](char* buf, size_t size) -> int
 	{
 		IPluginSelf* s = g_self;
