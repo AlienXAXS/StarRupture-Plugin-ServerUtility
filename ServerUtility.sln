@@ -11,6 +11,8 @@ Global
 		Release|x64 = Release|x64
 		Server Debug|x64 = Server Debug|x64
 		Server Release|x64 = Server Release|x64
+		Client Debug|x64 = Client Debug|x64
+		Client Release|x64 = Client Release|x64
 		Local SDK Server Debug|x64 = Local SDK Server Debug|x64
 		Local SDK Server Release|x64 = Local SDK Server Release|x64
 	EndGlobalSection
@@ -23,6 +25,10 @@ Global
 		{C4D1E2F3-6A7B-4C8D-9E0F-1A2B3C4D5E6F}.Server Debug|x64.Build.0 = Server Debug|x64
 		{C4D1E2F3-6A7B-4C8D-9E0F-1A2B3C4D5E6F}.Server Release|x64.ActiveCfg = Server Release|x64
 		{C4D1E2F3-6A7B-4C8D-9E0F-1A2B3C4D5E6F}.Server Release|x64.Build.0 = Server Release|x64
+		{C4D1E2F3-6A7B-4C8D-9E0F-1A2B3C4D5E6F}.Client Debug|x64.ActiveCfg = Client Debug|x64
+		{C4D1E2F3-6A7B-4C8D-9E0F-1A2B3C4D5E6F}.Client Debug|x64.Build.0 = Client Debug|x64
+		{C4D1E2F3-6A7B-4C8D-9E0F-1A2B3C4D5E6F}.Client Release|x64.ActiveCfg = Client Release|x64
+		{C4D1E2F3-6A7B-4C8D-9E0F-1A2B3C4D5E6F}.Client Release|x64.Build.0 = Client Release|x64
 		{C4D1E2F3-6A7B-4C8D-9E0F-1A2B3C4D5E6F}.Local SDK Server Debug|x64.ActiveCfg = Local SDK Server Debug|x64
 		{C4D1E2F3-6A7B-4C8D-9E0F-1A2B3C4D5E6F}.Local SDK Server Debug|x64.Build.0 = Local SDK Server Debug|x64
 		{C4D1E2F3-6A7B-4C8D-9E0F-1A2B3C4D5E6F}.Local SDK Server Release|x64.ActiveCfg = Local SDK Server Release|x64
