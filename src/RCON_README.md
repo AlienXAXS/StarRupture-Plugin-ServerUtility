@@ -170,6 +170,9 @@ No admins yet. Claim code: <code>
 
 A player gets 5 wrong tries, then is not asked again until restart; 5 wrong tries in total replace the code. "Not me" also stops the asking until restart. `[Policy] AdminPrompt=0` in `HostRules.ini` turns the asking off (the code still shows here). See the README for the full flow.
 
+- `admin pair <id|number>` makes a one-time code (8 characters, 10 minutes, one use) for that admin's in-game admin tool and prints it in the reply only; it is never logged. The player must already have the Admin flag. 5 wrong tries on one connection, or 5 in total, void the code. `[Policy] InGameAdmin=0` turns the tool off.
+- `admin unpair <id|number>` forgets that admin's pairing; the tool must be paired again. Taking the Admin flag away does the same.
+
 ### `hostrules [list|allow|deny|unset|default|message|minversion|modmin|reload|who]`
 
 Show and edit the host's rules for mod features: the `[Policy]`, `[Rules]` and `[MinVersions]` sections of `Plugins\config\HostRules.ini`. Each change is written to the file and sent to the mod loader straight away. The rules are sent only to a mod loader with plugin interface 79 or newer; on any other they are saved and `hostrules` says "not sent".

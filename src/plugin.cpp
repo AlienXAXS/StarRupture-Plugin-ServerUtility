@@ -18,6 +18,7 @@
 #include "admin/admin_panel.h"
 #include "host_rules/removal.h"
 #include "host_rules/admin_claim.h"
+#include "host_rules/ingame_admin.h"
 #include "host_rules/player_list.h"
 #include "host_rules/host_rules.h"
 
@@ -80,6 +81,7 @@ static void OnEngineShutdown()
 {
 	LOG_INFO("Engine shutting down - removing hooks...");
 	AdminPanel::Shutdown(g_self);
+	InGameAdmin::Shutdown();
 	AdminClaim::Shutdown();
 	Removal::Shutdown();
 	HostRules::Shutdown();
@@ -173,6 +175,7 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 	Cmd_HostRules::Register();
 	Removal::Init();
 	AdminClaim::Init();
+	InGameAdmin::Init();
 
 	g_self->hooks->Engine->RegisterOnInit(OnEngineInit);
 	LOG_DEBUG("Registered for engine init callback");

@@ -4,6 +4,7 @@
 #include "player_ids.h"
 #include "player_list.h"
 #include "admin_claim.h"
+#include "ingame_admin.h"
 #include "../plugin_helpers.h"
 #include "../rcon/listed_players.h"
 
@@ -280,6 +281,8 @@ namespace
 		auto* pc = static_cast<SDK::APlayerController*>(exitingController);
 		g_waiting.erase(std::remove_if(g_waiting.begin(), g_waiting.end(), [&](const Waiting& w) { return w.pc.Get() == pc; }), g_waiting.end());
 #endif
+
+		InGameAdmin::PlayerLeft(exitingController);
 
 		const std::string id = IdOf(exitingController);
 		if (id.empty())

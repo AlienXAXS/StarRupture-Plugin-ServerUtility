@@ -86,10 +86,12 @@ namespace InGameAdminModel
 		// its code and its proven connections.
 		void OnPlayersChanged();
 
-		// The ID completed the admin claim this session: its connection may pair
-		// without a code. Returns the challenges to send to its connections that
+		// The connection `claimant` completed the admin claim as this ID: that
+		// connection alone may pair without a code, for 10 minutes or until it
+		// disconnects or the world ends. Another connection with the same ID gets
+		// no shortcut. Returns the challenges to send to the ID's connections that
 		// were told "none" before they were an admin.
-		std::vector<Out> OnClaimed(const std::string& playerId);
+		std::vector<Out> OnClaimed(ConnId claimant, const std::string& playerId);
 
 		bool HasSecret(const std::string& playerId) const;
 
@@ -116,6 +118,7 @@ namespace InGameAdminModel
 		bool MakeChallengeLocked(Conn& c, std::string& message);
 		std::string Welcome(const char* role, uint32_t revision) const;
 		void UnproveIdLocked(const std::string& id);
+		void EraseClaimedLocked(const std::string& playerId);
 
 		Env                            env_;
 		mutable std::mutex             mutex_;
@@ -123,7 +126,8 @@ namespace InGameAdminModel
 		std::map<std::string, std::string> secrets_;   // player ID -> secret (hex)
 		std::map<ConnId, Conn>         conns_;
 		std::map<std::string, Code>    codes_;         // player ID -> open pairing code
-		std::map<std::string, double>  claimed_;       // player ID -> claim shortcut expiry
+		struct Claimed { std::string id; double expires = 0; };
+		std::map<ConnId, Claimed>      claimed_;       // connection that claimed -> claim shortcut
 		ProvenHandler                  proven_;
 	};
 }

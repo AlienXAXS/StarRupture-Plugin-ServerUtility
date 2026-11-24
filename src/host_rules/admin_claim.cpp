@@ -1,4 +1,5 @@
 #include "admin_claim.h"
+#include "ingame_admin.h"
 #include "admin_ops.h"
 #include "claim_model.h"
 #include "host_rules.h"
@@ -200,7 +201,10 @@ namespace
 			LOG_INFO("[Admin] '%s' claimed admin (id %s)", label.c_str(), id.c_str());
 			AdminOps::NoteChanged(AdminOps::kSectionPlayers);
 			HostRules::RefreshPlayers();
-			Say(playerController, "You are now an admin of this server.", true);
+			InGameAdmin::OnClaimed(playerController, id);
+			Say(playerController, InGameAdmin::Enabled()
+				? "You are the admin. To manage this server in game, install the ServerUtility admin client; RCON works too."
+				: "You are now an admin of this server.", true);
 
 			if (!others.empty())
 			{

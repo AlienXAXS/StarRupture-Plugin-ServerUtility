@@ -429,6 +429,8 @@
     <ClInclude Include="host_rules\claim_model.h" />
     <ClInclude Include="host_rules\known_features.h" />
     <ClInclude Include="host_rules\admin_claim.h" />
+    <ClInclude Include="host_rules\ingame_admin.h" />
+    <ClInclude Include="host_rules\ingame_admin_model.h" />
     <ClInclude Include="host_rules\rules_model.h" />
     <ClInclude Include="host_rules\player_list.h" />
     <ClInclude Include="host_rules\ini_file.h" />
@@ -487,6 +489,8 @@
     <ClCompile Include="host_rules\claim_model.cpp" />
     <ClCompile Include="host_rules\known_features.cpp" />
     <ClCompile Include="host_rules\admin_claim.cpp" />
+    <ClCompile Include="host_rules\ingame_admin.cpp" />
+    <ClCompile Include="host_rules\ingame_admin_model.cpp" />
     <ClCompile Include="host_rules\rules_model.cpp" />
     <ClCompile Include="host_rules\player_list.cpp" />
     <ClCompile Include="host_rules\ini_file.cpp" />

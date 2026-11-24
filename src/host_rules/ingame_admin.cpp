@@ -233,11 +233,15 @@ namespace InGameAdmin
 		return model && model->Unpair(playerId);
 	}
 
-	void OnClaimed(const std::string& playerId)
+	void OnClaimed(void* playerController, const std::string& playerId)
 	{
 		InGameAdminModel::Server* model = ModelPtr();
-		if (!model) return;
-		for (const InGameAdminModel::Out& out : model->OnClaimed(playerId))
+		if (!model || !playerController) return;
+		std::vector<ConnId> dropped;
+		const ConnId claimant = ConnectionFor(static_cast<SDK::APlayerController*>(playerController), dropped);
+		for (ConnId d : dropped)
+			model->OnDisconnect(d);
+		for (const InGameAdminModel::Out& out : model->OnClaimed(claimant, playerId))
 			SendToConnection(out.conn, out.data);
 	}
 

@@ -19,8 +19,9 @@ namespace InGameAdmin
 	bool IssueCode(const std::string& playerId, std::string& code, std::string& error);
 	bool Unpair(const std::string& playerId);
 
-	// The player just completed the admin claim: their connection may pair without a code.
-	void OnClaimed(const std::string& playerId);
+	// The player just completed the admin claim on this controller: that connection
+	// alone may pair without a code.
+	void OnClaimed(void* playerController, const std::string& playerId);
 
 	// A player leaves: forget their connection.
 	void PlayerLeft(void* playerController);

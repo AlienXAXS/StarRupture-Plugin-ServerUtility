@@ -1,17 +1,23 @@
 // Unit tests of the rules parser and the text it makes for the mod loader.
 // No project file: from a Visual Studio developer prompt, in the repo root:
-//   cl /nologo /EHsc /std:c++17 /Isrc tests\rules_model_tests.cpp src\host_rules\rules_model.cpp src\host_rules\claim_model.cpp src\host_rules\admin_ops.cpp src\host_rules\known_features.cpp /Fe:rules_model_tests.exe
+//   cl /nologo /EHsc /std:c++17 /Isrc tests\rules_model_tests.cpp src\host_rules\rules_model.cpp src\host_rules\claim_model.cpp src\host_rules\admin_ops.cpp src\host_rules\known_features.cpp src\host_rules\ingame_admin_model.cpp src\admin_wire\admin_wire.cpp src\admin_wire\admin_crypto.cpp /Fe:rules_model_tests.exe
 //   rules_model_tests.exe
 #include "host_rules/rules_model.h"
 #include "host_rules/claim_model.h"
 #include "host_rules/admin_ops.h"
 #include "host_rules/known_features.h"
 #include "admin/url_match.h"
+#include "host_rules/ingame_admin_model.h"
+#include "admin_wire/admin_wire.h"
+#include "admin_wire/admin_crypto.h"
 
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <filesystem>
 #include <set>
+#include <string>
+#include <vector>
 
 static int g_checks = 0, g_failed = 0;
 
@@ -24,6 +30,271 @@ static Model ParseText(const std::vector<std::string>& lines, std::vector<std::s
 	Model m;
 	Parse(lines, m, warnings);
 	return m;
+}
+
+// ---- In-game admin handshake and pairing ----
+
+namespace
+{
+	struct IgaEnv
+	{
+		std::set<std::string> admins;
+		double now = 1000;
+		bool on = true;
+		std::vector<std::string> audit;
+		std::string path;
+	};
+
+	std::unique_ptr<InGameAdminModel::Server> MakeIga(IgaEnv& e)
+	{
+		InGameAdminModel::Env env;
+		env.enabled = [&e] { return e.on; };
+		env.isAdmin = [&e](const std::string& id) { return e.admins.count(id) > 0; };
+		env.revision = [] { return 7u; };
+		env.now = [&e] { return e.now; };
+		env.audit = [&e](const std::string& line) { e.audit.push_back(line); };
+		env.storePath = e.path;
+		return std::make_unique<InGameAdminModel::Server>(env);
+	}
+
+	std::vector<AdminWire::Message> IgaSendRaw(InGameAdminModel::Server& s, uint64_t conn, const std::string& id, const std::string& wire)
+	{
+		std::vector<AdminWire::Message> replies;
+		for (const std::string& r : s.OnPacket(conn, id, id, reinterpret_cast<const uint8_t*>(wire.data()), wire.size()))
+		{
+			AdminWire::Message d;
+			if (AdminWire::Decode(r, d) == AdminWire::Decoded::Ok) replies.push_back(d);
+		}
+		return replies;
+	}
+
+	std::vector<AdminWire::Message> IgaSend(InGameAdminModel::Server& s, uint64_t conn, const std::string& id, const AdminWire::Message& m)
+	{
+		std::string wire;
+		AdminWire::Encode(m, wire);
+		return IgaSendRaw(s, conn, id, wire);
+	}
+
+	AdminWire::Message IgaHello()
+	{
+		AdminWire::Message m;
+		m.tag = AdminWire::Tag::Hello;
+		return m;
+	}
+
+	AdminWire::Message IgaPair(const std::string& code, const std::string& secret)
+	{
+		AdminWire::Message m;
+		m.tag = AdminWire::Tag::Pair;
+		m.code = code;
+		m.secret = secret;
+		return m;
+	}
+
+	// Hello, then the nonce of the challenge ("" when there is none).
+	std::string IgaChallenge(InGameAdminModel::Server& s, uint64_t conn, const std::string& id)
+	{
+		const auto r = IgaSend(s, conn, id, IgaHello());
+		return (r.size() == 1 && r[0].tag == AdminWire::Tag::Challenge) ? r[0].nonce : std::string();
+	}
+
+	std::string IgaRole(const std::vector<AdminWire::Message>& r)
+	{
+		return (r.size() == 1 && r[0].tag == AdminWire::Tag::Welcome) ? r[0].role : std::string("?");
+	}
+
+	const std::string kSecretA(64, 'a');
+	const std::string kSecretB(64, 'b');
+}
+
+static void InGameAdminTests()
+{
+	using AdminWire::Tag;
+	const std::string path = (std::filesystem::temp_directory_path() / "su-iga-pairing-test.txt").string();
+	std::filesystem::remove(path);
+
+	// Codes: alphabet, length, expiry, wrong-try limits.
+	{
+		IgaEnv e; e.path = path; e.admins = { "p1" };
+		auto s = MakeIga(e);
+		CHECK(s->Ready());
+		std::string code, err;
+		CHECK(!s->IssueCode("nobody", code, err));
+		CHECK(s->IssueCode("p1", code, err));
+		CHECK(code.size() == 8);
+		CHECK(code.find_first_not_of("23456789ABCDEFGHJKMNPQRSTUVWXYZ") == std::string::npos);
+
+		// Expires after 10 minutes.
+		CHECK(IgaChallenge(*s, 1, "p1") != "");
+		e.now += 601;
+		CHECK(IgaRole(IgaSend(*s, 1, "p1", IgaPair(code, kSecretA))) == "pair");
+		CHECK(!s->IsProven(1));
+		CHECK(!s->HasSecret("p1"));
+
+		// 5 wrong per connection: the next try is refused even with the right code.
+		CHECK(s->IssueCode("p1", code, err));
+		for (int i = 0; i < 5; ++i)
+			CHECK(IgaRole(IgaSend(*s, 1, "p1", IgaPair("22222222", kSecretA))) == "pair");
+		CHECK(IgaRole(IgaSend(*s, 1, "p1", IgaPair(code, kSecretA))) == "pair");
+		CHECK(!s->HasSecret("p1"));
+		// Another connection still can.
+		CHECK(IgaChallenge(*s, 2, "p1") != "");
+		CHECK(IgaRole(IgaSend(*s, 2, "p1", IgaPair(code, kSecretA))) == "admin");
+		CHECK(s->HasSecret("p1"));
+		std::filesystem::remove(path);
+	}
+	{
+		// 5 wrong in total, across connections, voids the code.
+		IgaEnv e; e.path = path; e.admins = { "p1" };
+		auto s = MakeIga(e);
+		std::string code, err;
+		CHECK(s->IssueCode("p1", code, err));
+		for (uint64_t c = 1; c <= 5; ++c)
+		{
+			CHECK(IgaChallenge(*s, c, "p1") != "");
+			IgaSend(*s, c, "p1", IgaPair("22222222", kSecretA));
+		}
+		CHECK(IgaChallenge(*s, 9, "p1") != "");
+		CHECK(IgaRole(IgaSend(*s, 9, "p1", IgaPair(code, kSecretA))) == "pair");
+		CHECK(!s->HasSecret("p1"));
+		std::filesystem::remove(path);
+	}
+
+	// Pairing with a code stores the secret and writes the file; prove: valid, wrong, empty.
+	{
+		IgaEnv e; e.path = path; e.admins = { "p1" };
+		auto s = MakeIga(e);
+		std::string code, err;
+		CHECK(s->IssueCode("p1", code, err));
+		CHECK(IgaChallenge(*s, 1, "p1") != "");
+		CHECK(IgaRole(IgaSend(*s, 1, "p1", IgaPair(code, kSecretA))) == "admin");
+		CHECK(s->IsProven(1));
+		CHECK(s->HasSecret("p1"));
+		CHECK(std::filesystem::exists(path));
+		// One use.
+		CHECK(IgaChallenge(*s, 2, "p1") != "");
+		CHECK(IgaRole(IgaSend(*s, 2, "p1", IgaPair(code, kSecretB))) == "pair");
+		for (const std::string& line : e.audit)
+			CHECK(line.find(code) == std::string::npos && line.find(kSecretA) == std::string::npos);
+
+		const std::string sid = s->ServerId();
+		AdminWire::Message prove; prove.tag = Tag::Prove;
+		std::string nonce = IgaChallenge(*s, 3, "p1");
+		CHECK(!nonce.empty());
+		AdminCrypto::MakeProof(kSecretA, nonce, sid, prove.proof);
+		CHECK(IgaRole(IgaSend(*s, 3, "p1", prove)) == "admin");
+		CHECK(s->IsProven(3));
+
+		nonce = IgaChallenge(*s, 4, "p1");
+		AdminCrypto::MakeProof(kSecretB, nonce, sid, prove.proof);
+		CHECK(IgaRole(IgaSend(*s, 4, "p1", prove)) == "pair");
+		CHECK(!s->IsProven(4));
+
+		nonce = IgaChallenge(*s, 5, "p1");
+		prove.proof.clear();
+		CHECK(IgaRole(IgaSend(*s, 5, "p1", prove)) == "pair");
+		CHECK(!s->IsProven(5));
+
+		// A restart keeps the secret and the server id.
+		auto again = MakeIga(e);
+		CHECK(again->ServerId() == sid);
+		CHECK(again->HasSecret("p1"));
+		again.reset();
+
+		// Losing the Admin flag drops the secret and un-proves the connection.
+		e.admins.clear();
+		s->OnPlayersChanged();
+		CHECK(!s->HasSecret("p1"));
+		CHECK(!s->IsProven(1) && !s->IsProven(3));
+		CHECK(!MakeIga(e)->HasSecret("p1"));
+		std::filesystem::remove(path);
+	}
+
+	// Unpair.
+	{
+		IgaEnv e; e.path = path; e.admins = { "p1" };
+		auto s = MakeIga(e);
+		std::string code, err;
+		s->IssueCode("p1", code, err);
+		IgaChallenge(*s, 1, "p1");
+		IgaSend(*s, 1, "p1", IgaPair(code, kSecretA));
+		CHECK(s->Unpair("p1"));
+		CHECK(!s->HasSecret("p1") && !s->IsProven(1));
+		CHECK(!s->Unpair("p1"));
+		std::filesystem::remove(path);
+	}
+
+	// The claim shortcut belongs to the connection that claimed, not to the ID.
+	{
+		IgaEnv e; e.path = path;
+		auto s = MakeIga(e);
+		CHECK(IgaRole(IgaSend(*s, 1, "p1", IgaHello())) == "none");
+		CHECK(IgaRole(IgaSend(*s, 2, "p1", IgaHello())) == "none");
+		e.admins = { "p1" };
+		const auto out = s->OnClaimed(1, "p1");
+		CHECK(out.size() == 2);   // both silent connections with that ID get a challenge
+		// A second connection with the same ID cannot use the shortcut.
+		CHECK(IgaRole(IgaSend(*s, 2, "p1", IgaPair("", kSecretB))) == "pair");
+		CHECK(!s->IsProven(2) && !s->HasSecret("p1"));
+		// The claiming connection can, once.
+		CHECK(IgaRole(IgaSend(*s, 1, "p1", IgaPair("", kSecretA))) == "admin");
+		CHECK(s->IsProven(1) && s->HasSecret("p1"));
+		CHECK(IgaRole(IgaSend(*s, 1, "p1", IgaPair("", kSecretB))) == "pair");
+		std::filesystem::remove(path);
+	}
+	{
+		// Cleared on disconnect, on world end, and after 10 minutes.
+		IgaEnv e; e.path = path; e.admins = { "p1" };
+		auto s = MakeIga(e);
+		s->OnClaimed(1, "p1");
+		s->OnDisconnect(1);
+		CHECK(IgaChallenge(*s, 1, "p1") != "");   // a new connection that reuses the number
+		CHECK(IgaRole(IgaSend(*s, 1, "p1", IgaPair("", kSecretA))) == "pair");
+
+		s->OnClaimed(2, "p1");
+		s->OnWorldEnd();
+		CHECK(IgaChallenge(*s, 2, "p1") != "");
+		CHECK(IgaRole(IgaSend(*s, 2, "p1", IgaPair("", kSecretA))) == "pair");
+
+		s->OnClaimed(3, "p1");
+		e.now += 601;
+		CHECK(IgaChallenge(*s, 3, "p1") != "");
+		CHECK(IgaRole(IgaSend(*s, 3, "p1", IgaPair("", kSecretA))) == "pair");
+		CHECK(!s->HasSecret("p1"));
+		std::filesystem::remove(path);
+	}
+
+	// A non-admin gets one welcome none, then silence.
+	{
+		IgaEnv e; e.path = path;
+		auto s = MakeIga(e);
+		CHECK(IgaRole(IgaSend(*s, 1, "p9", IgaHello())) == "none");
+		CHECK(IgaSend(*s, 1, "p9", IgaHello()).empty());
+		CHECK(IgaSend(*s, 1, "p9", IgaPair("ABCDEFGH", kSecretA)).empty());
+		std::filesystem::remove(path);
+	}
+
+	// InGameAdmin=0: silent.
+	{
+		IgaEnv e; e.path = path; e.admins = { "p1" }; e.on = false;
+		auto s = MakeIga(e);
+		CHECK(IgaSend(*s, 1, "p1", IgaHello()).empty());
+		CHECK(IgaSend(*s, 2, "p9", IgaHello()).empty());
+		std::filesystem::remove(path);
+	}
+
+	// A hello with another protocol gets welcome role update.
+	{
+		IgaEnv e; e.path = path; e.admins = { "p1" };
+		auto s = MakeIga(e);
+		std::string wire;
+		AdminWire::Encode(IgaHello(), wire);
+		const size_t us = wire.find(AdminWire::kUS);
+		CHECK(us != std::string::npos && us + 1 < wire.size());
+		if (us != std::string::npos && us + 1 < wire.size()) wire[us + 1] = '9';
+		CHECK(IgaRole(IgaSendRaw(*s, 1, "p1", wire)) == "update");
+		std::filesystem::remove(path);
+	}
 }
 
 int main()
@@ -548,6 +819,7 @@ int main()
 		CHECK(unmatched.size() == 3 && unmatched[0] == "Other.x" && unmatched[1] == "Other.*" && unmatched[2] == "BetterCheats.nope");
 	}
 
+	InGameAdminTests();
 	std::printf("%d checks, %d failed\n", g_checks, g_failed);
 	return g_failed ? 1 : 0;
 }

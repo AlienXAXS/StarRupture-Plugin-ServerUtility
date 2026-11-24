@@ -6,6 +6,7 @@
 #include "../../host_rules/admin_claim.h"
 #include "../../host_rules/admin_ops.h"
 #include "../../host_rules/ini_file.h"
+#include "../../host_rules/ingame_admin.h"
 #include "../../host_rules/player_list.h"
 
 #include <sstream>
@@ -30,7 +31,9 @@ namespace Cmd_Player
 			"  admin add <id|number> [label]\n"
 			"  admin remove <id|number>\n"
 			"  admin clear                            take Admin off every entry\n"
-				"  admin code                             the claim code, while there is no admin\n";
+				"  admin code                             the claim code, while there is no admin\n"
+			"  admin pair <id|number>                 a one-time code (10 minutes) to pair that admin's in-game tool\n"
+			"  admin unpair <id|number>               forget that admin's in-game tool pairing\n";
 
 		using CmdArgs::NextWord;
 		using IniFile::Lower;
@@ -137,6 +140,25 @@ namespace Cmd_Player
 			if (sub == "code")
 				return AdminClaim::CodeReport();
 
+			if (sub == "pair" || sub == "unpair")
+			{
+				const std::string who = NextWord(rest);
+				if (who.empty()) return kAdminUsage;
+
+				std::string id, target;
+				if (!ResolveId(who, id, error, &target)) return Error(error);
+
+				if (sub == "unpair")
+					return InGameAdmin::Unpair(id) ? "Removed the in-game tool pairing for " + target + ".\n"
+					                               : Error("that player has no pairing");
+
+				// The code goes only into this reply, never into the log.
+				std::string code;
+				if (!InGameAdmin::IssueCode(id, code, error)) return Error(error);
+				return "Pairing code for " + target + ": " + code +
+				       "\nGood for 10 minutes, one use. The player types it into the in-game admin tool.\n";
+			}
+
 			if (sub == "add" || sub == "remove")
 			{
 				const std::string who = NextWord(rest);
@@ -167,7 +189,7 @@ namespace Cmd_Player
 		PluginCommands::Register("player", nullptr, "player [list|ids|set|remove|reload]",
 			"Show and edit the host's player list (admins and per-player exemptions)",
 			HandlePlayer);
-		PluginCommands::Register("admin", nullptr, "admin add|remove|clear|code",
+		PluginCommands::Register("admin", nullptr, "admin add|remove|clear|code|pair|unpair",
 			"Add or remove an admin in the player list",
 			HandleAdmin);
 	}

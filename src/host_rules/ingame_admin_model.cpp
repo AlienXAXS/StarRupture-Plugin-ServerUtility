@@ -7,6 +7,7 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 
 namespace InGameAdminModel
@@ -264,9 +265,11 @@ namespace InGameAdminModel
 				bool codeOk = false;
 				if (m.code.empty())
 				{
-					const auto cl = claimed_.find(playerId);
-					codeOk = cl != claimed_.end() && now < cl->second;
-					if (cl != claimed_.end() && now >= cl->second) claimed_.erase(cl);
+					// Only the connection that completed the claim, and only while it still
+					// reads as the same ID. An ID alone is identification, not proof.
+					const auto cl = claimed_.find(conn);
+					codeOk = cl != claimed_.end() && cl->second.id == playerId && now < cl->second.expires;
+					if (cl != claimed_.end() && now >= cl->second.expires) claimed_.erase(cl);
 					if (!codeOk) ++c.wrongCodes;
 				}
 				else
@@ -319,7 +322,7 @@ namespace InGameAdminModel
 
 				auto it = codes_.find(playerId);
 				if (it != codes_.end()) { ClaimModel::Wipe(it->second.code); codes_.erase(it); }
-				claimed_.erase(playerId);
+				EraseClaimedLocked(playerId);
 				UnproveIdLocked(playerId);   // a new secret replaces the old one everywhere
 				c.proven = true;
 				c.nonce.clear();
@@ -343,12 +346,14 @@ namespace InGameAdminModel
 	{
 		std::lock_guard<std::mutex> lk(mutex_);
 		conns_.erase(conn);
+		claimed_.erase(conn);
 	}
 
 	void Server::OnWorldEnd()
 	{
 		std::lock_guard<std::mutex> lk(mutex_);
 		conns_.clear();
+		claimed_.clear();
 	}
 
 	bool Server::IsProven(ConnId conn) const
@@ -428,7 +433,7 @@ namespace InGameAdminModel
 		}
 		auto it = codes_.find(playerId);
 		if (it != codes_.end()) { ClaimModel::Wipe(it->second.code); codes_.erase(it); did = true; }
-		claimed_.erase(playerId);
+		EraseClaimedLocked(playerId);
 		UnproveIdLocked(playerId);
 		if (did && env_.audit) env_.audit("[Admin] pairing for " + playerId + " removed (unpaired)");
 		return did;
@@ -442,7 +447,7 @@ namespace InGameAdminModel
 			std::lock_guard<std::mutex> lk(mutex_);
 			for (const auto& kv : secrets_) ids.push_back(kv.first);
 			for (const auto& kv : codes_) ids.push_back(kv.first);
-			for (const auto& kv : claimed_) ids.push_back(kv.first);
+			for (const auto& kv : claimed_) ids.push_back(kv.second.id);
 			for (const auto& kv : conns_) if (kv.second.proven) ids.push_back(kv.second.id);
 		}
 		std::sort(ids.begin(), ids.end());
@@ -465,13 +470,19 @@ namespace InGameAdminModel
 			}
 			auto it = codes_.find(id);
 			if (it != codes_.end()) { ClaimModel::Wipe(it->second.code); codes_.erase(it); }
-			claimed_.erase(id);
+			EraseClaimedLocked(id);
 			UnproveIdLocked(id);
 		}
 		if (changed) SaveLocked();
 	}
 
-	std::vector<Out> Server::OnClaimed(const std::string& playerId)
+	void Server::EraseClaimedLocked(const std::string& playerId)
+	{
+		for (auto it = claimed_.begin(); it != claimed_.end();)
+			it = it->second.id == playerId ? claimed_.erase(it) : std::next(it);
+	}
+
+	std::vector<Out> Server::OnClaimed(ConnId claimant, const std::string& playerId)
 	{
 		std::vector<Out> out;
 		if (!env_.enabled || !env_.enabled() || !Ready())
@@ -480,7 +491,8 @@ namespace InGameAdminModel
 		if (!admin) return out;
 
 		std::lock_guard<std::mutex> lk(mutex_);
-		claimed_[playerId] = (env_.now ? env_.now() : 0) + kCodeLifetimeSeconds;
+		if (claimant)
+			claimed_[claimant] = { playerId, (env_.now ? env_.now() : 0) + kCodeLifetimeSeconds };
 		for (auto& kv : conns_)
 		{
 			Conn& c = kv.second;

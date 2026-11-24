@@ -118,6 +118,12 @@
     <ClCompile Include="host_rules\admin_ops.cpp">
       <Filter>host_rules</Filter>
     </ClCompile>
+    <ClCompile Include="host_rules\ingame_admin.cpp">
+      <Filter>host_rules</Filter>
+    </ClCompile>
+    <ClCompile Include="host_rules\ingame_admin_model.cpp">
+      <Filter>host_rules</Filter>
+    </ClCompile>
     <ClCompile Include="host_rules\admin_ops_host.cpp">
       <Filter>host_rules</Filter>
     </ClCompile>
@@ -257,6 +263,12 @@
     </ClInclude>
     <ClInclude Include="admin\admin_request.h">
       <Filter>admin</Filter>
+    </ClInclude>
+    <ClInclude Include="host_rules\ingame_admin.h">
+      <Filter>host_rules</Filter>
+    </ClInclude>
+    <ClInclude Include="host_rules\ingame_admin_model.h">
+      <Filter>host_rules</Filter>
     </ClInclude>
     <ClInclude Include="host_rules\admin_ops.h">
       <Filter>host_rules</Filter>

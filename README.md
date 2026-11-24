@@ -93,6 +93,12 @@ To turn asking off, set `AdminPrompt=0` in `[Policy]` (`off`, `false` and `no` a
 AdminPrompt=0
 ```
 
+### In-game admin tool (server side)
+
+Admins can manage the server from the ServerUtility admin client in the game. The server half answers only players who have the Admin flag in the player list; anyone else gets one "no access" answer and then silence. To turn it off, set `InGameAdmin=0` in `[Policy]` of `HostRules.ini` (default on).
+
+An admin pairs the client once. Either the host runs `admin pair <id|number>` in RCON and gives the player the 8-character code it prints (one use, 10 minutes, 5 wrong tries per connection and 5 in total, then the code is void), or the player who has just claimed admin with the claim code above pairs on that same connection with no code. After pairing, the client proves a stored secret each session, and the secret is kept in `Plugins\ServerUtility\admin-pairing.txt`. `admin unpair <id|number>` forgets it, and so does taking the Admin flag away. The code is shown only in the RCON reply and is never written to the log.
+
 The admin panel has matching endpoints (`/rules/players`, below), but the panel is off in this build, so RCON is the way to manage the list for now. `Admin` and `ExemptVersion` players are skipped by the version removal.
 
 ### Host rules: switch mod features off for players
