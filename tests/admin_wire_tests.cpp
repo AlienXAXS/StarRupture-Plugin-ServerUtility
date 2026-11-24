@@ -1,6 +1,6 @@
 // Unit tests of the admin message codec.
 // No project file: from a Visual Studio developer prompt, in the repo root:
-//   cl /nologo /EHsc /std:c++17 /Isrc tests\admin_wire_tests.cpp src\admin_wire\admin_wire.cpp /Fe:admin_wire_tests.exe
+//   cl /nologo /EHsc /std:c++17 /Isrc tests\admin_wire_tests.cpp src\admin_wire\admin_wire.cpp src\admin_wire\admin_crypto.cpp /Fe:admin_wire_tests.exe
 //   admin_wire_tests.exe
 #include "admin_wire/admin_wire.h"
 #include "admin_wire/admin_crypto.h"
