@@ -864,9 +864,10 @@ int main()
 			CHECK(Apply(f.be, rcon, { op("rule.set", { "Codex.map", "unset" }) }).ok && f.model.rules.empty());
 			CHECK(!Apply(f.be, rcon, { op("rule.set", { "Codex.map", "maybe" }) }).ok);
 			CHECK(!Apply(f.be, rcon, { op("rule.set", { "nodot", "deny" }) }).ok);
-			// Host-rules validation (ValidName) still refuses a spaced mod name such as "Best Builder";
-			// another branch is fixing it. Flip this to expect success once that lands.
-			CHECK(!Apply(f.be, rcon, { op("rule.set", { "Best Builder.fast", "deny" }) }).ok);
+			// A mod name with a single inner space is accepted and round-trips.
+			CHECK(Apply(f.be, rcon, { op("rule.set", { "Best Builder.fast", "deny" }) }).ok);
+			CHECK(f.model.rules.size() == 1 && f.model.rules[0].plugin == "Best Builder" && f.model.rules[0].id == "fast" && f.model.rules[0].deny);
+			CHECK(Apply(f.be, rcon, { op("rule.set", { "Best Builder.fast", "unset" }) }).ok && f.model.rules.empty());
 			CHECK(!Apply(f.be, rcon, { op("rule.set", { "Codex.map" }) }).ok);
 			CHECK(Apply(f.be, rcon, { op("policy.default", { "deny" }) }).ok && f.model.defaultDeny);
 			CHECK(!Apply(f.be, rcon, { op("policy.default", { "sometimes" }) }).ok);
