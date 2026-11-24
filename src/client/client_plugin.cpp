@@ -3,6 +3,7 @@
 #include "plugin.h"
 #include "plugin_helpers.h"
 #include "client/admin_client.h"
+#include "client/admin_window.h"
 #include "admin_wire/admin_wire.h"
 
 #include <chrono>
@@ -111,6 +112,8 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 	// Fires at once when the server is already ready (hot reload).
 	self->hooks->Network->RegisterServerReadyCallback(self, &OnServerReady);
 
+	AdminWindow::Init(self);
+
 	LOG_INFO("Admin client initialising...");
 	return true;
 }
@@ -118,6 +121,7 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 __declspec(dllexport) void PluginShutdown()
 {
 	IPluginSelf* self = g_self;
+	if (self) AdminWindow::Shutdown(self);   // the panel reads g_client: unregister it first
 	if (self && self->hooks)
 	{
 		if (self->hooks->Network)
