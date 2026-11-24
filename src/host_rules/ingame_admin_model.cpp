@@ -223,7 +223,7 @@ namespace InGameAdminModel
 		const std::string who = name.empty() ? playerId : name;
 
 		{
-			std::lock_guard<std::mutex> lk(mutex_);
+			std::unique_lock<std::mutex> lk(mutex_);
 			Conn& c = conns_[conn];
 			if (c.silent)
 				return out;
@@ -291,7 +291,8 @@ namespace InGameAdminModel
 				{
 					c.proven = true;
 					out.push_back(Welcome(kRoleAdmin, revision));
-					goto sendSnapshot;
+					lk.unlock();   // the snapshot runs game-thread work, outside the model lock
+					return WithSnapshot(std::move(out));
 				}
 				if (env_.audit) env_.audit("[Admin] '" + who + "' proof failed");
 				out.push_back(Welcome(kRolePair, revision));
@@ -379,7 +380,8 @@ namespace InGameAdminModel
 				c.nonce.clear();
 				if (env_.audit) env_.audit("[Admin] '" + who + "' paired");
 				out.push_back(Welcome(kRoleAdmin, revision));
-				goto sendSnapshot;
+				lk.unlock();   // the snapshot runs game-thread work, outside the model lock
+				return WithSnapshot(std::move(out));
 			}
 
 			// Anything else is for a proven connection only.
@@ -413,13 +415,14 @@ namespace InGameAdminModel
 		if (m.tag == Tag::Snap)
 			return SnapshotMessages(m.sections);
 		return RunOps(playerId, who, m);
+	}
 
-	sendSnapshot:   // reached only after "welcome admin": the state follows it
-		{
-			const std::vector<std::string> snap = SnapshotMessages(AdminWire::kSectionAll);
-			out.insert(out.end(), snap.begin(), snap.end());
-			return out;
-		}
+	std::vector<std::string> Server::WithSnapshot(std::vector<std::string> out) const
+	{
+		// Follows "welcome admin": the full state.
+		const std::vector<std::string> snap = SnapshotMessages(AdminWire::kSectionAll);
+		out.insert(out.end(), snap.begin(), snap.end());
+		return out;
 	}
 
 	void Server::OnDisconnect(ConnId conn)

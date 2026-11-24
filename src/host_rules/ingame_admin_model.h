@@ -135,6 +135,7 @@ namespace InGameAdminModel
 		std::string Welcome(const char* role, uint32_t revision) const;
 		// snap-begin ... snap-end for a proven connection.
 		std::vector<std::string> SnapshotMessages(const std::string& sections) const;
+		std::vector<std::string> WithSnapshot(std::vector<std::string> out) const;
 		// A proven connection's ops message.
 		std::vector<std::string> RunOps(const std::string& playerId, const std::string& name, const AdminWire::Message& m) const;
 		void UnproveIdLocked(const std::string& id);
