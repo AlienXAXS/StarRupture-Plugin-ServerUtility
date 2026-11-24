@@ -1,5 +1,6 @@
 #include "ingame_admin_model.h"
 #include "claim_model.h"
+#include "ini_file.h"
 #include "../admin_wire/admin_wire.h"
 #include "../admin_wire/admin_crypto.h"
 
@@ -14,11 +15,7 @@ namespace InGameAdminModel
 {
 	namespace
 	{
-		std::string Lower(std::string s)
-		{
-			std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-			return s;
-		}
+		using IniFile::Lower;
 
 		bool Blank(const std::string& id)
 		{
@@ -91,24 +88,10 @@ namespace InGameAdminModel
 	bool Server::SaveLocked()
 	{
 		if (env_.storePath.empty()) return true;
-		namespace fs = std::filesystem;
-		std::error_code ec;
-		const fs::path target(env_.storePath);
-		if (target.has_parent_path()) fs::create_directories(target.parent_path(), ec);
-		fs::path tmp = target;
-		tmp += ".tmp";
-		{
-			std::ofstream out(tmp, std::ios::trunc);
-			if (!out) return false;
-			out << "serverid " << serverId_ << "\n";
-			for (const auto& kv : secrets_)
-				out << kv.first << " " << kv.second << "\n";
-			out.flush();
-			if (!out) { out.close(); fs::remove(tmp, ec); return false; }
-		}
-		fs::rename(tmp, target, ec);
-		if (ec) { fs::remove(tmp, ec); return false; }
-		return true;
+		std::string text = "serverid " + serverId_ + "\n";
+		for (const auto& kv : secrets_)
+			text += kv.first + " " + kv.second + "\n";
+		return IniFile::WriteTextFile(std::filesystem::path(env_.storePath).wstring(), text);
 	}
 
 	std::string Server::Welcome(const char* role, uint32_t revision) const
@@ -449,23 +432,6 @@ namespace InGameAdminModel
 		std::lock_guard<std::mutex> lk(mutex_);
 		const auto it = conns_.find(conn);
 		return it != conns_.end() && it->second.proven;
-	}
-
-	std::vector<ConnId> Server::ProvenConnections() const
-	{
-		std::vector<ConnId> out;
-		std::lock_guard<std::mutex> lk(mutex_);
-		for (const auto& kv : conns_)
-			if (kv.second.proven)
-				out.push_back(kv.first);
-		return out;
-	}
-
-	std::string Server::PlayerIdOf(ConnId conn) const
-	{
-		std::lock_guard<std::mutex> lk(mutex_);
-		const auto it = conns_.find(conn);
-		return it == conns_.end() ? std::string() : it->second.id;
 	}
 
 	bool Server::HasSecret(const std::string& playerId) const

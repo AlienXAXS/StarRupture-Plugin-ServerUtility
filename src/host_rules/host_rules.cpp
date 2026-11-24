@@ -415,9 +415,9 @@ namespace HostRules
 		if (!Load(error))
 			LOG_WARN("[HostRules] Rules not read: %s", error.c_str());
 
-		const std::wstring& iniPath = IniFile::Path();
-		if (!iniPath.empty())
-			KnownFeatures::Init((std::filesystem::path(iniPath).parent_path().parent_path() / L"ServerUtility" / L"known-features.txt").wstring());
+		const std::wstring featuresPath = IniFile::DataPath(L"known-features.txt");
+		if (!featuresPath.empty())
+			KnownFeatures::Init(featuresPath);
 
 #if PLUGIN_INTERFACE_VERSION >= 79
 		auto* hooks = GetHooks();

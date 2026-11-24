@@ -101,6 +101,22 @@ namespace InGameAdmin
 				reinterpret_cast<const uint8_t*>(message.data()), message.size());
 		}
 
+		// Game thread. Looks the controller up again; nothing is sent when it is gone.
+		bool SendToConnection(ConnId conn, const std::string& message)
+		{
+			ObjectRef<SDK::APlayerController> ref;
+			{
+				std::lock_guard<std::mutex> lk(g_mutex);
+				const auto it = std::find_if(g_conns.begin(), g_conns.end(), [&](const Connection& c) { return c.id == conn; });
+				if (it == g_conns.end()) return false;
+				ref = it->ref;
+			}
+			SDK::APlayerController* pc = ref.Get();
+			if (!pc) return false;
+			SendRaw(pc, message);
+			return true;
+		}
+
 		constexpr int kMaxControllers = 128;
 
 		std::string FlagsText(const PlayerList::Entry& e)
@@ -283,10 +299,7 @@ namespace InGameAdmin
 
 		std::string StorePath()
 		{
-			const std::wstring& iniPath = IniFile::Path();
-			if (iniPath.empty())
-				return std::string();
-			return (std::filesystem::path(iniPath).parent_path().parent_path() / L"ServerUtility" / L"admin-pairing.txt").string();
+			return std::filesystem::path(IniFile::DataPath(L"admin-pairing.txt")).string();
 		}
 	}
 
@@ -418,21 +431,5 @@ namespace InGameAdmin
 				}
 		}
 		if (gone) model->OnDisconnect(gone);
-	}
-
-	// Game thread. Looks the controller up again; nothing is sent when it is gone.
-	bool SendToConnection(ConnId conn, const std::string& message)
-	{
-		ObjectRef<SDK::APlayerController> ref;
-		{
-			std::lock_guard<std::mutex> lk(g_mutex);
-			const auto it = std::find_if(g_conns.begin(), g_conns.end(), [&](const Connection& c) { return c.id == conn; });
-			if (it == g_conns.end()) return false;
-			ref = it->ref;
-		}
-		SDK::APlayerController* pc = ref.Get();
-		if (!pc) return false;
-		SendRaw(pc, message);
-		return true;
 	}
 }

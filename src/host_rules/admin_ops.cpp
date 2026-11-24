@@ -1,4 +1,5 @@
 #include "admin_ops.h"
+#include "ini_file.h"
 
 #include <algorithm>
 #include <atomic>
@@ -14,18 +15,8 @@ namespace
 	std::vector<std::pair<int, AdminOps::Listener>> g_listeners;
 	int                                          g_nextHandle = 1;
 
-	std::string Lower(std::string s)
-	{
-		for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-		return s;
-	}
-
-	std::string Trim(const std::string& s)
-	{
-		const size_t a = s.find_first_not_of(" \t\r\n");
-		if (a == std::string::npos) return {};
-		return s.substr(a, s.find_last_not_of(" \t\r\n") - a + 1);
-	}
+	using IniFile::Lower;
+	using IniFile::Trim;
 
 	// Text that goes into a log line or an error: no line breaks or control
 	// characters, so a name or reason cannot start a line of its own.

@@ -1,4 +1,5 @@
 #include "admin_wire/admin_wire.h"
+#include "host_rules/claim_model.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -87,7 +88,7 @@ namespace
 	bool IsPairCode(const std::string& s)
 	{
 		if (s.size() > 8) return false;
-		for (char c : s) if (!std::strchr("23456789ABCDEFGHJKMNPQRSTUVWXYZ", c) || !c) return false;
+		for (char c : s) if (!std::strchr(ClaimModel::kAlphabet, c) || !c) return false;
 		return true;
 	}
 

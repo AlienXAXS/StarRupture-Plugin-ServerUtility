@@ -6,6 +6,7 @@
 #include "host_rules/claim_model.h"
 #include "host_rules/admin_ops.h"
 #include "host_rules/known_features.h"
+#include "host_rules/ini_file.h"
 #include "host_rules/player_list.h"
 #include "admin/url_match.h"
 #include "admin/admin_json.h"
@@ -50,7 +51,7 @@ namespace
 		bool on = true;
 		std::vector<std::string> audit;
 		std::string path;
-		// SA3b: the state a snapshot carries and what a batch of ops comes to. Unset = none.
+		// The state an in-game admin snapshot carries and what a batch of ops comes to. Unset = none.
 		std::function<AdminWire::Snapshot()> snapshot;
 		std::function<InGameAdminModel::OpsOutcome(const std::string&, const std::string&,
 		                                           const std::vector<AdminWire::Op>&, uint32_t)> runOps;
@@ -1188,7 +1189,7 @@ int main()
 		full.Merge(rep("Plug", "id1", "2.0.1", "b1", true, "A title with spaces"), d1);
 		full.Merge(rep("Plug", "id1", "2.0.1", "b2", true), d2);
 		full.Merge(rep("Plug", "id2", "", "", false), d2);
-		CHECK(SaveFile(path, full.Serialize()));
+		CHECK(IniFile::WriteTextFile(path, full.Serialize()));
 		CHECK(!std::filesystem::exists(dir / "known-features.txt.tmp"));
 		std::string back;
 		CHECK(LoadFile(path, back));
@@ -1196,7 +1197,7 @@ int main()
 		CHECK(loaded.Parse(back) == 0);
 		CHECK(loaded.Serialize() == full.Serialize() && loaded.Size() == 2);
 		CHECK(loaded.Entries()[0].offBuilds.size() == 2 && loaded.Entries()[0].lastSeen == d2 && loaded.Entries()[0].title == "A title with spaces");
-		CHECK(SaveFile(path, loaded.Serialize()));   // overwrites an existing file
+		CHECK(IniFile::WriteTextFile(path, loaded.Serialize()));   // overwrites an existing file
 		std::filesystem::remove_all(dir);
 		std::string none;
 		CHECK(!LoadFile(path, none));

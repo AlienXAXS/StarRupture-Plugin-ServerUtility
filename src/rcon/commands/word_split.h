@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 // Taking one word off the front of a console command's arguments. A word ends
 // at a space, except inside double quotes, so a mod name with a space is typed
@@ -28,5 +29,19 @@ namespace WordSplit
 		const size_t b = rest.find_first_not_of(' ');
 		rest.erase(0, b == std::string::npos ? rest.size() : b);
 		return word;
+	}
+
+	// "<name>=a;b" for a flags text, or <name>="a b.x;c" when a key holds a
+	// space so it stays one word; empty when there are no keys.
+	inline std::string SectionsFlag(const char* name, const std::vector<std::string>& keys)
+	{
+		std::string list;
+		for (const std::string& s : keys)
+		{
+			if (!list.empty()) list += ';';
+			list += s;
+		}
+		if (list.empty()) return std::string();
+		return std::string(name) + "=" + (list.find(' ') == std::string::npos ? list : "\"" + list + "\"");
 	}
 }

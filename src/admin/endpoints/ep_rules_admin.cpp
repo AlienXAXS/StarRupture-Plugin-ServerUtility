@@ -93,16 +93,8 @@ namespace
 				continue;
 			++reported;
 
-			std::istringstream lines(text);
-			std::string line;
-			bool first = true;
-			while (std::getline(lines, line))
-			{
-				if (first) { first = false; continue; }   // loader=<tag> interface=<n>
-				const size_t eq = line.find('=');
-				if (eq != std::string::npos && eq > 0)
-					++listedBy[line.substr(0, eq)];
-			}
+			for (const KnownFeatures::Report& r : KnownFeatures::ParseReportText(text, std::string()))
+				++listedBy[r.plugin + "." + r.id];
 		}
 
 		std::ostringstream json;

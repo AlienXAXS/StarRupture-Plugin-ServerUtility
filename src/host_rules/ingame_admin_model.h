@@ -25,7 +25,6 @@ namespace InGameAdminModel
 	constexpr int    kMaxWrongPerCode       = 5;
 	constexpr double kCodeLifetimeSeconds   = 600.0;   // 10 minutes
 	constexpr double kNonceLifetimeSeconds  = 30.0;    // a challenge is good for one proof, this long
-	constexpr size_t kCodeLength            = 8;
 	constexpr double kOpsPerSecond          = 20;   // refill rate per connection: one token per op, one per other message
 	constexpr double kOpsBurst              = 100;  // bucket size: at least the ops one packet can hold
 
@@ -83,8 +82,6 @@ namespace InGameAdminModel
 		// True when the connection proved its secret (or paired) this session and
 		// its server-read ID still has the Admin flag as of the last check.
 		bool IsProven(ConnId conn) const;
-		std::vector<ConnId> ProvenConnections() const;
-		std::string PlayerIdOf(ConnId conn) const;
 
 		// RCON `admin pair`: a one-time code for this ID. False with a reason when
 		// the ID has no Admin flag. Any thread.

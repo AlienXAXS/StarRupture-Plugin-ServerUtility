@@ -10,6 +10,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
+#include <fstream>
 
 namespace
 {
@@ -136,6 +138,35 @@ namespace IniFile
 			DeleteFileW(tmp.c_str());
 			return false;
 		}
+		return true;
+	}
+
+	std::wstring DataPath(const wchar_t* name)
+	{
+		const std::wstring& iniPath = Path();
+		if (iniPath.empty()) return std::wstring();
+		return (std::filesystem::path(iniPath).parent_path().parent_path() / L"ServerUtility" / name).wstring();
+	}
+
+	bool WriteTextFile(const std::wstring& path, const std::string& text)
+	{
+		if (path.empty()) return false;
+		namespace fs = std::filesystem;
+		std::error_code ec;
+		const fs::path target(path);
+		if (target.has_parent_path()) fs::create_directories(target.parent_path(), ec);
+
+		fs::path temp = target;
+		temp += L".tmp";
+		{
+			std::ofstream f(temp, std::ios::binary | std::ios::trunc);
+			if (!f) return false;
+			f.write(text.data(), static_cast<std::streamsize>(text.size()));
+			f.flush();
+			if (!f) { f.close(); fs::remove(temp, ec); return false; }
+		}
+		fs::rename(temp, target, ec);
+		if (ec) { fs::remove(temp, ec); return false; }
 		return true;
 	}
 

@@ -1,4 +1,5 @@
 #include "rules_model.h"
+#include "ini_file.h"
 
 #include <algorithm>
 #include <cctype>
@@ -13,18 +14,8 @@ namespace RulesModel
 		constexpr size_t kMaxPluginNameBytes = 64;
 		constexpr int    kMaxVersionDigits = 9;   // keeps each number inside 32 bits
 
-		std::string Lower(std::string s)
-		{
-			std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-			return s;
-		}
-
-		std::string Trim(const std::string& s)
-		{
-			const size_t a = s.find_first_not_of(" \t\r\n");
-			if (a == std::string::npos) return {};
-			return s.substr(a, s.find_last_not_of(" \t\r\n") - a + 1);
-		}
+		using IniFile::Lower;
+		using IniFile::Trim;
 
 		bool HasControl(const std::string& s)
 		{

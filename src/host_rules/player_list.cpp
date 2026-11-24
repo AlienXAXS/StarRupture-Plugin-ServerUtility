@@ -190,16 +190,10 @@ namespace PlayerList
 
 	std::string SectionsFlag(const char* name, const std::vector<std::string>& keys)
 	{
-		std::string list;
+		std::vector<std::string> valid;
 		for (const std::string& s : keys)
-		{
-			if (!RulesModel::ValidSectionKey(s)) continue;   // never write a key that could break the line
-			if (!list.empty()) list += ';';
-			list += s;
-		}
-		if (list.empty()) return std::string();
-		// A key with a space (a mod name like "Best Builder") needs the quotes to stay one word.
-		return std::string(name) + "=" + (list.find(' ') == std::string::npos ? list : "\"" + list + "\"");
+			if (RulesModel::ValidSectionKey(s)) valid.push_back(s);   // never write a key that could break the line
+		return WordSplit::SectionsFlag(name, valid);
 	}
 
 	std::string FormatLine(const Entry& e)

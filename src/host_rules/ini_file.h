@@ -12,6 +12,10 @@ namespace IniFile
 	// <folder of this DLL>\config\HostRules.ini; empty when the folder is unknown.
 	const std::wstring& Path();
 
+	// Plugins\ServerUtility\<name>, where the plugin keeps
+	// its own data files; empty when the folder is unknown.
+	std::wstring DataPath(const wchar_t* name);
+
 	// Held by a module for the whole read-modify-write of the file, so two
 	// modules never write over each other's change.
 	std::mutex& FileMutex();
@@ -25,6 +29,11 @@ namespace IniFile
 	// Write the lines to a temp file, then rename it over the file. False when
 	// the file could not be written (the old file is then untouched).
 	bool WriteLines(const std::wstring& path, const std::vector<std::string>& lines, bool crlf);
+
+	// Write text to path through a temp file renamed over it, creating the
+	// folders on the way. False when it could not be written (the old file is
+	// then untouched).
+	bool WriteTextFile(const std::wstring& path, const std::string& text);
 
 	// Replace the body of [name]: the old section's comment and blank lines are
 	// kept, then body follows. A missing section is added at the end.

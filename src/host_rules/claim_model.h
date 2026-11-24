@@ -11,7 +11,7 @@
 namespace ClaimModel
 {
 	// Letters and digits a person can tell apart: no 0, O, 1, I or L.
-	extern const char* const kAlphabet;
+	inline constexpr char    kAlphabet[]   = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 	constexpr size_t         kAlphabetSize = 31;
 	constexpr size_t         kCodeLength   = 8;
 

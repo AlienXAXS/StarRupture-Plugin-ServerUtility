@@ -1,6 +1,7 @@
 #include "known_features.h"
 
 #include "rules_model.h"
+#include "ini_file.h"
 
 #include <algorithm>
 #include <cctype>
@@ -20,11 +21,7 @@ namespace KnownFeatures
 		const char* const kHeader = "known-features 1";
 		const char* const kUnknownBuild = "unknown";
 
-		std::string Lower(std::string s)
-		{
-			std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-			return s;
-		}
+		using IniFile::Lower;
 
 		// One line, no tab: what the file format needs.
 		std::string Clean(const std::string& s)
@@ -240,28 +237,6 @@ namespace KnownFeatures
 		return skipped;
 	}
 
-	bool SaveFile(const std::wstring& path, const std::string& text)
-	{
-		if (path.empty()) return false;
-		namespace fs = std::filesystem;
-		std::error_code ec;
-		const fs::path target(path);
-		fs::create_directories(target.parent_path(), ec);
-
-		fs::path temp = target;
-		temp += L".tmp";
-		{
-			std::ofstream f(temp, std::ios::binary | std::ios::trunc);
-			if (!f) return false;
-			f.write(text.data(), static_cast<std::streamsize>(text.size()));
-			f.flush();
-			if (!f) { f.close(); fs::remove(temp, ec); return false; }
-		}
-		fs::rename(temp, target, ec);
-		if (ec) { fs::remove(temp, ec); return false; }
-		return true;
-	}
-
 	bool LoadFile(const std::wstring& path, std::string& text)
 	{
 		text.clear();
@@ -310,7 +285,7 @@ namespace KnownFeatures
 				g_dirty = false;
 				g_debounce.Wrote(nowMs);
 			}
-			if (!SaveFile(g_path, text))
+			if (!IniFile::WriteTextFile(g_path, text))
 			{
 				std::lock_guard<std::mutex> lk(g_mutex);
 				g_dirty = true;   // tried again after the next interval

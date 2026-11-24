@@ -6,8 +6,6 @@
 
 namespace ClaimModel
 {
-	const char* const kAlphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
-
 	namespace
 	{
 		constexpr size_t kMaxTyped = 64;                       // what the loader hands over at most

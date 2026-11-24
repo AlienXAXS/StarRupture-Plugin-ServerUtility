@@ -28,7 +28,4 @@ namespace InGameAdmin
 
 	// [Policy] InGameAdmin (default on).
 	bool Enabled();
-
-	// Sending to one connection (game thread).
-	bool SendToConnection(InGameAdminModel::ConnId conn, const std::string& message);
 }

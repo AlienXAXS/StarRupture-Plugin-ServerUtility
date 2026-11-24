@@ -23,20 +23,6 @@ namespace AdminView
 		return r;
 	}
 
-	static std::string Join(const std::vector<std::string>& v, char sep)
-	{
-		std::string r;
-		for (size_t i = 0; i < v.size(); ++i) { if (i) r += sep; r += v[i]; }
-		return r;
-	}
-
-	// sections=A;B, quoted when a key has a space, as the server writes it.
-	static std::string SectionsFlag(const std::vector<std::string>& keys)
-	{
-		const std::string list = Join(keys, ';');
-		return "sections=" + (list.find(' ') == std::string::npos ? list : "\"" + list + "\"");
-	}
-
 	// Applies the tokens of one flags text to f (delta semantics, as the server does).
 	static void ApplyTokens(PlayerFlags& f, const std::string& text)
 	{
@@ -78,7 +64,7 @@ namespace AdminView
 		if (f.admin) add("admin");
 		if (f.exemptVersion) add("exemptversion");
 		if (f.exemptRules) add("exemptrules");
-		if (!f.sections.empty()) add(SectionsFlag(f.sections));
+		if (!f.sections.empty()) add(WordSplit::SectionsFlag("sections", f.sections));
 		if (!f.label.empty()) add("label=" + f.label);
 		return r;
 	}
@@ -90,7 +76,7 @@ namespace AdminView
 		add(f.admin ? "admin" : "-admin");
 		add(f.exemptVersion ? "exemptversion" : "-exemptversion");
 		add(f.exemptRules ? "exemptrules" : "-exemptrules");
-		add(f.sections.empty() ? std::string("-sections") : SectionsFlag(f.sections));
+		add(f.sections.empty() ? std::string("-sections") : WordSplit::SectionsFlag("sections", f.sections));
 		return r;
 	}
 

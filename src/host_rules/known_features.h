@@ -78,8 +78,6 @@ namespace KnownFeatures
 		uint64_t m_lastMs = 0;
 	};
 
-	// Whole file: temp file, then rename over it. False when it could not be written.
-	bool SaveFile(const std::wstring& path, const std::string& text);
 	// False when the file does not exist or could not be read (text left empty).
 	bool LoadFile(const std::wstring& path, std::string& text);
 
