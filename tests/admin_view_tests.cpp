@@ -53,6 +53,16 @@ int main()
 		CHECK(FormatWireFlags(none) == "-admin -exemptversion -exemptrules -sections");
 		CHECK(ParseFlags("sections=A.*").sections.size() == 1);
 		CHECK(ParseFlags("admin -sections").sections.empty());
+		// A key with a space travels quoted and survives parse, popup edit and write.
+		PlayerFlags sp = ParseFlags("admin sections=\"Best Builder.x;Other.y\" label=Big Boss");
+		CHECK(sp.sections.size() == 2 && sp.sections[0] == "Best Builder.x" && sp.sections[1] == "Other.y");
+		CHECK(sp.label == "Big Boss");
+		CHECK(FormatFlags(sp) == "admin sections=\"Best Builder.x;Other.y\" label=Big Boss");
+		sp.sections.push_back("Third.z");
+		CHECK(FormatWireFlags(sp) == "admin -exemptversion -exemptrules sections=\"Best Builder.x;Other.y;Third.z\"");
+		CHECK(FormatWireFlags(ParseFlags(FormatWireFlags(sp))).find("\"Best Builder.x;Other.y;Third.z\"") != std::string::npos);
+		PlayerFlags plain = ParseFlags("sections=A.x;B.y");
+		CHECK(FormatWireFlags(plain).find("sections=A.x;B.y") != std::string::npos);
 	}
 
 	// Effective snapshot: rules, policy, minimums.

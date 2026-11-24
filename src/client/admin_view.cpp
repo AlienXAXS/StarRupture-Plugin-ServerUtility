@@ -4,6 +4,8 @@
 #include <cctype>
 #include <set>
 
+#include "rcon/commands/word_split.h"
+
 using namespace AdminWire;
 
 namespace AdminView
@@ -28,23 +30,29 @@ namespace AdminView
 		return r;
 	}
 
+	// sections=A;B, quoted when a key has a space, as the server writes it.
+	static std::string SectionsFlag(const std::vector<std::string>& keys)
+	{
+		const std::string list = Join(keys, ';');
+		return "sections=" + (list.find(' ') == std::string::npos ? list : "\"" + list + "\"");
+	}
+
 	// Applies the tokens of one flags text to f (delta semantics, as the server does).
 	static void ApplyTokens(PlayerFlags& f, const std::string& text)
 	{
-		size_t pos = 0;
-		while (pos < text.size())
+		std::string rest = text;
+		for (;;)
 		{
-			while (pos < text.size() && text[pos] == ' ') ++pos;
-			if (pos >= text.size()) break;
-			if (text.compare(pos, 6, "label=") == 0)
+			const size_t a = rest.find_first_not_of(' ');
+			if (a == std::string::npos) break;
+			rest.erase(0, a);
+			if (rest.compare(0, 6, "label=") == 0)
 			{
-				f.label = text.substr(pos + 6);   // runs to the end
+				f.label = rest.substr(6);   // runs to the end
 				return;
 			}
-			size_t end = text.find(' ', pos);
-			if (end == std::string::npos) end = text.size();
-			const std::string tok = text.substr(pos, end - pos);
-			pos = end;
+			// A key with a space is sent as sections="Best Builder.x;Other.y"; TakeWord drops the quotes.
+			const std::string tok = WordSplit::TakeWord(rest);
 			if (tok == "admin") f.admin = true;
 			else if (tok == "-admin") f.admin = false;
 			else if (tok == "exemptversion") f.exemptVersion = true;
@@ -70,7 +78,7 @@ namespace AdminView
 		if (f.admin) add("admin");
 		if (f.exemptVersion) add("exemptversion");
 		if (f.exemptRules) add("exemptrules");
-		if (!f.sections.empty()) add("sections=" + Join(f.sections, ';'));
+		if (!f.sections.empty()) add(SectionsFlag(f.sections));
 		if (!f.label.empty()) add("label=" + f.label);
 		return r;
 	}
@@ -82,7 +90,7 @@ namespace AdminView
 		add(f.admin ? "admin" : "-admin");
 		add(f.exemptVersion ? "exemptversion" : "-exemptversion");
 		add(f.exemptRules ? "exemptrules" : "-exemptrules");
-		add(f.sections.empty() ? std::string("-sections") : "sections=" + Join(f.sections, ';'));
+		add(f.sections.empty() ? std::string("-sections") : SectionsFlag(f.sections));
 		return r;
 	}
 
