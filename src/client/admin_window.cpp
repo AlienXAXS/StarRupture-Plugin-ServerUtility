@@ -43,6 +43,18 @@ namespace
 		char message[512] = {};
 		std::string messageSynced;
 		char modFilter[64] = {};
+
+		// Players tab.
+		char playerFilter[64] = {};
+		char addId[40] = {};
+		char kickReason[128] = {};
+		std::string kickId, kickName;
+		bool openKick = false;
+
+		// Versions tab. Each box is re-filled only when its effective value changes.
+		struct MinBox { char text[64] = {}; std::string synced; bool init = false; };
+		MinBox loaderMin;
+		std::map<std::string, MinBox> modMin;
 	};
 	UiState g_ui;
 
@@ -270,6 +282,211 @@ namespace
 		DrawUnknownRules(f);
 	}
 
+	// A flag checkbox for one player: stages the full wanted flag state.
+	void DrawPlayerFlag(Frame& f, const PlayerInfo& p, AdminView::PlayerFlags flags, bool AdminView::PlayerFlags::* member, const char* id)
+	{
+		bool value = flags.*member;
+		if (f.ui->Checkbox(id, &value))
+		{
+			flags.*member = value;
+			Edit(f, MakeOp("player.set", { p.id, AdminView::FormatWireFlags(flags) }));
+		}
+	}
+
+	void DrawPlayerSections(Frame& f, const PlayerInfo& p, AdminView::PlayerFlags flags)
+	{
+		IModLoaderImGui* ui = f.ui;
+		char label[32];
+		if (flags.sections.empty()) std::snprintf(label, sizeof(label), "All##sections");
+		else std::snprintf(label, sizeof(label), "%zu chosen##sections", flags.sections.size());
+		if (ui->SmallButton(label)) ui->OpenPopup("##sectionspopup", 0);
+		if (ui->BeginPopup("##sectionspopup", 0))
+		{
+			ui->TextDisabled("Sections this admin may change. None ticked means all.");
+			for (const std::string& key : AdminView::SectionKeys(f.eff))
+			{
+				bool on = false;
+				for (const std::string& s : flags.sections) if (s == key) on = true;
+				if (!ui->Checkbox(key.c_str(), &on)) continue;
+				AdminView::PlayerFlags next = flags;
+				next.sections.clear();
+				for (const std::string& s : flags.sections) if (s != key) next.sections.push_back(s);
+				if (on) next.sections.push_back(key);
+				Edit(f, MakeOp("player.set", { p.id, AdminView::FormatWireFlags(next) }));
+			}
+			ui->EndPopup();
+		}
+	}
+
+	void DrawPlayerMods(Frame& f, const PlayerInfo& p)
+	{
+		IModLoaderImGui* ui = f.ui;
+		char label[32];
+		std::snprintf(label, sizeof(label), "%zu mods##mods", p.mods.size());
+		ui->BeginDisabled(p.mods.empty());
+		if (ui->SmallButton(label)) ui->OpenPopup("##modspopup", 0);
+		ui->EndDisabled();
+		if (ui->BeginPopup("##modspopup", 0))
+		{
+			for (const PlayerMod& m : p.mods)
+				ui->Text((m.name + (m.version.empty() ? "" : " " + m.version)).c_str());
+			ui->EndPopup();
+		}
+	}
+
+	void DrawPlayerRow(Frame& f, const PlayerInfo& p)
+	{
+		IModLoaderImGui* ui = f.ui;
+		const AdminView::PlayerFlags flags = AdminView::ParseFlags(p.flags);
+		const bool changed = AdminView::PlayerChanged(f.view.snapshot, f.eff, p.id);
+		ui->TableNextRow(0, 0.0f);
+		ui->PushIDStr(p.id.c_str());
+		ui->TableNextColumn();
+		ui->AlignTextToFramePadding();
+		std::string name = p.name.empty() ? p.id : p.name;
+		if (p.online) name += " (online)";
+		ui->Text(Marked(changed, name).c_str());
+		ui->TableNextColumn();
+		DrawPlayerFlag(f, p, flags, &AdminView::PlayerFlags::admin, "##admin");
+		ui->TableNextColumn();
+		DrawPlayerFlag(f, p, flags, &AdminView::PlayerFlags::exemptVersion, "##exemptversion");
+		ui->TableNextColumn();
+		DrawPlayerFlag(f, p, flags, &AdminView::PlayerFlags::exemptRules, "##exemptrules");
+		ui->TableNextColumn();
+		DrawPlayerSections(f, p, flags);
+		ui->TableNextColumn();
+		DrawPlayerMods(f, p);
+		ui->TableNextColumn();
+		if (p.online && ui->SmallButton("Kick"))
+		{
+			g_ui.kickId = p.id;
+			g_ui.kickName = p.name.empty() ? p.id : p.name;
+			g_ui.kickReason[0] = '\0';
+			g_ui.openKick = true;
+		}
+		if (p.online) ui->SameLine(0, -1);
+		if (ui->SmallButton("Remove")) Edit(f, MakeOp("player.remove", { p.id }));
+		ui->PopID();
+	}
+
+	void DrawKickPopup(Frame& f)
+	{
+		IModLoaderImGui* ui = f.ui;
+		if (g_ui.openKick) { ui->OpenPopup("Kick player", 0); g_ui.openKick = false; }
+		if (!ui->BeginPopupModal("Kick player", nullptr, kWindowAlwaysAutoResize)) return;
+		ui->Text(("Kick " + g_ui.kickName + " from the server.").c_str());
+		ui->InputTextWithHint("##kickreason", "Reason (optional)", g_ui.kickReason, sizeof(g_ui.kickReason));
+		if (ui->Button("Kick"))
+		{
+			f.client->Kick(g_ui.kickId, g_ui.kickReason);
+			ui->CloseCurrentPopup();
+		}
+		ui->SameLine(0, -1);
+		if (ui->Button("Cancel")) ui->CloseCurrentPopup();
+		ui->EndPopup();
+	}
+
+	void DrawPlayersTab(Frame& f)
+	{
+		IModLoaderImGui* ui = f.ui;
+		ui->SetNextItemWidth(-FLT_MIN);
+		ui->InputTextWithHint("##playerfilter", "Filter players", g_ui.playerFilter, sizeof(g_ui.playerFilter));
+		const std::vector<size_t> order = AdminView::PlayerOrder(f.eff, g_ui.playerFilter);
+		if (order.empty())
+			ui->TextDisabled(f.eff.players.empty() ? "No players known yet." : "No player matches the filter.");
+		else if (ui->BeginTable("##players", 7, kTableFlags))
+		{
+			ui->TableSetupColumn("Player", kColumnWidthStretch, 3.0f);
+			ui->TableSetupColumn("Admin", kColumnWidthStretch, 1.0f);
+			ui->TableSetupColumn("Exempt version", kColumnWidthStretch, 1.5f);
+			ui->TableSetupColumn("Exempt rules", kColumnWidthStretch, 1.5f);
+			ui->TableSetupColumn("Sections", kColumnWidthStretch, 2.0f);
+			ui->TableSetupColumn("Mods", kColumnWidthStretch, 1.5f);
+			ui->TableSetupColumn("Actions", kColumnWidthStretch, 2.0f);
+			ui->TableHeadersRow();
+			for (size_t i : order) DrawPlayerRow(f, f.eff.players[i]);
+			ui->EndTable();
+		}
+		ui->Separator();
+		ui->AlignTextToFramePadding();
+		ui->Text("Add a player by ID");
+		ui->SameLine(0, -1);
+		ui->InputText("##addid", g_ui.addId, sizeof(g_ui.addId));
+		ui->SameLine(0, -1);
+		ui->BeginDisabled(g_ui.addId[0] == '\0');
+		if (ui->Button("Add"))
+		{
+			Edit(f, MakeOp("player.set", { g_ui.addId, "-admin -exemptversion -exemptrules -sections" }));
+			g_ui.addId[0] = '\0';
+		}
+		ui->EndDisabled();
+		DrawKickPopup(f);
+	}
+
+	// A minimum-version row: text box, Set and Off.
+	void DrawMinEditor(Frame& f, UiState::MinBox& box, const std::string& eff)
+	{
+		IModLoaderImGui* ui = f.ui;
+		if (!box.init || eff != box.synced)
+		{
+			std::snprintf(box.text, sizeof(box.text), "%s", eff.c_str());
+			box.synced = eff;
+			box.init = true;
+		}
+		ui->SetNextItemWidth(-FLT_MIN);
+		ui->InputTextWithHint("##min", "Off", box.text, sizeof(box.text));
+	}
+
+	void MinButtons(Frame& f, UiState::MinBox& box, const std::string& plugin)
+	{
+		IModLoaderImGui* ui = f.ui;
+		auto stage = [&](const std::string& value) {
+			if (plugin.empty()) Edit(f, MakeOp("min.loader", { value }));
+			else Edit(f, MakeOp("min.mod", { plugin, value }));
+		};
+		ui->BeginDisabled(box.text[0] == '\0');
+		if (ui->SmallButton("Set")) stage(box.text);
+		ui->EndDisabled();
+		ui->SameLine(0, -1);
+		if (ui->SmallButton("Off")) stage("off");
+	}
+
+	void DrawVersionsTab(Frame& f)
+	{
+		IModLoaderImGui* ui = f.ui;
+		ui->TextWrapped("Players below a minimum are refused. A mod's minimum may be a version or \"wire\" (the server's own version of it). Off removes the minimum.");
+		ui->Separator();
+		ui->AlignTextToFramePadding();
+		ui->Text(Marked(AdminView::MinChanged(f.view.snapshot, f.eff, std::string()), "Loader minimum").c_str());
+		ui->PushIDStr("##loadermin");
+		DrawMinEditor(f, g_ui.loaderMin, AdminView::MinValue(f.eff, std::string()));
+		MinButtons(f, g_ui.loaderMin, std::string());
+		ui->PopID();
+		ui->Separator();
+		const std::vector<std::string> plugins = AdminView::MinPlugins(f.eff);
+		if (plugins.empty()) { ui->TextDisabled("The server lists no mods."); return; }
+		if (!ui->BeginTable("##mins", 3, kTableFlags)) return;
+		ui->TableSetupColumn("Mod", kColumnWidthStretch, 3.0f);
+		ui->TableSetupColumn("Minimum", kColumnWidthStretch, 3.0f);
+		ui->TableSetupColumn("Actions", kColumnWidthStretch, 1.5f);
+		ui->TableHeadersRow();
+		for (const std::string& plugin : plugins)
+		{
+			ui->TableNextRow(0, 0.0f);
+			ui->PushIDStr(plugin.c_str());
+			ui->TableNextColumn();
+			ui->AlignTextToFramePadding();
+			ui->Text(Marked(AdminView::MinChanged(f.view.snapshot, f.eff, plugin), plugin).c_str());
+			ui->TableNextColumn();
+			UiState::MinBox& box = g_ui.modMin[plugin];
+			DrawMinEditor(f, box, AdminView::MinValue(f.eff, plugin));
+			ui->TableNextColumn();
+			MinButtons(f, box, plugin);
+			ui->PopID();
+		}
+		ui->EndTable();
+	}
+
 	void DrawReady(Frame& f)
 	{
 		IModLoaderImGui* ui = f.ui;
@@ -286,6 +503,16 @@ namespace
 			if (ui->BeginTabItem("Mods", nullptr, 0))
 			{
 				DrawModsTab(f);
+				ui->EndTabItem();
+			}
+			if (ui->BeginTabItem("Players", nullptr, 0))
+			{
+				DrawPlayersTab(f);
+				ui->EndTabItem();
+			}
+			if (ui->BeginTabItem("Versions", nullptr, 0))
+			{
+				DrawVersionsTab(f);
 				ui->EndTabItem();
 			}
 			ui->EndTabBar();

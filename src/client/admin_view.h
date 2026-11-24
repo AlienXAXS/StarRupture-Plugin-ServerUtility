@@ -63,4 +63,8 @@ namespace AdminView
 	bool MatchesFilter(const std::string& text, const std::string& filter);
 	bool ModMatches(const AdminWire::ModInfo& mod, const std::string& filter);
 	bool PlayerMatches(const AdminWire::PlayerInfo& p, const std::string& filter);
+	// Indices of the players that match the filter: online first, then saved, each in list order.
+	std::vector<size_t> PlayerOrder(const AdminWire::Snapshot& s, const std::string& filter);
+	// Plugins the Versions tab lists: every catalog mod, then plugins that only have a minimum.
+	std::vector<std::string> MinPlugins(const AdminWire::Snapshot& s);
 }

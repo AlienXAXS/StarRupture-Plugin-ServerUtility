@@ -152,6 +152,27 @@ int main()
 		CHECK(!PlayerMatches(base.players[1], "ann"));
 	}
 
+	// Player order and the Versions tab's plugin list.
+	{
+		Snapshot s;
+		PlayerInfo a, b, c;
+		a.id = "1"; a.name = "Saved"; a.online = false;
+		b.id = "2"; b.name = "Live"; b.online = true;
+		c.id = "3"; c.name = "Also saved"; c.online = false;
+		s.players = { a, b, c };
+		std::vector<size_t> all = PlayerOrder(s, "");
+		CHECK(all.size() == 3 && all[0] == 1 && all[1] == 0 && all[2] == 2);
+		std::vector<size_t> some = PlayerOrder(s, "saved");
+		CHECK(some.size() == 2 && some[0] == 0 && some[1] == 2);
+		CHECK(PlayerOrder(s, "zzz").empty());
+		ModInfo m1, m2;
+		m1.plugin = "Alpha"; m2.plugin = "Beta";
+		s.mods = { m1, m2 };
+		s.mins = { { "", "1.0" }, { "Beta", "2" }, { "Gone", "3" } };
+		std::vector<std::string> p = MinPlugins(s);
+		CHECK(p.size() == 3 && p[0] == "Alpha" && p[1] == "Beta" && p[2] == "Gone");
+	}
+
 	std::printf("%d checks, %d failed\n", g_checks, g_failed);
 	return g_failed ? 1 : 0;
 }

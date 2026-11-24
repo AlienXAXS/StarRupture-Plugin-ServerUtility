@@ -295,4 +295,22 @@ namespace AdminView
 	{
 		return MatchesFilter(p.name, filter) || MatchesFilter(p.id, filter) || MatchesFilter(ParseFlags(p.flags).label, filter);
 	}
+
+	std::vector<size_t> PlayerOrder(const Snapshot& s, const std::string& filter)
+	{
+		std::vector<size_t> r;
+		for (int pass = 0; pass < 2; ++pass)
+			for (size_t i = 0; i < s.players.size(); ++i)
+				if (s.players[i].online == (pass == 0) && PlayerMatches(s.players[i], filter)) r.push_back(i);
+		return r;
+	}
+
+	std::vector<std::string> MinPlugins(const Snapshot& s)
+	{
+		std::vector<std::string> r;
+		std::set<std::string> seen;
+		for (const ModInfo& m : s.mods) if (seen.insert(m.plugin).second) r.push_back(m.plugin);
+		for (const MinEntry& e : s.mins) if (!e.plugin.empty() && seen.insert(e.plugin).second) r.push_back(e.plugin);
+		return r;
+	}
 }
