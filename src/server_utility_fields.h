@@ -1,6 +1,7 @@
 #pragma once
 
 #include "plugin_interface.h"
+#include "plugin_helpers.h"
 #include "SDK/Engine_classes.hpp"
 #include "SDK/Chimera_classes.hpp"
 #include "SDK/AuItems_classes.hpp"
@@ -13,8 +14,12 @@
 // each. Resolved once in OnPluginLoadHooks; a member is read on the game thread
 // with In(object), which is null when the object is null or the member did not
 // resolve. A rename in the map is a one-line edit here. The byte patterns the
-// plugin falls back on are in game_signatures.h. Engine members (UObject::Index,
-// UWorld::GameState, bAlwaysRelevant) are not game classes and stay compiled in.
+// plugin falls back on are in game_signatures.h. The engine members the player
+// lookup reads are here too, under the map's keys UWorld::GameState,
+// AGameStateBase::PlayerArray, AActor::Owner and APlayerController::PlayerState.
+// A few engine reads elsewhere (UObject::Index, bAlwaysRelevant, the GameState
+// reads in rcon.cpp and the admin endpoints) are not in the table yet and stay
+// compiled in.
 
 // Minimal FString mirror so we can manipulate engine strings from outside.
 // Layout matches UE4/UE5 TArray<TCHAR> used as FString storage.
@@ -33,10 +38,14 @@ struct ClassRepNodePolicyBlock
 	uint8_t Bytes[0x80];
 };
 
+// A member of an SDK class. Its key is "Class::Member", and the compiled offset
+// is the row for the game build the SDK was dumped for.
 #define SERVER_UTILITY_FIELD(Class, Member) SR_FIELD(decltype(SDK::Class::Member), Class, Member, 0)
 
-// A member reflection does not describe. The offset is the one compiled in,
-// which is also this plugin's own row for the build it was verified on.
+// A member the SDK dumps as padding, so it has no name or offset to compile in:
+// the loader's map holds it under this key, and offset is the row for the build
+// this plugin was compiled against. The offsets were typed by hand and checked
+// on CL 127004: re-check them whenever the dump moves.
 #define SERVER_UTILITY_NATIVE(T, Class, Member, offset) \
 	PluginField<T>{ { #Class "::" #Member, #Class, #Member, PLUGIN_FIELD_NATIVE, sizeof(T), (offset) } }
 
@@ -75,37 +84,43 @@ namespace ServerUtilityFields
 	// The item catalogue the admin give-item endpoint searches.
 	inline auto ItemDataBaseArray = SERVER_UTILITY_FIELD(UAuItemDataBaseSubsystem, ItemDataBaseArray);
 
-	// The game build the compiled offsets above were taken from: the plugin's
-	// own row for a member the loader's map has no row for yet. It is the CL the
-	// Game-SDK dump is built for. That holds for the SERVER_UTILITY_FIELD members,
-	// whose offsets come from the dump. The SERVER_UTILITY_NATIVE offsets are typed
-	// by hand and were checked on CL 127004: re-check them whenever the dump moves.
-	static_assert(PLUGIN_GAME_BUILT_CL != 0, "PLUGIN_GAME_BUILT_CL is not set: the Game SDK has no build_cl.txt");
-	inline constexpr uint32_t kVerifiedCL = PLUGIN_GAME_BUILT_CL;
+	// The engine members that lead from the world to a connected player's
+	// controller and from a controller to its player state (the player lookup).
+	inline auto WorldGameState         = SERVER_UTILITY_FIELD(UWorld, GameState);
+	inline auto GameStatePlayerArray   = SERVER_UTILITY_FIELD(AGameStateBase, PlayerArray);
+	inline auto ActorOwner             = SERVER_UTILITY_FIELD(AActor, Owner);
+	inline auto ControllerPlayerState  = SERVER_UTILITY_FIELD(APlayerController, PlayerState);
 
-	// Asks the loader for one native member, with this plugin's own row as the
-	// fallback for a loader or build whose map has none.
-	template <class T>
-	bool ResolveNative(IPluginHookScanner* scanner, const IPluginSelf* self, PluginField<T>& field)
-	{
-		const PluginFieldCandidate rows[] = { { kVerifiedCL, field.builtOffset, field.size, 0, nullptr } };
-		return PluginMap::ResolveField(scanner, self, field, rows, 1);
-	}
+	// The part of the plugin that can be off while the rest runs: finding the
+	// connected players and the ID of each. Host rules, the player list, the
+	// admin claim and the in-game admin tool all start from it. When the loader
+	// has no row for one of its keys on the running game build it turns this
+	// feature off and keeps the plugin; every key not listed here still refuses
+	// the plugin. While it is off, the lookup returns nothing: no controllers
+	// are listed and no player's ID is readable.
+	inline PluginMap::Feature PlayerLookup{ "player-lookup", "Player lookup", {
+		WorldGameState.key, GameStatePlayerArray.key, ActorOwner.key, ControllerPlayerState.key
+	} };
 
-	// Asks the loader for every member above. False when any did not resolve;
-	// the loader has then recorded the failure and refuses the plugin.
+	// Asks the loader for every member above. False when a key that is not in
+	// the player lookup did not resolve; the loader has then recorded the
+	// failure and refuses the plugin. A miss in the player lookup only turns
+	// that feature off.
 	inline bool Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
 	{
-		bool ok = ResolveNative(scanner, self, SessionName);
-		ok = ResolveNative(scanner, self, SaveGameName) && ok;
-		ok = ResolveNative(scanner, self, SaveGameInterval) && ok;
-		ok = ResolveNative(scanner, self, StartNewGame) && ok;
-		ok = ResolveNative(scanner, self, LoadSavedGame) && ok;
-		ok = ResolveNative(scanner, self, ClassRepNodePolicies) && ok;
-		ok = ResolveNative(scanner, self, ObjectItemSerialNumber) && ok;
+		PluginMap::DeclareFeatures(scanner, self, PlayerLookup);
+
+		const bool lookup = PluginMap::ResolveFields(scanner, self,
+			WorldGameState, GameStatePlayerArray, ActorOwner, ControllerPlayerState);
+		if (!lookup)
+			LOG_WARN("[PlayerLookup] The loader has no row for one of its engine members on this game build - "
+			         "host rules, player IDs and the player list are off");
+
 		return PluginMap::ResolveFields(scanner, self,
+			SessionName, SaveGameName, SaveGameInterval, StartNewGame, LoadSavedGame,
+			ClassRepNodePolicies, ObjectItemSerialNumber,
 			RepGlobalGatherablePCGSeed, RepEnviroWaveTypeChange, RepEnviroWaveStageChange,
 			PCGActorBaseLocalSeed, PCGGatherableSpawnerLocalSeed, PCGVolumeLocalSeed,
-			ItemDataBaseArray) && ok;
+			ItemDataBaseArray);
 	}
 }

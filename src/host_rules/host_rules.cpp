@@ -7,6 +7,7 @@
 #include "ingame_admin.h"
 #include "../plugin_helpers.h"
 #include "../rcon/listed_players.h"
+#include "../server_utility_fields.h"
 
 #include "SDK/Engine_classes.hpp"
 #include "object_ref.h"
@@ -201,16 +202,22 @@ namespace
 	{
 		__try
 		{
-			auto* world = static_cast<SDK::UWorld*>(worldPtr);
-			if (!world || !world->GameState)
+			using namespace ServerUtilityFields;
+			if (!PlayerLookup.On())
 				return 0;
 
-			const int32_t count = world->GameState->PlayerArray.Num();
+			SDK::AGameStateBase** gameStateAt = WorldGameState.In(worldPtr);
+			auto* players = GameStatePlayerArray.In(gameStateAt ? *gameStateAt : nullptr);
+			if (!players)
+				return 0;
+
+			const int32_t count = players->Num();
 			int written = 0;
 			for (int32_t i = 0; i < count && written < max; ++i)
 			{
-				SDK::APlayerState* ps = world->GameState->PlayerArray[i];
-				SDK::AActor* owner = ps ? ps->Owner : nullptr;
+				SDK::APlayerState* ps = (*players)[i];
+				SDK::AActor** ownerAt = ActorOwner.In(ps);
+				SDK::AActor* owner = ownerAt ? *ownerAt : nullptr;
 				if (owner && owner->IsA(SDK::APlayerController::StaticClass()))
 					out[written++] = static_cast<SDK::APlayerController*>(owner);
 			}

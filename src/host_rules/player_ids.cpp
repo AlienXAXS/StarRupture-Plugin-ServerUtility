@@ -5,6 +5,7 @@
 #if defined(MODLOADER_SERVER_BUILD) || defined(MODLOADER_CLIENT_BUILD)
 #  include "SDK/Engine_classes.hpp"
 #  include "SDK/Chimera_classes.hpp"
+#  include "../server_utility_fields.h"
 #  define PLAYER_IDS_HAS_SDK 1
 #else
 #  define PLAYER_IDS_HAS_SDK 0
@@ -57,8 +58,11 @@ namespace
 	{
 		__try
 		{
-			auto* pc = static_cast<SDK::APlayerController*>(playerController);
-			return pc ? pc->PlayerState : nullptr;
+			if (!ServerUtilityFields::PlayerLookup.On())
+				return nullptr;
+
+			SDK::APlayerState** stateAt = ServerUtilityFields::ControllerPlayerState.In(playerController);
+			return stateAt ? *stateAt : nullptr;
 		}
 		__except (EXCEPTION_EXECUTE_HANDLER)
 		{
