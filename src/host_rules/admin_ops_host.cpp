@@ -3,6 +3,7 @@
 #include "player_ids.h"
 #include "player_list.h"
 #include "removal.h"
+#include "../server_settings/stack_size.h"
 #include "../plugin_helpers.h"
 #include "../admin/admin_gamethread.h"
 
@@ -71,6 +72,8 @@ namespace
 			if (!KickGuarded(pc, reason)) { e = "the kick failed"; return false; }
 			return true;
 		};
+		be.getStackSize   = [] { return StackSize::Get(); };
+		be.setStackSize   = [](int size, std::string& e) { return StackSize::Set(size, e); };
 		be.audit          = [](const std::string& line) { LOG_INFO("%s", line.c_str()); };
 		return be;
 	}

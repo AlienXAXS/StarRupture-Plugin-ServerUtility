@@ -445,6 +445,7 @@
     <ClInclude Include="admin\admin_request.h" />
     <ClInclude Include="host_rules\admin_ops.h" />
     <ClInclude Include="server_settings\stack_size_model.h" />
+    <ClInclude Include="server_settings\stack_size.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(StarRuptureSDKSourceDir)Basic.cpp">
@@ -505,6 +506,7 @@
     <ClCompile Include="host_rules\admin_ops.cpp" />
     <ClCompile Include="host_rules\admin_ops_host.cpp" />
     <ClCompile Include="server_settings\stack_size_model.cpp" />
+    <ClCompile Include="server_settings\stack_size.cpp" />
     <ClCompile Include="admin_wire\admin_wire.cpp" />
     <ClCompile Include="admin_wire\admin_crypto.cpp" />
     <ClCompile Include="admin_wire\wire_info.cpp" />

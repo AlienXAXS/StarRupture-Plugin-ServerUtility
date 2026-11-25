@@ -21,6 +21,7 @@
 #include "host_rules/ingame_admin.h"
 #include "host_rules/player_list.h"
 #include "host_rules/host_rules.h"
+#include "server_settings/stack_size.h"
 
 // -----------------------------------------------------------------------
 // Global plugin self pointer
@@ -84,6 +85,7 @@ static void OnEngineShutdown()
 	InGameAdmin::Shutdown();
 	AdminClaim::Shutdown();
 	Removal::Shutdown();
+	StackSize::Shutdown();
 	HostRules::Shutdown();
 	ParseSettingsHook::Remove();
 	MaxPlayersHook::Remove();
@@ -119,6 +121,9 @@ __declspec(dllexport) void OnPluginLoadHooks(IPluginSelf* self, IPluginHookScann
 	// Every game member the plugin reads, from the loader's map for the running
 	// build. A miss is recorded with the loader, which refuses the plugin.
 	ServerUtilityFields::Resolve(self, scanner);
+
+	// Optional: a game build without the item members only turns the server stack size off.
+	StackSize::Resolve(self, scanner);
 
 	// Optional: without it the DSSettings command-line bypass is skipped, but the
 	// RCON server and the rest of the plugin still work.
@@ -172,6 +177,7 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 	PlayerList::Init();
 	Cmd_Player::Register();
 	HostRules::Init();
+	StackSize::Init();
 	Cmd_HostRules::Register();
 	Removal::Init();
 	AdminClaim::Init();
