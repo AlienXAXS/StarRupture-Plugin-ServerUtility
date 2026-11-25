@@ -238,6 +238,7 @@ namespace InGameAdmin
 			if (sections & AdminOps::kSectionMins) add("mins");
 			if (sections & AdminOps::kSectionPlayers) add("players");
 			if (sections & AdminOps::kSectionMods) add("mods");
+			if (sections & AdminOps::kSectionServer) add("server");
 			return text.empty() ? std::string(AdminWire::kSectionAll) : text;
 		}
 

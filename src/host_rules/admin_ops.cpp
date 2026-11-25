@@ -1,5 +1,6 @@
 #include "admin_ops.h"
 #include "ini_file.h"
+#include "server_settings/stack_size_model.h"
 
 #include <algorithm>
 #include <atomic>
@@ -54,8 +55,9 @@ namespace
 	// One validated op, ready to apply.
 	struct Planned
 	{
-		enum class Kind { Model, Set, Remove, Clear, Kick, ReloadRules, ReloadPlayers } kind = Kind::Model;
+		enum class Kind { Model, Set, Remove, Clear, Kick, ReloadRules, ReloadPlayers, Server } kind = Kind::Model;
 		std::string id, flags, reason;
+		int         stackSize = 0;
 		std::string audit;      // what the audit line says
 		unsigned    sections = 0;
 	};
@@ -213,6 +215,20 @@ namespace
 			return true;
 		}
 
+		if (n == "server.stacksize")
+		{
+			if (!Need(op, 1, error)) return false;
+			if (!be.setStackSize) { error = "stack size is not available on this server"; return false; }
+			const bool off = Lower(Trim(op.args[0])) == "off";
+			int size = 0;
+			if (!off && !StackSizeModel::Validate(op.args[0], size, error)) return false;
+			out.kind = Planned::Kind::Server;
+			out.stackSize = size;
+			out.audit = "server.stacksize=" + (size == 0 ? std::string("off") : std::to_string(size));
+			out.sections = kSectionServer;
+			return true;
+		}
+
 		error = "unknown op " + OneLine(n);
 		return false;
 	}
@@ -324,6 +340,10 @@ namespace AdminOps
 				break;
 			case Planned::Kind::ReloadPlayers:
 				if (be.reloadPlayers(error)) { applied(p); playersTouched = true; text = "Player list reloaded."; }
+				else if (failure.empty()) failure = error;
+				break;
+			case Planned::Kind::Server:
+				if (be.setStackSize(p.stackSize, error)) applied(p);
 				else if (failure.empty()) failure = error;
 				break;
 			default:

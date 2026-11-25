@@ -444,6 +444,7 @@
     <ClInclude Include="admin\endpoints\ep_rules_admin.h" />
     <ClInclude Include="admin\admin_request.h" />
     <ClInclude Include="host_rules\admin_ops.h" />
+    <ClInclude Include="server_settings\stack_size_model.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(StarRuptureSDKSourceDir)Basic.cpp">
@@ -503,6 +504,7 @@
     <ClCompile Include="admin\endpoints\ep_rules_admin.cpp" />
     <ClCompile Include="host_rules\admin_ops.cpp" />
     <ClCompile Include="host_rules\admin_ops_host.cpp" />
+    <ClCompile Include="server_settings\stack_size_model.cpp" />
     <ClCompile Include="admin_wire\admin_wire.cpp" />
     <ClCompile Include="admin_wire\admin_crypto.cpp" />
     <ClCompile Include="admin_wire\wire_info.cpp" />
@@ -512,7 +514,7 @@
     <ClCompile Include="client\admin_window.cpp" Condition="'$(Configuration)' == 'Client Debug' Or '$(Configuration)' == 'Client Release'" />
   </ItemGroup>
   <ItemGroup Condition="'$(Configuration)' == 'Client Debug' Or '$(Configuration)' == 'Client Release'">
-    <ClCompile Remove="hooks\**;rcon\**;admin\**;host_rules\**;plugin.cpp;plugin_config.cpp;$(StarRuptureSDKSourceDir)*.cpp" />
+    <ClCompile Remove="hooks\**;rcon\**;admin\**;host_rules\**;server_settings\**;plugin.cpp;plugin_config.cpp;$(StarRuptureSDKSourceDir)*.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
