@@ -124,6 +124,9 @@ namespace
 		std::set<std::string> others;
 		{
 			std::lock_guard<std::mutex> lk(g_mutex);
+			// Only a player with an open prompt can answer it.
+			if (!g_open.count(id))
+				return;
 			g_open.erase(id);
 
 			std::string norm;
