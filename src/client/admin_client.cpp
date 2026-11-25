@@ -309,7 +309,7 @@ namespace AdminClient
 				SendSnapReq(m.sections == kSectionMods ? kSectionMods : kSectionAll);   // the catalog alone, or everything
 			break;
 		case Tag::Result: HandleResult(m); break;
-		case Tag::SnapBegin: case Tag::SnapPolicy: case Tag::SnapRule: case Tag::SnapMin: case Tag::SnapDefault:
+		case Tag::SnapBegin: case Tag::SnapPolicy: case Tag::SnapRule: case Tag::SnapMin: case Tag::SnapDefault: case Tag::SnapServer:
 		case Tag::SnapMod: case Tag::SnapPlayer: case Tag::SnapEnd:
 			HandleSnapshotPart(m, size); break;
 		default: break;
@@ -437,6 +437,10 @@ namespace AdminClient
 			break;
 		case Tag::SnapDefault:
 			building_.defaults.insert(building_.defaults.end(), m.keys.begin(), m.keys.end());
+			break;
+		case Tag::SnapServer:
+			building_.stackSize = static_cast<int>(m.stackSize);
+			building_.stackAvailable = m.stackAvailable;
 			break;
 		case Tag::SnapMod:
 			if (m.cont && !building_.mods.empty() && building_.mods.back().plugin == m.mod.plugin)

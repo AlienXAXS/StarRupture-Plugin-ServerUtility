@@ -863,8 +863,8 @@ int main()
 		CHECK(v.status == Status::Ready && v.snapshot.revision == 6 && v.snapshot.defaults.empty() && !v.lastResultIsError);
 	}
 
-	// A client that has no snap-server handling (this one, until the Server tab lands) drops the record: the
-	// snapshot still completes and the stack size stays -1. An older server never sends it: -1 as well.
+	// The snap-server record fills the stack size and availability. A server that never sends it leaves -1,
+	// so the client shows no Server tab.
 	{
 		Rig r;
 		MakeReady(r);
@@ -882,7 +882,7 @@ int main()
 		CHECK(sawServer);
 		AdminClient::View v = r.View();
 		CHECK(v.status == Status::Ready && v.haveSnapshot && v.snapshot.revision == 7 && v.snapshot.rules.size() == 1
-			&& v.snapshot.stackSize == -1 && !v.lastResultIsError);
+			&& v.snapshot.stackSize == 500 && v.snapshot.stackAvailable && !v.lastResultIsError);
 
 		FeedSnapshot(r, 8);   // no snap-server at all
 		v = r.View();
