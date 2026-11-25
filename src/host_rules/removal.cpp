@@ -1,4 +1,5 @@
 #include "removal.h"
+#include "line_text.h"
 #include "player_ids.h"
 #include "rules_model.h"
 #include "../plugin_helpers.h"
@@ -89,14 +90,14 @@ namespace
 	{
 		if (PlayerIds::ExemptFromVersion(pc))
 		{
-			LOG_INFO("[HostRules] Player '%s' is below a minimum version but exempt - kept", PlayerName(pc).c_str());
+			LOG_INFO("[HostRules] Player '%s' is below a minimum version but exempt - kept", LineText::OneLine(PlayerName(pc)).c_str());
 			return;
 		}
 
 		if (AlreadyRemoved(pc))
 			return;
 
-		LOG_INFO("[HostRules] Player '%s' removed: %s", PlayerName(pc).c_str(), plainReason);
+		LOG_INFO("[HostRules] Player '%s' removed: %s", LineText::OneLine(PlayerName(pc)).c_str(), LineText::OneLine(plainReason).c_str());
 		Removal::Kick(pc, plainReason);
 	}
 

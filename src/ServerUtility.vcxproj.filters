@@ -278,6 +278,9 @@
     <ClInclude Include="host_rules\admin_ops.h">
       <Filter>host_rules</Filter>
     </ClInclude>
+    <ClInclude Include="host_rules\line_text.h">
+      <Filter>host_rules</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="admin_wire">

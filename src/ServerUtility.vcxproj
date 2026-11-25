@@ -444,6 +444,7 @@
     <ClInclude Include="admin\endpoints\ep_rules_admin.h" />
     <ClInclude Include="admin\admin_request.h" />
     <ClInclude Include="host_rules\admin_ops.h" />
+    <ClInclude Include="host_rules\line_text.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(StarRuptureSDKSourceDir)Basic.cpp">

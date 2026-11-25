@@ -6,6 +6,7 @@
 #include "host_rules/claim_model.h"
 #include "host_rules/admin_ops.h"
 #include "host_rules/known_features.h"
+#include "host_rules/line_text.h"
 #include "host_rules/ini_file.h"
 #include "host_rules/player_list.h"
 #include "admin/url_match.h"
@@ -1438,10 +1439,57 @@ int main()
 			for (size_t i = 1; g.Size() < kMaxRows; ++i)
 				g.Merge(rep("Plug", ("f" + std::to_string(i)).c_str(), "", "", false), d1);
 			CHECK(g.Size() == kMaxRows);
-			CHECK(!g.Merge(rep("Plug", "one-too-many", "", "", false), d1));
-			CHECK(g.Size() == kMaxRows);
 			CHECK(!g.Merge(rep("Plug", "f1", "", "", false), d1));   // an old row still merges, unchanged
 			CHECK(g.Merge(rep("Plug", "f1", "", "", false), d2));    // a new day still counts
+			// Full: a new feature replaces the reported row seen longest ago.
+			CHECK(g.Merge(rep("Plug", "one-too-many", "", "", false), d2));
+			CHECK(g.Size() == kMaxRows);
+			bool hasNew = false, hasF1 = false, hasBest = false, hasF2 = false;
+			for (const auto& en : g.Entries())
+			{
+				hasNew |= en.id == "one-too-many"; hasF1 |= en.id == "f1";
+				hasBest |= en.id == "fast"; hasF2 |= en.id == "f2";
+			}
+			CHECK(hasNew && hasF1);                                  // f1 was seen d2, so it stays
+			CHECK(!(hasBest && hasF2));                              // an older d1 row went (the first in key order)
+		}
+
+		// A full catalog of declared rows refuses a new reported one; a declared row is never evicted.
+		{
+			Catalog g;
+			for (size_t i = 1; g.Size() < kMaxRows; ++i)
+			{
+				Report r = rep("Plug", ("d" + std::to_string(i)).c_str(), "", "", false);
+				r.source = "declared";
+				g.Merge(r, d1);
+			}
+			CHECK(g.Size() == kMaxRows && !g.Merge(rep("Plug", "late", "", "", false), d2) && g.Size() == kMaxRows);
+			// One reported row among them is the one that goes.
+			Catalog h;
+			Report rr = rep("Plug", "rep", "", "", false);
+			h.Merge(rr, d1);
+			for (size_t i = 1; h.Size() < kMaxRows; ++i)
+			{
+				Report r = rep("Plug", ("d" + std::to_string(i)).c_str(), "", "", false);
+				r.source = "declared";
+				h.Merge(r, d2);
+			}
+			CHECK(h.Merge(rep("Plug", "late", "", "", false), d2) && h.Size() == kMaxRows);
+			bool hasRep = false, hasLate = false;
+			for (const auto& en : h.Entries()) { hasRep |= en.id == "rep"; hasLate |= en.id == "late"; }
+			CHECK(!hasRep && hasLate);
+		}
+
+		// Reply lines: control characters go, and a long line is cut on a character boundary.
+		{
+			CHECK(LineText::OneLine("a\nb\rc\td") == "a b c d");
+			CHECK(LineText::Clip("short", 120) == "short");
+			const std::string longLine(500, 'x');
+			CHECK(LineText::Clip(longLine, 120).size() == 120 && LineText::Clip(longLine, 120).substr(117) == "...");
+			std::string wide;
+			for (int i = 0; i < 100; ++i) wide += "\xE2\x82\xAC";   // 3-byte characters
+			const std::string cut = LineText::Clip(wide, 120);
+			CHECK(cut.size() <= 120 && (cut.size() - 3) % 3 == 0 && cut.compare(cut.size() - 3, 3, "...") == 0);
 		}
 
 		// Merge: a new feature is added, the same one again is not a change, a new day is.

@@ -3,6 +3,7 @@
 #include "admin_ops.h"
 #include "claim_model.h"
 #include "host_rules.h"
+#include "line_text.h"
 #include "player_ids.h"
 #include "player_list.h"
 #include "../plugin_helpers.h"
@@ -172,23 +173,23 @@ namespace
 		switch (result)
 		{
 		case Result::NotMe:
-			LOG_INFO("[Admin] Player %s chose Not me - not asked again until restart", id.c_str());
+			LOG_INFO("[Admin] Player %s chose Not me - not asked again until restart", LineText::OneLine(id).c_str());
 			Say(playerController, "Okay. You will not be asked again until the server restarts.", true);
 			break;
 		case Result::NoCode:
 			Say(playerController, "No claim code is available. Ask the host to add you with the admin command.", true);
 			break;
 		case Result::Taken:
-			LOG_INFO("[Admin] Player %s answered after the server already had an admin (expired)", id.c_str());
+			LOG_INFO("[Admin] Player %s answered after the server already had an admin (expired)", LineText::OneLine(id).c_str());
 			Say(playerController, "This server already has an admin.", true);
 			break;
 		case Result::Locked:
-			LOG_WARN("[Admin] Player %s gave too many wrong codes - not asked again until restart", id.c_str());
+			LOG_WARN("[Admin] Player %s gave too many wrong codes - not asked again until restart", LineText::OneLine(id).c_str());
 			Say(playerController, "Too many wrong codes. You will not be asked again until the server restarts.", true);
 			break;
 		case Result::Wrong:
 		{
-			LOG_INFO("[Admin] Player %s gave a wrong code (%d tries left)", id.c_str(), wrong.left);
+			LOG_INFO("[Admin] Player %s gave a wrong code (%d tries left)", LineText::OneLine(id).c_str(), wrong.left);
 			const std::string line = "That is not the code. " + std::to_string(wrong.left) + " tries left.";
 			Say(playerController, line.c_str(), false);
 			break;
@@ -198,7 +199,7 @@ namespace
 			break;
 		case Result::Claimed:
 		{
-			LOG_INFO("[Admin] '%s' claimed admin (id %s)", label.c_str(), id.c_str());
+			LOG_INFO("[Admin] '%s' claimed admin (id %s)", LineText::OneLine(label).c_str(), LineText::OneLine(id).c_str());
 			AdminOps::NoteChanged(AdminOps::kSectionPlayers);
 			HostRules::RefreshPlayers();
 			InGameAdmin::OnClaimed(playerController, id);

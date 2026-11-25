@@ -21,7 +21,9 @@ namespace CmdArgs
 		return true;
 	}
 
-	// An ID, or the number of a connected player as `player ids` shows it. who, when
+	// An ID, or the number of a connected player as `player ids` shows it, read when the
+	// command runs (the list can change between `player ids` and the command, so the
+	// usage text says to check the name in the reply). who, when
 	// given, is set to "Name (ID)" (just the ID when that player is not connected),
 	// so the reply can show whom the command acted on.
 	inline bool ResolveId(const std::string& arg, std::string& id, std::string& error, std::string* who = nullptr)

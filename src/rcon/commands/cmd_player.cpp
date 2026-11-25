@@ -24,7 +24,9 @@ namespace Cmd_Player
 			"  player remove <id|number>              delete an entry\n"
 			"  player reload                          re-read HostRules.ini\n"
 			"Flags: admin, exemptversion, exemptrules, sections=<key>;<key>, label=<text>\n"
-			"       (a leading - takes a flag off). <number> is the number `player ids` shows.\n";
+			"       (a leading - takes a flag off). <number> is the number `player ids` shows\n"
+			"       when the command runs, and the list can change in between: check the name\n"
+			"       in the reply, or use the ID.\n";
 
 		const char* const kAdminUsage =
 			"Usage:\n"
@@ -33,7 +35,9 @@ namespace Cmd_Player
 			"  admin clear                            take Admin off every entry\n"
 				"  admin code                             the claim code, while there is no admin\n"
 			"  admin pair <id|number>                 a one-time code (10 minutes) to pair that admin's in-game tool\n"
-			"  admin unpair <id|number>               forget that admin's in-game tool pairing\n";
+			"  admin unpair <id|number>               forget that admin's in-game tool pairing\n"
+			"<number> is the number `player ids` shows when the command runs: check the name in\n"
+			"the reply, or use the ID.\n";
 
 		using CmdArgs::NextWord;
 		using IniFile::Lower;

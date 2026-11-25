@@ -5,6 +5,7 @@
 #include "../../host_rules/host_rules.h"
 #include "../../host_rules/ini_file.h"
 #include "../../host_rules/known_features.h"
+#include "../../host_rules/line_text.h"
 #include "../../host_rules/player_list.h"
 
 #include <sstream>
@@ -42,7 +43,20 @@ namespace Cmd_HostRules
 
 		std::string Error(const std::string& text) { return "Error: " + text + "\n"; }
 
-		constexpr size_t kMaxKnownListed = 30;   // keeps the reply inside one RCON packet
+		// An RCON packet holds 4096 bytes. A reply stays under kMaxReply: each line is cut
+		// to kMaxLine and a list stops with "... and M more" when the next line would not fit.
+		constexpr size_t kMaxReply       = 3800;
+		constexpr size_t kMaxLine        = 120;
+		constexpr size_t kMaxKnownListed = 10;   // unmatched-rule warnings
+
+		// Adds one line (cut to kMaxLine) when it fits; false when it does not.
+		bool AddLine(std::string& out, const std::string& line)
+		{
+			const std::string cut = LineText::Clip(LineText::OneLine(line), kMaxLine);
+			if (out.size() + cut.size() + 1 > kMaxReply) return false;
+			out += cut + "\n";
+			return true;
+		}
 
 		// The remembered catalog, each row with where it came from, and the rules
 		// that match none of it.
@@ -60,26 +74,29 @@ namespace Cmd_HostRules
 				oss << "  known features: none yet (a player's mod loader lists them when they join)\n";
 				return oss.str();
 			}
-			oss << "  known features (" << known.size() << "):\n";
+			std::string out = oss.str();
+			AddLine(out, "  known features (" + std::to_string(known.size()) + "):");
 			size_t shown = 0;
 			for (const KnownFeatures::Entry& e : known)
 			{
-				if (++shown > kMaxKnownListed)
-				{
-					oss << "    ... and " << (known.size() - kMaxKnownListed) << " more\n";
-					break;
-				}
-				oss << "    " << e.plugin << "." << e.id << " [" << e.source << "]";
-				if (!e.title.empty()) oss << " " << e.title;
-				if (!e.version.empty()) oss << " v" << e.version;
+				std::ostringstream row;
+				row << "    " << e.plugin << "." << e.id << " [" << e.source << "]";
+				if (!e.title.empty()) row << " " << e.title;
+				if (!e.version.empty()) row << " v" << e.version;
 				if (!e.offBuilds.empty())
 				{
-					oss << " off on:";
-					for (const std::string& b : e.offBuilds) oss << " " << b;
+					row << " off on:";
+					for (const std::string& b : e.offBuilds) row << " " << b;
 				}
-				oss << " (last seen " << e.lastSeen << ")\n";
+				row << " (last seen " << e.lastSeen << ")";
+				if (!AddLine(out, row.str()))
+				{
+					out += "    ... and " + std::to_string(known.size() - shown) + " more\n";
+					break;
+				}
+				++shown;
 			}
-			return oss.str();
+			return out;
 		}
 
 		std::string State()
@@ -117,18 +134,20 @@ namespace Cmd_HostRules
 			std::string id, error;
 			if (!ResolveId(arg, id, error)) return Error(error);
 
-			std::string out = "Player " + id;
+			std::string head = "Player " + id;
 			PlayerList::Entry entry;
 			if (PlayerList::Find(id, entry) && !entry.label.empty())
-				out += " (" + entry.label + ")";
-			out += ": ";
+				head += " (" + entry.label + ")";
+			head += ": ";
 
 			HostRules::Reported r;
 			if (!HostRules::WhoReported(id, r))
-				out += "no mod loader feature list has reached the server.\n";
+				head += "no mod loader feature list has reached the server.";
 			else
-				out += "the mod loader reported its features " + std::to_string(r.count) + " time(s), last " +
-				       std::to_string((GetTickCount64() - r.lastMs) / 1000) + " s ago.\n";
+				head += "the mod loader reported its features " + std::to_string(r.count) + " time(s), last " +
+				        std::to_string((GetTickCount64() - r.lastMs) / 1000) + " s ago.";
+			std::string out;
+			AddLine(out, head);
 
 			std::string text;
 			switch (HostRules::ClientFeatures(id, text))
@@ -138,23 +157,27 @@ namespace Cmd_HostRules
 				// First line: loader=<tag> interface=<n>; the rest, one mod feature per line.
 				std::istringstream lines(text);
 				std::string line;
-				bool first = true;
+				bool first = true, full = false;
+				size_t more = 0;
 				while (std::getline(lines, line))
 				{
-					if (first) out += "  mod loader: " + line + "\n  mods:\n";
-					else       out += "    " + line + "\n";
+					if (full) { ++more; continue; }
+					const bool ok = first ? AddLine(out, "  mod loader: " + line) && AddLine(out, "  mods:")
+					                      : AddLine(out, "    " + line);
+					if (!ok) { full = true; ++more; }
 					first = false;
 				}
+				if (more) out += "    ... and " + std::to_string(more) + " more\n";
 				break;
 			}
 			case HostRules::FeaturesState::NoReport:
-				out += "  no report (vanilla or older loader)\n";
+				AddLine(out, "  no report (vanilla or older loader)");
 				break;
 			case HostRules::FeaturesState::NotConnected:
-				out += "  not connected\n";
+				AddLine(out, "  not connected");
 				break;
 			case HostRules::FeaturesState::NoLoaderSupport:
-				out += "  this mod loader cannot list a player's mods\n";
+				AddLine(out, "  this mod loader cannot list a player's mods");
 				break;
 			}
 			return out;

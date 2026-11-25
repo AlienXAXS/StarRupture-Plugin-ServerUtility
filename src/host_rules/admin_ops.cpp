@@ -1,5 +1,6 @@
 #include "admin_ops.h"
 #include "ini_file.h"
+#include "line_text.h"
 
 #include <algorithm>
 #include <atomic>
@@ -18,15 +19,7 @@ namespace
 	using IniFile::Lower;
 	using IniFile::Trim;
 
-	// Text that goes into a log line or an error: no line breaks or control
-	// characters, so a name or reason cannot start a line of its own.
-	std::string OneLine(const std::string& s)
-	{
-		std::string out = s;
-		for (char& c : out)
-			if (static_cast<unsigned char>(c) < 0x20) c = ' ';
-		return out;
-	}
+	using LineText::OneLine;
 
 	std::string CallerText(const AdminOps::Caller& c)
 	{
