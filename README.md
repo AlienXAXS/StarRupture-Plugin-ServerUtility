@@ -84,7 +84,7 @@ What a player sees: when a player joins with the mod loader and the list has no 
 - **Not me:** closes the prompt. That player is not asked again until the server restarts.
 - **When it ends:** the code is gone once the list has an admin, however that happened (claim, `admin add`, a hand edit and `player reload`). A restart makes a new code if the list is still empty.
 
-Every player with the mod loader is asked once per server run while there is no admin, so the host should be ready to tell the first player the code. A player without the mod loader, or with an older one, is never asked. **The prompt needs a mod loader with plugin interface 79 or newer on both the server and the player's side.** On a mod loader without the prompt the claim is off and `admin code` says to use `admin add`.
+Every player with the mod loader is asked once per server run while there is no admin, so the host should be ready to tell the first player the code. A player without the mod loader, or with an older one, is never asked. **The prompt needs ModLoader 1.27.0 or newer (plugin interface 79) on both the server and the player's side.** On a mod loader without the prompt the claim is off and `admin code` says to use `admin add`.
 
 To turn asking off, set `AdminPrompt=0` in `[Policy]` (`off`, `false` and `no` also work). The code is still shown to the host and `admin add` still works.
 
@@ -115,7 +115,7 @@ How it works. Once an admin is paired and proven, the server sends the current s
 
 The host can tell players' mod loaders to switch a mod's feature off. ServerUtility keeps the rules in `Plugins\config\HostRules.ini` and sends them to the server's mod loader when the server starts and each time you change them. The mod loader passes them to the players' mod loaders, which switch off what a rule denies and show your message. A player without the mod loader is not affected.
 
-**Needs mod loader with plugin interface 79 or newer; older loaders refuse to load it and say a newer loader is needed.** On a mod loader that has no host rules support the rules are still saved, but they are not sent (the log says so, and `hostrules` shows "not sent").
+**Needs ModLoader 1.27.0 or newer (plugin interface 79); older loaders refuse to load it and say a newer loader is needed.** On a mod loader that has no host rules support the rules are still saved, but they are not sent (the log says so, and `hostrules` shows "not sent").
 
 A feature is named `Plugin.feature`; `Plugin.*` means every feature of one mod. `Default` decides what a feature with no rule gets.
 
@@ -421,7 +421,7 @@ All endpoints return `{"ok": false, "error": "<reason>"}` on failure, with an ap
 
 > **Requires [StarRupture-ModLoader](https://github.com/AlienXAXS/StarRupture-ModLoader)** to be installed first.
 
-> **Host rules need a mod loader with plugin interface 79 or newer.** Older loaders refuse to load this build of ServerUtility and say a newer loader is needed.
+> **Host rules need ModLoader 1.27.0 or newer (plugin interface 79).** Older loaders refuse to load this build of ServerUtility and say a newer loader is needed.
 
 ServerUtility takes its game addresses and member offsets from the mod loader's version object map (the version map) first, so the same DLL runs on every server build the version map covers. It also carries its own values for CL 127004, the current 0.3.5 server, so it runs there even when the version map has no entries for that build. On a newer server build it needs the version map's entries for that build. After a game update, update the mod loader to get them.
 
