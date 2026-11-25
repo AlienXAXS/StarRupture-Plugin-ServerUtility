@@ -1,5 +1,6 @@
 #include "client/admin_client.h"
 #include "admin_wire/admin_crypto.h"
+#include "client/admin_view.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -547,6 +548,25 @@ namespace AdminClient
 		if (index >= staged_.size()) return;
 		staged_.erase(staged_.begin() + index);
 		if (index < applyCount_) --applyCount_;
+	}
+
+	bool Client::Replace(const Op& op)
+	{
+		std::lock_guard<std::mutex> lock(mu_);
+		for (size_t i : AdminView::StagedWithTarget(staged_, op))
+		{
+			staged_.erase(staged_.begin() + i);
+			if (i < applyCount_) --applyCount_;
+		}
+		if (AdminView::IsNoop(snapshot_, op)) return true;
+		if (OpArgCount(op.name) != static_cast<int>(op.args.size())) return false;
+		std::vector<Op> trial = staged_;
+		trial.push_back(op);
+		std::string enc;
+		if (!EncodeBatch(trial, 0, snapshot_.revision, enc)) return false;
+		if (staged_.empty()) stagedBase_ = snapshot_.revision;
+		staged_ = std::move(trial);
+		return true;
 	}
 
 	bool Client::Apply()

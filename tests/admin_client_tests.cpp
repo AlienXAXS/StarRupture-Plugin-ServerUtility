@@ -441,6 +441,9 @@ int main()
 		r.client->Unstage(1);
 		CHECK(r.View().staged.size() == 1);
 		CHECK(r.client->Stage(b));
+		Op a2; a2.name = "rule.set"; a2.args = { "k", "allow" };
+		CHECK(r.client->Replace(a2));                        // swaps the staged op for the same key
+		CHECK(r.View().staged.size() == 2 && r.View().staged[1].args[1] == "allow");
 		r.Clear();
 		CHECK(r.client->Apply());
 		const Message* o = r.Last(Tag::Ops);

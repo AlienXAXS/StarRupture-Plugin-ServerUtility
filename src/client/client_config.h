@@ -19,7 +19,7 @@ namespace ServerUtilityClientConfig
 			"Open",
 			ConfigValueType::Boolean,
 			"false",
-			"Open the Server Admin window. Also set by the toggle key."
+			"Open the Server Admin window."
 		}
 	};
 

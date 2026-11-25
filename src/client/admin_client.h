@@ -87,6 +87,9 @@ namespace AdminClient
 		void GetView(View& out);                           // also applies the hello timeout
 		bool Stage(const AdminWire::Op& op);               // false when the batch would not fit one message or the op is unknown
 		void Unstage(size_t index);
+		// One edit under one lock: drops every staged op with the same target as op, then stages op
+		// unless it changes nothing on the server. False when op does not fit (the old ones are still dropped).
+		bool Replace(const AdminWire::Op& op);
 		bool Apply();                                      // one batch, base = snapshot revision; false when nothing to send
 		void Revert();                                     // drops staged ops and asks for a fresh snapshot
 		bool Kick(const std::string& playerId, const std::string& reason);   // sent at once

@@ -130,10 +130,7 @@ namespace
 	// one unless it changes nothing on the server.
 	void Edit(Frame& f, const Op& op)
 	{
-		for (size_t i : AdminView::StagedWithTarget(f.view.staged, op)) f.client->Unstage(i);
-		g_ui.tooManyChanges = false;
-		if (AdminView::IsNoop(f.view.snapshot, op)) return;
-		if (!f.client->Stage(op)) g_ui.tooManyChanges = true;
+		g_ui.tooManyChanges = !f.client->Replace(op);
 	}
 
 	// A key with no rule reads "Default", or "Deny (default)" when a built-in default row denies it.
