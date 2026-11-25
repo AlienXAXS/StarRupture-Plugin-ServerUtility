@@ -1490,13 +1490,13 @@ int main()
 		auto has = [](const std::string& text, const std::string& line) { return text.find("\n" + line + "\n") != std::string::npos || text.rfind(line + "\n", 0) == 0; };
 		std::vector<std::string> dw;
 		const Model none = ParseText({ "[Policy]", "Default=allow" }, dw);
-		const Model deny1 = ParseText({ "[Rules]", "betterCheats.Stack-Size=deny" }, dw);
+		const Model deny1 = ParseText({ "[Rules]", "betterCheats.stack-size=deny" }, dw);
 		const Model allow1 = ParseText({ "[Rules]", "BetterCheats.stack-size=allow" }, dw);
 		const Model star = ParseText({ "[Policy]", "Default=allow", "[Rules]", "BetterCheats.*=allow" }, dw);
 		PlayerFlags plain;
 
-		// The table: every row is a deny, and every other mod name matches without case.
-		CHECK(DefaultRows().size() == 25 && IsDefaultRow("bettercheats", "STACK-SIZE") && IsDefaultRow("best builder", "no-build-cost")
+		// The table: every row is a deny, and a mod name matches without case, a section id exactly.
+		CHECK(DefaultRows().size() == 25 && IsDefaultRow("bettercheats", "stack-size") && !IsDefaultRow("BetterCheats", "Stack-Size") && IsDefaultRow("best builder", "no-build-cost")
 		      && IsDefaultRow("CameraControls", "vitals") && IsDefaultRow("WaveOptimiser", "heat-tools") && !IsDefaultRow("BetterCheats", "wind-mute"));
 
 		// A non-admin is denied; a remote set carries it, a set for no remote connection does not.
@@ -1512,6 +1512,10 @@ int main()
 		CHECK(RulesText(deny1, true).find("tack-") != std::string::npos && !has(RulesText(deny1, true), "BetterCheats.stack-size=deny")
 		      && has(RulesText(deny1, true), "BetterCheats.movement=deny"));
 		CHECK(ActiveDefaultRows(allow1).size() == 24 && ActiveDefaultRows(deny1).size() == 24 && ActiveDefaultRows(none).size() == 25);
+
+		// A different-case id is another section to the loader, so it does not replace the default.
+		const Model oddCase = ParseText({ "[Rules]", "BetterCheats.Stack-Size=allow" }, dw);
+		CHECK(ActiveDefaultRows(oddCase).size() == 25);
 
 		// Plugin.* = allow and [Policy] Default = allow do not open it.
 		CHECK(has(RulesText(star, true), "BetterCheats.*=allow") && has(RulesText(star, true), "BetterCheats.stack-size=deny"));
@@ -1530,6 +1534,9 @@ int main()
 		PlayerFlags exact; exact.sections = { "BetterCheats.stack-size" };
 		const std::string exactText = PlayerRulesText(none, exact, true);
 		CHECK(has(exactText, "BetterCheats.stack-size=allow") && !has(exactText, "BetterCheats.stack-size=deny") && has(exactText, "BetterCheats.movement=deny"));
+		// A Plugin.* key does not take back an exact allow the host wrote.
+		const std::string wideOpened = PlayerRulesText(allow1, wide, true);
+		CHECK(has(wideOpened, "BetterCheats.stack-size=allow") && !has(wideOpened, "BetterCheats.stack-size=deny"));
 		PlayerFlags both; both.sections = { "BetterCheats.*", "BetterCheats.stack-size" };
 		const std::string bothText = PlayerRulesText(star, both, true);
 		CHECK(has(bothText, "BetterCheats.stack-size=allow") && !has(bothText, "BetterCheats.stack-size=deny"));

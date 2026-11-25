@@ -97,9 +97,8 @@ namespace RulesModel
 
 	bool IsDefaultRow(const std::string& plugin, const std::string& id)
 	{
-		const std::string lid = Lower(id);
 		return std::any_of(DefaultRows().begin(), DefaultRows().end(),
-			[&](const DefaultRow& d) { return SamePlugin(d.plugin, plugin) && Lower(d.id) == lid; });
+			[&](const DefaultRow& d) { return SamePlugin(d.plugin, plugin) && id == d.id; });
 	}
 
 	std::vector<DefaultRow> ActiveDefaultRows(const Model& m)
@@ -107,9 +106,8 @@ namespace RulesModel
 		std::vector<DefaultRow> out;
 		for (const DefaultRow& d : DefaultRows())
 		{
-			const std::string lid = Lower(d.id);
 			const bool named = std::any_of(m.rules.begin(), m.rules.end(),
-				[&](const Rule& r) { return SamePlugin(r.plugin, d.plugin) && Lower(r.id) == lid; });
+				[&](const Rule& r) { return SamePlugin(r.plugin, d.plugin) && r.id == d.id; });
 			if (!named) out.push_back(d);
 		}
 		return out;
@@ -325,12 +323,13 @@ namespace RulesModel
 			if (ParseKey(key, r.plugin, r.id, error)) own.push_back(r);
 		}
 
-		// A whole-mod key opens every row of that mod first.
+		// A whole-mod key opens every denied row of that mod first. Allow rows stay,
+		// so an exact allow that opened a default row keeps doing so.
 		for (const Rule& o : own)
 		{
 			if (o.id != "*") continue;
 			rules.erase(std::remove_if(rules.begin(), rules.end(),
-				[&](const Rule& r) { return SamePlugin(r.plugin, o.plugin); }), rules.end());
+				[&](const Rule& r) { return SamePlugin(r.plugin, o.plugin) && (r.deny || r.id == "*"); }), rules.end());
 			rules.push_back({ o.plugin, "*", false });
 		}
 		for (const Rule& o : own)

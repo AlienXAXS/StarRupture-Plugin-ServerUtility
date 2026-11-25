@@ -36,7 +36,7 @@ namespace RulesModel
 	// Each is an exact Plugin.section deny row in the text sent to players, so it
 	// beats Plugin.* and [Policy] Default; only an exact [Rules] line (allow or
 	// deny), or a player's own exact Sections= key, takes its place. Admins and
-	// ExemptRules players get none. Mod and section names match without case.
+	// ExemptRules players get none. Mod names match without case, section ids exactly (as the loader does).
 	// One list, in rules_model.cpp: add a row there.
 	struct DefaultRow { const char* plugin; const char* id; };
 	const std::vector<DefaultRow>& DefaultRows();
