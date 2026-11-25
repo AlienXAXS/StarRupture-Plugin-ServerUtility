@@ -179,6 +179,19 @@ What works today and what does not:
 - **`who <id|number>`** shows one connected player: the player's ID, how many times their mod loader reported its features and when it last did, the mod loader version and the mods with each feature on or off. A player whose mod loader sent nothing shows `no report (vanilla or older loader)`.
 - **Admins and `ExemptRules` players** are exempt: the host's rules are replaced for them by a set with nothing denied (the server message still shows). A player with `Sections=` gets the host's rules with those keys set to allow. Each player is sent their own set, and a change to the rules or to the player list is applied to players already connected.
 
+### Server-wide stack size (Unreleased)
+
+On a dedicated server the host can raise every stackable item's stack to one size, for all players. The size is the `StackSize` key in the `[Server]` section of `Plugins\config\HostRules.ini`; `0` or no key uses the game's own sizes.
+
+```
+[Server]
+StackSize=500
+```
+
+Set it from RCON (`stacksize 500`, `stacksize off`, `stacksize` to read it), from the Server tab of the in-game admin window, or from the admin panel's `/rules/stacksize` route (`stack_size` is a number or `off`; the rules `state` also carries `stack_size` and `stack_size_available`). The range is 0-9999. A change is saved and used within a second.
+
+An item the game gives no stack limit (single items) is left alone, and an item whose own size is already above the setting keeps it. Setting `0`, switching the feature off, or shutting the server down puts every item back to its own size. Solo play and a listen host are not changed. The size is read from the mod loader's version object map (the version map); on a game build with no entry for it the feature turns itself off with one line in the log and `stacksize` says it is not available.
+
 ### Admin API
 
 An HTTP JSON API for remote server administration.
