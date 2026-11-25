@@ -61,6 +61,60 @@ namespace RulesModel
 		}
 	}
 
+	const std::vector<DefaultRow>& DefaultRows()
+	{
+		// Every row is a deny. Mod names are the PluginInfo names, section ids the
+		// ones each mod declares. Information-only features have no row.
+		static const std::vector<DefaultRow> rows = {
+			{ "BetterCheats", "stack-size" },
+			{ "BetterCheats", "player-stats" },
+			{ "BetterCheats", "movement" },
+			{ "BetterCheats", "weapons" },
+			{ "BetterCheats", "grenade-probe" },
+			{ "BetterCheats", "mining-tools" },
+			{ "BetterCheats", "inventory" },
+			{ "BetterCheats", "item-spawner" },
+			{ "BetterCheats", "skills" },
+			{ "BetterCheats", "build-free" },
+			{ "BetterCheats", "build-unlock" },
+			{ "BetterCheats", "build-anywhere" },
+			{ "BetterCheats", "deconstruct-windows" },
+			{ "BetterCheats", "enemies" },
+			{ "BetterCheats", "machine-power" },
+			{ "BetterCheats", "corporations" },
+			{ "BetterCheats", "rupture-wave" },
+			{ "Best Builder", "build-anywhere" },
+			{ "Best Builder", "deconstruct-windows" },
+			{ "Best Builder", "no-build-cost" },
+			{ "Best Builder", "no-stability-check" },
+			{ "Best Builder", "unlock-all-recipes" },
+			{ "Best Builder", "unlock-all-buildings" },
+			{ "CameraControls", "vitals" },
+			{ "WaveOptimiser", "heat-tools" },
+		};
+		return rows;
+	}
+
+	bool IsDefaultRow(const std::string& plugin, const std::string& id)
+	{
+		const std::string lid = Lower(id);
+		return std::any_of(DefaultRows().begin(), DefaultRows().end(),
+			[&](const DefaultRow& d) { return SamePlugin(d.plugin, plugin) && Lower(d.id) == lid; });
+	}
+
+	std::vector<DefaultRow> ActiveDefaultRows(const Model& m)
+	{
+		std::vector<DefaultRow> out;
+		for (const DefaultRow& d : DefaultRows())
+		{
+			const std::string lid = Lower(d.id);
+			const bool named = std::any_of(m.rules.begin(), m.rules.end(),
+				[&](const Rule& r) { return SamePlugin(r.plugin, d.plugin) && Lower(r.id) == lid; });
+			if (!named) out.push_back(d);
+		}
+		return out;
+	}
+
 	bool ValidName(const std::string& s)
 	{
 		return !s.empty() && s.size() <= kMaxNameBytes && s[0] != '$' && s[0] != '#' && s[0] != ';' && !HasControl(s)
@@ -233,11 +287,14 @@ namespace RulesModel
 		return out;
 	}
 
-	std::string RulesText(const Model& m)
+	std::string RulesText(const Model& m, bool remote)
 	{
 		std::string t = std::string("default=") + (m.defaultDeny ? "deny" : "allow") + "\n";
 		if (!m.message.empty()) t += "message=" + m.message + "\n";
 		for (const Rule& r : m.rules) t += r.plugin + "." + r.id + "=" + (r.deny ? "deny" : "allow") + "\n";
+		if (remote)
+			for (const DefaultRow& d : ActiveDefaultRows(m))
+				t += std::string(d.plugin) + "." + d.id + "=deny\n";
 		return t;
 	}
 
@@ -246,10 +303,10 @@ namespace RulesModel
 		return f.exemptRules || !f.sections.empty();
 	}
 
-	std::string PlayerRulesText(const Model& m, const PlayerFlags& f)
+	std::string PlayerRulesText(const Model& m, const PlayerFlags& f, bool remote)
 	{
 		if (!NeedsOwnRules(f))
-			return RulesText(m);
+			return RulesText(m, remote);
 
 		// Nothing denied: the default, the message and no rows.
 		if (f.exemptRules)
@@ -284,12 +341,13 @@ namespace RulesModel
 			auto it = std::find_if(rules.begin(), rules.end(),
 				[&](const Rule& r) { return SamePlugin(r.plugin, o.plugin) && r.id == o.id; });
 			if (it != rules.end()) it->deny = false;
-			else if (!covered || m.defaultDeny) rules.push_back({ o.plugin, o.id, false });
+			// A default row stays denied under a covering Plugin.*, so the exact key is written.
+			else if (!covered || m.defaultDeny || IsDefaultRow(o.plugin, o.id)) rules.push_back({ o.plugin, o.id, false });
 		}
 
 		Model own2 = m;
 		own2.rules = rules;
-		return RulesText(own2);
+		return RulesText(own2, remote);
 	}
 
 	std::string VersionMinimumsText(const Model& m)

@@ -133,6 +133,28 @@ BetterDrone.*=deny
 RuptureTimer=0.11.0
 ```
 
+#### Built-in default rows
+
+ServerUtility ships with rows that deny the cheat-style features of these mods, so a server that never writes a rule still has them off for players:
+
+| Mod | Sections |
+|---|---|
+| BetterCheats | `stack-size`, `player-stats`, `movement`, `weapons`, `grenade-probe`, `mining-tools`, `inventory`, `item-spawner`, `skills`, `build-free`, `build-unlock`, `build-anywhere`, `deconstruct-windows`, `enemies`, `machine-power`, `corporations`, `rupture-wave` |
+| Best Builder | `build-anywhere`, `deconstruct-windows`, `no-build-cost`, `no-stability-check`, `unlock-all-recipes`, `unlock-all-buildings` |
+| CameraControls | `vitals` |
+| WaveOptimiser | `heat-tools` |
+
+They are built into the plugin, so an existing `HostRules.ini` gets them too, and they apply on a server only (to remote players): single player and a listen host's own player see no change. `hostrules` lists them marked `(default)`. Admins, and any player with `ExemptRules`, are exempt like they are from every rule.
+
+Precedence: a `[Rules]` line that names the exact section (`Plugin.section`, `allow` or `deny`) replaces the default. A default beats `Plugin.*` and `[Policy] Default=allow`, so `BetterCheats.*=allow` does not open it: the host names the section. To open one:
+
+```
+[Rules]
+BetterCheats.stack-size=allow
+```
+
+or `hostrules allow BetterCheats.stack-size`. A player's own `Sections=` key opens a default row only when it names the exact section (`BetterCheats.stack-size`); `BetterCheats.*` does not. Mod and section names are matched without regard to case.
+
 Easiest is RCON (see [RCON_README.md](src/RCON_README.md) for every verb):
 
 ```

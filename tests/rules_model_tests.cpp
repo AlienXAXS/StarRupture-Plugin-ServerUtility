@@ -782,7 +782,7 @@ int main()
 	CHECK(m.rules.size() == 3 && m.rules[1].plugin == "BetterCheats" && m.rules[1].id == "movement" && m.rules[1].deny);
 	CHECK(m.modMins.size() == 2);
 	CHECK(m.policyKept.size() == 1 && m.policyKept[0] == "AdminPrompt=1");
-	const std::string text = RulesText(m);
+	const std::string text = RulesText(m, false);
 	CHECK(text == "default=deny\nmessage=Some mods are off here #rules = ok\nBetterCheats.*=allow\nBetterCheats.movement=deny\nBetterDrone.drone-limits=deny\n");
 	CHECK(VersionMinimumsText(m) == "loader=v1.27.0\nRuptureTimer=0.11.0\nproductionviewer=0.19.0\n");
 
@@ -803,7 +803,7 @@ int main()
 	// Empty and comment-only files: allow everything.
 	w.clear();
 	m = ParseText({ "# nothing", "" }, w);
-	CHECK(RulesText(m) == "default=allow\n" && VersionMinimumsText(m).empty() && w.empty());
+	CHECK(RulesText(m, false) == "default=allow\n" && VersionMinimumsText(m).empty() && w.empty());
 
 	// "loader" is the loader's own row, so a mod cannot take that name.
 	w.clear();
@@ -876,28 +876,28 @@ int main()
 	for (auto& l : ModMinLines(m)) file.push_back(l);
 	w.clear();
 	Model back = ParseText(file, w);
-	CHECK(w.empty() && RulesText(back) == RulesText(m) && VersionMinimumsText(back) == VersionMinimumsText(m));
+	CHECK(w.empty() && RulesText(back, false) == RulesText(m, false) && VersionMinimumsText(back) == VersionMinimumsText(m));
 
 	// The rules one player is sent.
 	w.clear();
 	m = ParseText({ "[Policy]", "Default=deny", "Message=Off here", "[Rules]", "BetterCheats.*=allow", "BetterCheats.movement=deny",
 	                "BetterDrone.drone-limits=deny", "Other.x=deny" }, w);
 	PlayerFlags none;
-	CHECK(!NeedsOwnRules(none) && PlayerRulesText(m, none) == RulesText(m));
+	CHECK(!NeedsOwnRules(none) && PlayerRulesText(m, none, false) == RulesText(m, false));
 	PlayerFlags exempt; exempt.exemptRules = true;
-	CHECK(NeedsOwnRules(exempt) && PlayerRulesText(m, exempt) == "default=allow\nmessage=Off here\n");
+	CHECK(NeedsOwnRules(exempt) && PlayerRulesText(m, exempt, false) == "default=allow\nmessage=Off here\n");
 	exempt.sections = { "BetterDrone.drone-limits" };   // exempt wins over sections
-	CHECK(PlayerRulesText(m, exempt) == "default=allow\nmessage=Off here\n");
+	CHECK(PlayerRulesText(m, exempt, false) == "default=allow\nmessage=Off here\n");
 	PlayerFlags sec; sec.sections = { "betterdrone.drone-limits" };
 	CHECK(NeedsOwnRules(sec));
-	CHECK(PlayerRulesText(m, sec) == "default=deny\nmessage=Off here\nBetterCheats.*=allow\nBetterCheats.movement=deny\nBetterDrone.drone-limits=allow\nOther.x=deny\n");
+	CHECK(PlayerRulesText(m, sec, false) == "default=deny\nmessage=Off here\nBetterCheats.*=allow\nBetterCheats.movement=deny\nBetterDrone.drone-limits=allow\nOther.x=deny\n");
 	sec.sections = { "BetterCheats.*", "Other.*" };   // a whole-mod key opens its specific rows
-	CHECK(PlayerRulesText(m, sec) == "default=deny\nmessage=Off here\nBetterDrone.drone-limits=deny\nBetterCheats.*=allow\nOther.*=allow\n");
+	CHECK(PlayerRulesText(m, sec, false) == "default=deny\nmessage=Off here\nBetterDrone.drone-limits=deny\nBetterCheats.*=allow\nOther.*=allow\n");
 	sec.sections = { "New.thing", "bad key", "nodot" };   // a key with no rule is added; unusable keys are skipped
-	CHECK(PlayerRulesText(m, sec).find("New.thing=allow\n") != std::string::npos && PlayerRulesText(m, sec).find("bad") == std::string::npos);
+	CHECK(PlayerRulesText(m, sec, false).find("New.thing=allow\n") != std::string::npos && PlayerRulesText(m, sec, false).find("bad") == std::string::npos);
 	Model open = m; open.defaultDeny = false;
 	sec.sections = { "Fresh.thing" };
-	CHECK(PlayerRulesText(open, sec).find("Fresh.thing=allow\n") != std::string::npos);   // still stands alone with default allow
+	CHECK(PlayerRulesText(open, sec, false).find("Fresh.thing=allow\n") != std::string::npos);   // still stands alone with default allow
 
 	// Claim code: making one.
 	{
@@ -1404,7 +1404,7 @@ int main()
 		CHECK(!SetModMin(sp, std::string(65, 'a'), "1.0.0", e) && SetModMin(sp, std::string(64, 'a'), "1.0.0", e));
 		CHECK(!SetModMin(sp, "Best.Builder", "1.0.0", e));
 		CHECK(SetModMin(sp, std::string(64, 'a'), "", e));
-		CHECK(RulesText(sp) == "default=allow\nBest Builder.some_feature=allow\nBest Builder.other=deny\n");
+		CHECK(RulesText(sp, false) == "default=allow\nBest Builder.some_feature=allow\nBest Builder.other=deny\n");
 		CHECK(VersionMinimumsText(sp) == "Best Builder=1.3.0\n");
 
 		// The file round trip: written rows read back the same, outer spaces trimmed.
@@ -1483,6 +1483,56 @@ int main()
 
 		// An unquoted space still ends the value, as before.
 		CHECK(PlayerList::ParseLine("3=Bob|Sections=Best Builder.x", back) && back.sections.size() == 1 && back.sections[0] == "Best");
+	}
+
+	// Built-in default rows.
+	{
+		auto has = [](const std::string& text, const std::string& line) { return text.find("\n" + line + "\n") != std::string::npos || text.rfind(line + "\n", 0) == 0; };
+		std::vector<std::string> dw;
+		const Model none = ParseText({ "[Policy]", "Default=allow" }, dw);
+		const Model deny1 = ParseText({ "[Rules]", "betterCheats.Stack-Size=deny" }, dw);
+		const Model allow1 = ParseText({ "[Rules]", "BetterCheats.stack-size=allow" }, dw);
+		const Model star = ParseText({ "[Policy]", "Default=allow", "[Rules]", "BetterCheats.*=allow" }, dw);
+		PlayerFlags plain;
+
+		// The table: every row is a deny, and every other mod name matches without case.
+		CHECK(DefaultRows().size() == 25 && IsDefaultRow("bettercheats", "STACK-SIZE") && IsDefaultRow("best builder", "no-build-cost")
+		      && IsDefaultRow("CameraControls", "vitals") && IsDefaultRow("WaveOptimiser", "heat-tools") && !IsDefaultRow("BetterCheats", "wind-mute"));
+
+		// A non-admin is denied; a remote set carries it, a set for no remote connection does not.
+		CHECK(has(RulesText(none, true), "BetterCheats.stack-size=deny") && has(RulesText(none, true), "Best Builder.unlock-all-buildings=deny"));
+		CHECK(RulesText(none, false) == "default=allow\n");
+		CHECK(PlayerRulesText(none, plain, true) == RulesText(none, true));
+		PlayerFlags sec;
+		sec.sections = { "Other.thing" };
+		CHECK(has(PlayerRulesText(none, sec, true), "BetterCheats.stack-size=deny") && PlayerRulesText(none, sec, false).find("BetterCheats") == std::string::npos);
+
+		// An exact ini line (either value) replaces the default.
+		CHECK(!has(RulesText(allow1, true), "BetterCheats.stack-size=deny") && has(RulesText(allow1, true), "BetterCheats.stack-size=allow"));
+		CHECK(RulesText(deny1, true).find("tack-") != std::string::npos && !has(RulesText(deny1, true), "BetterCheats.stack-size=deny")
+		      && has(RulesText(deny1, true), "BetterCheats.movement=deny"));
+		CHECK(ActiveDefaultRows(allow1).size() == 24 && ActiveDefaultRows(deny1).size() == 24 && ActiveDefaultRows(none).size() == 25);
+
+		// Plugin.* = allow and [Policy] Default = allow do not open it.
+		CHECK(has(RulesText(star, true), "BetterCheats.*=allow") && has(RulesText(star, true), "BetterCheats.stack-size=deny"));
+		CHECK(has(RulesText(none, true), "BetterCheats.stack-size=deny"));
+
+		// An admin (or any ExemptRules entry) gets nothing denied, even with a Sections= key.
+		PlayerFlags admin; admin.exemptRules = true;
+		CHECK(PlayerRulesText(none, admin, true) == "default=allow\n");
+		admin.sections = { "BetterCheats.stack-size" };
+		CHECK(PlayerRulesText(none, admin, true) == "default=allow\n");
+
+		// A player's Sections= grant: Plugin.* leaves the default denied, the exact key opens it.
+		PlayerFlags wide; wide.sections = { "BetterCheats.*" };
+		const std::string wideText = PlayerRulesText(none, wide, true);
+		CHECK(has(wideText, "BetterCheats.*=allow") && has(wideText, "BetterCheats.stack-size=deny"));
+		PlayerFlags exact; exact.sections = { "BetterCheats.stack-size" };
+		const std::string exactText = PlayerRulesText(none, exact, true);
+		CHECK(has(exactText, "BetterCheats.stack-size=allow") && !has(exactText, "BetterCheats.stack-size=deny") && has(exactText, "BetterCheats.movement=deny"));
+		PlayerFlags both; both.sections = { "BetterCheats.*", "BetterCheats.stack-size" };
+		const std::string bothText = PlayerRulesText(star, both, true);
+		CHECK(has(bothText, "BetterCheats.stack-size=allow") && !has(bothText, "BetterCheats.stack-size=deny"));
 	}
 
 	std::printf("%d checks, %d failed\n", g_checks, g_failed);

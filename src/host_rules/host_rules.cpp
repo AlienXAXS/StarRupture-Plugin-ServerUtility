@@ -129,7 +129,7 @@ namespace
 		{
 			std::lock_guard<std::mutex> lk(g_mutex);
 			if (needsOwn)
-				text = RulesModel::PlayerRulesText(g_model, flags);
+				text = RulesModel::PlayerRulesText(g_model, flags, true);
 			auto it = g_ownRules.find(id);
 			if (it != g_ownRules.end()) { hadOwn = true; last = it->second; }
 		}
@@ -367,7 +367,7 @@ namespace
 		std::string text, minimums;
 		{
 			std::lock_guard<std::mutex> lk(g_mutex);
-			text = RulesModel::RulesText(g_model);
+			text = RulesModel::RulesText(g_model, true);
 			minimums = RulesModel::VersionMinimumsText(g_model);
 		}
 		PushText(text);

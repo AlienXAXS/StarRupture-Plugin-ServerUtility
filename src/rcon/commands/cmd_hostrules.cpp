@@ -91,6 +91,8 @@ namespace Cmd_HostRules
 			oss << "  message: " << (m.message.empty() ? "(none)" : m.message) << "\n";
 			if (m.rules.empty()) oss << "  rules: none\n";
 			else for (const auto& r : m.rules) oss << "  " << r.plugin << "." << r.id << " = " << (r.deny ? "deny" : "allow") << "\n";
+			// Built in; an exact rule above replaces one. Admins are exempt.
+			for (const auto& d : RulesModel::ActiveDefaultRows(m)) oss << "  " << d.plugin << "." << d.id << " = deny (default)\n";
 			oss << "  minimum loader version: " << (m.minLoaderVersion.empty() ? "off" : m.minLoaderVersion) << "\n";
 			if (m.modMins.empty()) oss << "  minimum mod versions: none\n";
 			else for (const auto& r : m.modMins) oss << "  minimum " << r.plugin << ": " << r.version << "\n";

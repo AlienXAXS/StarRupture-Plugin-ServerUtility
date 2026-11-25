@@ -32,8 +32,23 @@ namespace RulesModel
 	std::vector<std::string> RuleLines(const Model& m);
 	std::vector<std::string> ModMinLines(const Model& m);
 
+	// The built-in default rows: sections a server denies without being told to.
+	// Each is an exact Plugin.section deny row in the text sent to players, so it
+	// beats Plugin.* and [Policy] Default; only an exact [Rules] line (allow or
+	// deny), or a player's own exact Sections= key, takes its place. Admins and
+	// ExemptRules players get none. Mod and section names match without case.
+	// One list, in rules_model.cpp: add a row there.
+	struct DefaultRow { const char* plugin; const char* id; };
+	const std::vector<DefaultRow>& DefaultRows();
+	// True when plugin.id is one of the default rows.
+	bool IsDefaultRow(const std::string& plugin, const std::string& id);
+	// The default rows in force: those no [Rules] line names exactly.
+	std::vector<DefaultRow> ActiveDefaultRows(const Model& m);
+
 	// What SetRules takes: default=, message=, one Plugin.feature=allow|deny per rule.
-	std::string RulesText(const Model& m);
+	// remote: the text goes to remote connections, so the default rows are added.
+	// False (a set for the listen host's own player, or for no connection) adds none.
+	std::string RulesText(const Model& m, bool remote);
 	// What one player's entry changes in the rules that player is sent.
 	struct PlayerFlags
 	{
@@ -46,7 +61,7 @@ namespace RulesModel
 	// It stands alone (default and message too) because the loader's per-player
 	// set replaces the global one. ExemptRules: nothing denied. Sections: those
 	// keys are allowed, ahead of any global rule for the same mod.
-	std::string PlayerRulesText(const Model& m, const PlayerFlags& f);
+	std::string PlayerRulesText(const Model& m, const PlayerFlags& f, bool remote);
 
 	// What SetVersionMinimums takes: loader=version first (when set), then one
 	// Plugin=version line per mod minimum. Empty when every minimum is off.
