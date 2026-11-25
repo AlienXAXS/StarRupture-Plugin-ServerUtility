@@ -853,8 +853,12 @@ int main()
 		s.revision = 6;
 		s.rules.push_back({ "a", "allow" });
 		std::vector<std::string> pages = EncodeSnapshot(s);
-		r.FeedRaw(std::string("snap-future") + kUS + "1" + kUS + "x");
-		for (const std::string& e : pages) r.FeedRaw(e);
+		CHECK(pages.size() > 2);
+		for (size_t i = 0; i < pages.size(); ++i)
+		{
+			r.FeedRaw(pages[i]);
+			if (i == 1) r.FeedRaw(std::string("snap-future") + kUS + "1" + kUS + "x");   // between pages
+		}
 		v = r.View();
 		CHECK(v.status == Status::Ready && v.snapshot.revision == 6 && v.snapshot.defaults.empty() && !v.lastResultIsError);
 	}

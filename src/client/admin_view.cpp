@@ -157,14 +157,14 @@ namespace AdminView
 		return std::string();
 	}
 
+	static std::string Lower(const std::string& s);
+
 	// "plugin.id" with the plugin lower-cased, split at the first dot.
 	static std::string RuleKeyForMatch(const std::string& key)
 	{
 		const size_t dot = key.find('.');
 		if (dot == std::string::npos) return key;
-		std::string plugin = key.substr(0, dot);
-		for (char& c : plugin) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-		return plugin + key.substr(dot);
+		return Lower(key.substr(0, dot)) + key.substr(dot);
 	}
 
 	bool IsDefaultDenied(const Snapshot& s, const std::string& key)

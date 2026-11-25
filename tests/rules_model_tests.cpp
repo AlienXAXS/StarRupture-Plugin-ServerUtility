@@ -393,6 +393,7 @@ namespace
 		snap.defaultPolicy = "deny";
 		snap.message = "Welcome";
 		snap.rules.push_back({ "Best Builder.fast", "deny" });
+		snap.defaults.push_back("Best Builder.build-anywhere");
 		snap.mins.push_back({ "", "1.27.0" });
 		snap.mins.push_back({ "Best Builder", "0.2.0" });
 		for (int i = 0; i < mods; ++i)
@@ -447,7 +448,7 @@ static void InGameAdminOpsTests()
 		CHECK(msgs.size() > 2 && msgs[1].tag == Tag::SnapBegin && msgs[1].revision == 7);
 		CHECK(!msgs.empty() && msgs.back().tag == Tag::SnapEnd && msgs.back().revision == 7);
 		CHECK(msgs.size() > 3 && msgs[2].tag == Tag::SnapPolicy);
-		size_t mods = 0, players = 0, rules = 0, mins = 0;
+		size_t mods = 0, players = 0, rules = 0, mins = 0, defaults = 0;
 		bool allSmall = true, spaced = false;
 		for (size_t i = 0; i < raw.size(); ++i)
 		{
@@ -456,10 +457,22 @@ static void InGameAdminOpsTests()
 			if (msgs[i].tag == Tag::SnapPlayer && !msgs[i].cont) ++players;
 			if (msgs[i].tag == Tag::SnapRule) rules += msgs[i].rules.size();
 			if (msgs[i].tag == Tag::SnapMin) mins += msgs[i].mins.size();
+			if (msgs[i].tag == Tag::SnapDefault) defaults += msgs[i].keys.size();
 		}
 		CHECK(allSmall);
 		CHECK(mods == 30 && players == 40 && rules == 1 && mins == 2);
+		CHECK(defaults == 1);   // a full snapshot carries the default-denied keys
 		CHECK(spaced);
+
+		// A mods-only snapshot carries the catalog and none of the defaults.
+		AdminWire::Message modsOnly; modsOnly.tag = Tag::Snap; modsOnly.sections = "mods";
+		size_t modsOnlyDefaults = 0, modsOnlyMods = 0;
+		for (const auto& d : IgaDecode(IgaRaw(*s, 1, "p1", modsOnly)))
+		{
+			if (d.tag == Tag::SnapDefault) modsOnlyDefaults += d.keys.size();
+			if (d.tag == Tag::SnapMod && !d.cont) ++modsOnlyMods;
+		}
+		CHECK(modsOnlyDefaults == 0 && modsOnlyMods == 30);
 
 		// A snap request gets it again; a connection that is not proven gets nothing.
 		AdminWire::Message snap; snap.tag = Tag::Snap; snap.sections = "all";
