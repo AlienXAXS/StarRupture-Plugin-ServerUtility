@@ -57,7 +57,8 @@ namespace KnownFeatures
 	{
 	public:
 		// True when the catalog changed. Rows with a bad plugin name or feature id,
-		// and new rows past kMaxRows, are refused; a title is cut to 80
+		// are refused; a new row in a full catalog replaces the reported row with
+		// the oldest lastSeen (declared rows stay, and are refused when all are declared); a title is cut to 80
 		// bytes. today is YYYY-MM-DD. *visible, when given, is set when something a
 		// window shows changed (a new row, version, title or off build) - a newer
 		// lastSeen alone is a change to save, not to show.
@@ -75,6 +76,7 @@ namespace KnownFeatures
 		int Parse(const std::string& text);
 
 	private:
+		bool EvictOldestReported();
 		std::map<std::string, Entry> m_rows;   // lower-case "plugin.id"
 		std::set<std::string> m_versionWarned;   // lower-case plugin names
 		std::vector<std::string> m_newVersionWarn;

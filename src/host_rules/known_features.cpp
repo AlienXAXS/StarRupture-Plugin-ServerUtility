@@ -145,6 +145,21 @@ namespace KnownFeatures
 		return out;
 	}
 
+	// A full catalog drops the reported row seen longest ago, so a new feature can
+	// still get in; rows a plugin declared stay. False when every row is declared.
+	bool Catalog::EvictOldestReported()
+	{
+		auto oldest = m_rows.end();
+		for (auto it = m_rows.begin(); it != m_rows.end(); ++it)
+		{
+			if (it->second.source != kSourceReported) continue;
+			if (oldest == m_rows.end() || it->second.lastSeen < oldest->second.lastSeen) oldest = it;
+		}
+		if (oldest == m_rows.end()) return false;
+		m_rows.erase(oldest);
+		return true;
+	}
+
 	bool Catalog::Merge(const Report& rIn, const std::string& today, bool* visible)
 	{
 		Report r = rIn;
@@ -175,7 +190,7 @@ namespace KnownFeatures
 		auto it = m_rows.find(key);
 		if (it == m_rows.end())
 		{
-			if (m_rows.size() >= kMaxRows)
+			if (m_rows.size() >= kMaxRows && !EvictOldestReported())
 				return false;
 			m_rows.emplace(key, std::move(e));
 			shown = true;
