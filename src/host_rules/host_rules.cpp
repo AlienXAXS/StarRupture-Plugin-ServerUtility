@@ -115,13 +115,12 @@ namespace
 		if (!api)
 			return;
 
+		// An ID alone is not proof: another player can claim it. The flags that loosen a rule
+		// apply only to a connection that proved the pairing secret as this ID.
 		RulesModel::PlayerFlags flags;
 		PlayerList::Entry entry;
-		if (PlayerList::Find(id, entry))
-		{
-			flags.exemptRules = entry.ExemptsRules();
-			flags.sections = entry.sections;
-		}
+		if (PlayerList::Find(id, entry) && entry.NeedsProof())
+			flags = RulesModel::FlagsFor(entry.ExemptsRules(), entry.sections, InGameAdmin::IsProven(playerController, id));
 
 		const bool needsOwn = RulesModel::NeedsOwnRules(flags);
 		std::string text, last;

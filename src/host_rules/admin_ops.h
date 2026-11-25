@@ -99,6 +99,12 @@ namespace AdminOps
 	Result Run(const Caller& caller, const Op& op);
 	Backend& HostBackend();
 
+	// The one connected player a kick by ID means: its position in connectedIds. An ID is not
+	// proof of a player, so when two connections share it nothing is chosen and error says so
+	// (the same words the admin panel uses).
+	constexpr const char* kAmbiguousIdText = "more than one connected player has that ID";
+	bool UniqueConnected(const std::vector<std::string>& connectedIds, const std::string& id, size_t& position, std::string& error);
+
 	// The server-wide counter. It goes up once for every applied batch from any
 	// front end, and for a reload or an edit made outside AdminOps (NoteChanged).
 	uint64_t Revision();

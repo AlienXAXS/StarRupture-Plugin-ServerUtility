@@ -349,6 +349,20 @@ namespace AdminOps
 		return r;
 	}
 
+	bool UniqueConnected(const std::vector<std::string>& connectedIds, const std::string& id, size_t& position, std::string& error)
+	{
+		bool found = false;
+		for (size_t i = 0; i < connectedIds.size(); ++i)
+		{
+			if (connectedIds[i] != id) continue;
+			if (found) { error = kAmbiguousIdText; return false; }
+			found = true;
+			position = i;
+		}
+		if (!found) { error = "player not found"; return false; }
+		return true;
+	}
+
 	uint64_t Revision() { return g_revision.load(); }
 
 	int AddListener(Listener listener)

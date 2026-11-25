@@ -301,6 +301,17 @@ namespace RulesModel
 		return t;
 	}
 
+	PlayerFlags FlagsFor(bool exemptRules, const std::vector<std::string>& sections, bool proven)
+	{
+		PlayerFlags f;
+		if (proven)
+		{
+			f.exemptRules = exemptRules;
+			f.sections = sections;
+		}
+		return f;
+	}
+
 	bool NeedsOwnRules(const PlayerFlags& f)
 	{
 		return f.exemptRules || !f.sections.empty();

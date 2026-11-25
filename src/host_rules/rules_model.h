@@ -55,6 +55,9 @@ namespace RulesModel
 		bool exemptRules = false;               // Admin counts as this
 		std::vector<std::string> sections;      // Plugin.feature or Plugin.* keys allowed for this player
 	};
+	// The flags a connection gets from its list entry. An ID alone is not proof, so a connection
+	// that has not proved the pairing secret as that ID gets none: the default rules apply.
+	PlayerFlags FlagsFor(bool exemptRules, const std::vector<std::string>& sections, bool proven);
 	// True when the player needs a rules set of their own (a flag changes the result).
 	bool NeedsOwnRules(const PlayerFlags& f);
 	// The rules text for one player: the global rules with the flags applied.

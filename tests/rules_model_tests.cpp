@@ -47,6 +47,8 @@ namespace
 	struct IgaEnv
 	{
 		std::set<std::string> admins;
+		std::set<std::string> rulesFlagged;   // IDs with ExemptRules or Sections= but no Admin
+		int proofChanges = 0;
 		double now = 1000;
 		bool on = true;
 		std::vector<std::string> audit;
@@ -63,6 +65,8 @@ namespace
 		InGameAdminModel::Env env;
 		env.enabled = [&e] { return e.on; };
 		env.isAdmin = [&e](const std::string& id) { return e.admins.count(id) > 0; };
+		env.canProve = [&e](const std::string& id) { return e.rulesFlagged.count(id) > 0; };
+		env.proofChanged = [&e] { ++e.proofChanges; };
 		env.revision = [] { return 7u; };
 		env.now = [&e] { return e.now; };
 		env.audit = [&e](const std::string& line) { e.audit.push_back(line); };
@@ -762,6 +766,127 @@ static void InGameAdminOpsTests()
 	}
 }
 
+// A [Players] flag that gives something or loosens a rule counts only on a connection that proved
+// the pairing secret as that ID. ExemptVersion stays on the ID.
+static void ProofGateTests()
+{
+	using AdminWire::Tag;
+	const std::string path = (std::filesystem::temp_directory_path() / "su-iga-gate-test.txt").string();
+	std::filesystem::remove(path);
+
+	RulesModel::Model model;
+	model.defaultDeny = false;
+	PlayerList::Entry flagged;
+	flagged.id = "p1"; flagged.exemptRules = true; flagged.sections = { "Codex.map" };
+
+	// What ApplyRules does for one connection: the flags its entry gets, for that proof state.
+	const auto flagsFor = [&](InGameAdminModel::Server& s, uint64_t conn, const std::string& id)
+	{
+		return RulesModel::FlagsFor(flagged.ExemptsRules(), flagged.sections, s.IsProvenAs(conn, id));
+	};
+
+	// A spoofed ID with no proof gets the default rules; the same ID with proof gets the flags.
+	{
+		IgaEnv e; e.path = path; e.rulesFlagged = { "p1" };
+		auto s = MakeIga(e);
+		CHECK(!RulesModel::NeedsOwnRules(flagsFor(*s, 1, "p1")));
+		CHECK(RulesModel::PlayerRulesText(model, flagsFor(*s, 1, "p1"), true) == RulesModel::RulesText(model, true));
+
+		// Hello alone proves nothing, and a wrong proof does not either.
+		CHECK(IgaChallenge(*s, 1, "p1") != "");
+		CHECK(!RulesModel::NeedsOwnRules(flagsFor(*s, 1, "p1")));
+		AdminWire::Message bad; bad.tag = Tag::Prove; bad.proof = std::string(64, '0');
+		IgaSend(*s, 1, "p1", bad);
+		CHECK(!RulesModel::NeedsOwnRules(flagsFor(*s, 1, "p1")));
+		CHECK(e.proofChanges == 0);
+
+		std::string code, err;
+		CHECK(s->IssueCode("p1", code, err));
+		CHECK(IgaChallenge(*s, 2, "p1") != "");
+		CHECK(IgaRole(IgaSend(*s, 2, "p1", IgaPair(code, kSecretA))) == "paired");
+		CHECK(s->IsProvenAs(2, "p1"));
+		CHECK(RulesModel::NeedsOwnRules(flagsFor(*s, 2, "p1")));
+		CHECK(RulesModel::PlayerRulesText(model, flagsFor(*s, 2, "p1"), true) != RulesModel::RulesText(model, true));
+		CHECK(e.proofChanges == 1);   // the rules are sent again when the proof lands
+
+		// The other connection with the same ID stays on the default rules.
+		CHECK(!RulesModel::NeedsOwnRules(flagsFor(*s, 1, "p1")));
+
+		// The server reads another ID on the next packet: the proof and the flags go, rules are re-sent.
+		IgaSend(*s, 2, "p2", IgaHello());
+		CHECK(!s->IsProvenAs(2, "p1") && !s->IsProvenAs(2, "p2") && !s->IsProven(2));
+		CHECK(!RulesModel::NeedsOwnRules(flagsFor(*s, 2, "p1")));
+		CHECK(e.proofChanges == 2);
+
+		// The ID read right now must be the proven one, with no packet in between.
+		const std::string sid = s->ServerId();
+		AdminWire::Message prove; prove.tag = Tag::Prove;
+		AdminCrypto::MakeProof(kSecretA, IgaChallenge(*s, 3, "p1"), sid, prove.proof);
+		CHECK(IgaRole(IgaSend(*s, 3, "p1", prove)) == "paired");
+		CHECK(s->IsProvenAs(3, "p1") && !s->IsProvenAs(3, "p9"));
+		std::filesystem::remove(path);
+	}
+
+	// A flagged non-admin ID is challenged and pairs, but gets no admin tool.
+	{
+		IgaEnv e; e.path = path; e.rulesFlagged = { "r1" };
+		int opsRun = 0;
+		e.snapshot = [] { return IgaState(1, 1); };
+		e.runOps = [&](const std::string&, const std::string&, const std::vector<AdminWire::Op>&, uint32_t)
+		{ ++opsRun; InGameAdminModel::OpsOutcome o; o.ok = true; return o; };
+		auto s = MakeIga(e);
+
+		// An ID with no flag at all gets no challenge and cannot get a code.
+		std::string code, err;
+		CHECK(!s->IssueCode("nobody", code, err));
+		CHECK(IgaRole(IgaSend(*s, 9, "nobody", IgaHello())) == "none");
+
+		CHECK(s->IssueCode("r1", code, err));
+		CHECK(IgaChallenge(*s, 1, "r1") != "");
+		const auto pairReply = IgaDecode(IgaRaw(*s, 1, "r1", IgaPair(code, kSecretA)));
+		CHECK(pairReply.size() == 1 && pairReply[0].tag == Tag::Welcome && pairReply[0].role == "paired");   // no snapshot
+		CHECK(s->IsProven(1));
+		CHECK(IgaRaw(*s, 1, "r1", IgaOps(1, 7, { { "policy.default", { "allow" } } })).empty());
+		CHECK(opsRun == 0);
+
+		// It proves with the secret later, still without an admin tool.
+		const std::string sid = s->ServerId();
+		AdminWire::Message prove; prove.tag = Tag::Prove;
+		AdminCrypto::MakeProof(kSecretA, IgaChallenge(*s, 2, "r1"), sid, prove.proof);
+		CHECK(IgaRole(IgaSend(*s, 2, "r1", prove)) == "paired");
+		CHECK(s->IsProvenAs(2, "r1"));
+
+		// The flag removed: the proof goes with it on the next change.
+		e.rulesFlagged.clear();
+		s->OnPlayersChanged();
+		CHECK(!s->IsProven(1) && !s->IsProven(2));
+		CHECK(!s->HasSecret("r1"));
+		std::filesystem::remove(path);
+	}
+
+	// A kick by ID needs exactly one connected player with that ID.
+	{
+		std::string err;
+		size_t pos = 99;
+		CHECK(AdminOps::UniqueConnected({ "a", "b", "c" }, "b", pos, err) && pos == 1);
+		CHECK(!AdminOps::UniqueConnected({ "a", "b", "b" }, "b", pos, err) && err == AdminOps::kAmbiguousIdText);
+		CHECK(!AdminOps::UniqueConnected({ "a", "b" }, "z", pos, err) && err == "player not found");
+		CHECK(!AdminOps::UniqueConnected({}, "z", pos, err));
+	}
+
+	// ExemptVersion works on the ID alone; Admin keeps implying it. The listen host and solo have
+	// no list entry or no connection to prove, so the gate changes nothing for them.
+	{
+		PlayerList::Entry v; v.id = "v1"; v.exemptVersion = true;
+		CHECK(v.ExemptsVersion() && !v.NeedsProof() && !v.ExemptsRules());
+		PlayerList::Entry a; a.id = "a1"; a.admin = true;
+		CHECK(a.ExemptsVersion() && a.ExemptsRules() && a.NeedsProof());
+		CHECK(!RulesModel::NeedsOwnRules(RulesModel::FlagsFor(false, {}, true)));
+		CHECK(!RulesModel::NeedsOwnRules(RulesModel::FlagsFor(true, { "x.y" }, false)));
+		CHECK(RulesModel::NeedsOwnRules(RulesModel::FlagsFor(false, { "x.y" }, true)));
+	}
+}
+
 int main()
 {
 	std::vector<std::string> w;
@@ -1402,6 +1527,7 @@ int main()
 
 	InGameAdminTests();
 	InGameAdminOpsTests();
+	ProofGateTests();
 
 	// Mod names with single inner spaces, as the mod loader allows them.
 	{

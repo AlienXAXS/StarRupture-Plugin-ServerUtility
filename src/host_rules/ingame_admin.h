@@ -19,6 +19,11 @@ namespace InGameAdmin
 	bool IssueCode(const std::string& playerId, std::string& code, std::string& error);
 	bool Unpair(const std::string& playerId);
 
+	// True when this controller proved the pairing secret this session, as the ID the server
+	// reads for it now. A [Players] flag that gives something or loosens a rule asks this first:
+	// an ID alone is not proof.
+	bool IsProven(void* playerController, const std::string& playerId);
+
 	// The player just completed the admin claim on this controller: that connection
 	// alone may pair without a code.
 	void OnClaimed(void* playerController, const std::string& playerId);

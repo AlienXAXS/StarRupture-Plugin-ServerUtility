@@ -25,6 +25,8 @@ namespace PlayerList
 
 		bool ExemptsVersion() const { return admin || exemptVersion; }
 		bool ExemptsRules()   const { return admin || exemptRules; }
+		// Flags that give something or loosen a rule: the player must prove the pairing secret first, an ID alone is not proof.
+		bool NeedsProof()     const { return admin || exemptRules || !sections.empty(); }
 	};
 
 	// Pure helpers (no file or engine access).

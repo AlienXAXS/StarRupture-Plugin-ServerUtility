@@ -41,6 +41,12 @@ namespace InGameAdminModel
 	{
 		std::function<bool()>                          enabled;    // [Policy] InGameAdmin
 		std::function<bool(const std::string&)>        isAdmin;    // the player list's Admin flag
+		// The ID has a flag that gives something or loosens a rule (Admin, ExemptRules, Sections=): it
+		// may pair and prove. Admin counts whether or not this is set.
+		std::function<bool(const std::string&)>        canProve;
+		// Some connection started or stopped being proven. Called with no lock held, on the thread
+		// that made the change, so the host can re-send that connection's rules.
+		std::function<void()>                          proofChanged;
 		std::function<uint32_t()>                      revision;   // AdminOps::Revision
 		std::function<double()>                        now;        // seconds, steady
 		std::function<bool(size_t, std::vector<uint8_t>&)> random; // empty = the system generator
@@ -83,11 +89,14 @@ namespace InGameAdminModel
 		void OnWorldEnd();
 
 		// True when the connection proved its secret (or paired) this session and
-		// its server-read ID still has the Admin flag as of the last check.
+		// its server-read ID still has a flag that needs proof as of the last check.
 		bool IsProven(ConnId conn) const;
+		// The same, and the connection's ID as the server reads it now is still the ID it proved.
+		// What a flag that grants something must ask: the ID can change between packets.
+		bool IsProvenAs(ConnId conn, const std::string& currentId) const;
 
 		// RCON `admin pair`: a one-time code for this ID. False with a reason when
-		// the ID has no Admin flag. Any thread.
+		// the ID has no flag that needs proof. Any thread.
 		bool IssueCode(const std::string& playerId, std::string& code, std::string& error);
 
 		// RCON `admin unpair`: drop the secret and un-prove the ID's connections.
@@ -147,6 +156,9 @@ namespace InGameAdminModel
 		std::vector<std::string> CatalogPush(ConnId conn, const AdminWire::Message& m) const;
 		std::vector<std::string> RunOps(ConnId conn, const std::string& playerId, const std::string& name, const AdminWire::Message& m) const;
 		void UnproveIdLocked(const std::string& id);
+		void SetProvenLocked(Conn& c, bool proven);
+		bool CanProve(const std::string& id) const;
+		struct ProofWatch;   // calls env_.proofChanged when a method changed who is proven
 		void EraseClaimedLocked(const std::string& playerId);
 
 		Env                            env_;
@@ -154,6 +166,7 @@ namespace InGameAdminModel
 		std::string                    serverId_;
 		std::map<std::string, std::string> secrets_;   // player ID -> secret (hex)
 		std::map<ConnId, Conn>         conns_;
+		uint64_t                       provenEpoch_ = 0;   // counts proven/not-proven flips
 		std::map<std::string, Code>    codes_;         // player ID -> open pairing code
 		struct Claimed { std::string id; double expires = 0; };
 		std::map<ConnId, Claimed>      claimed_;       // connection that claimed -> claim shortcut

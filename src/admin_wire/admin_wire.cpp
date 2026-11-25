@@ -295,7 +295,7 @@ Decoded Decode(const std::string& data, Message& out)
 	{
 	case Tag::Hello: ok = n == 2; break;
 	case Tag::Welcome:
-		ok = n == 4 && (f[2] == kRoleAdmin || f[2] == kRolePair || f[2] == kRoleNone || f[2] == kRoleUpdate) && ParseNum(f[3], m.revision);
+		ok = n == 4 && (f[2] == kRoleAdmin || f[2] == kRolePair || f[2] == kRoleNone || f[2] == kRoleUpdate || f[2] == kRolePaired) && ParseNum(f[3], m.revision);
 		m.role = f[2];
 		break;
 	case Tag::Snap: ok = n == 3; m.sections = f[2]; break;

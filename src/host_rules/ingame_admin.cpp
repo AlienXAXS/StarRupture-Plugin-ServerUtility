@@ -323,6 +323,8 @@ namespace InGameAdmin
 		InGameAdminModel::Env env;
 		env.enabled   = [] { return Enabled(); };
 		env.isAdmin   = [](const std::string& id) { PlayerList::Entry e; return PlayerList::Find(id, e) && e.admin; };
+		env.canProve  = [](const std::string& id) { PlayerList::Entry e; return PlayerList::Find(id, e) && e.NeedsProof(); };
+		env.proofChanged = [] { HostRules::RefreshPlayers(); };
 		env.revision  = [] { return static_cast<uint32_t>(AdminOps::Revision()); };
 		env.now       = &NowSeconds;
 		env.audit     = [](const std::string& line) { LOG_INFO("%s", line.c_str()); };
@@ -408,6 +410,24 @@ namespace InGameAdmin
 	{
 		const std::shared_ptr<InGameAdminModel::Server> model = ModelPtr();
 		return model && model->Unpair(playerId);
+	}
+
+	bool IsProven(void* playerController, const std::string& playerId)
+	{
+		const std::shared_ptr<InGameAdminModel::Server> model = ModelPtr();
+		if (!model || !playerController || playerId.empty() || !Enabled()) return false;
+		const ObjectRef<SDK::APlayerController> ref(static_cast<SDK::APlayerController*>(playerController));
+		ConnId conn = 0;
+		{
+			std::lock_guard<std::mutex> lk(g_mutex);
+			for (const Connection& c : g_conns)
+				if (c.ref == ref)
+				{
+					conn = c.id;
+					break;
+				}
+		}
+		return conn && model->IsProvenAs(conn, playerId);
 	}
 
 	void OnClaimed(void* playerController, const std::string& playerId)

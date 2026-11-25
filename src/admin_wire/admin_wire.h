@@ -46,6 +46,7 @@ namespace AdminWire
 	constexpr const char* kRoleNone   = "none";
 	constexpr const char* kRolePair   = "pair";     // Admin flag but not proven: show the pairing box
 	constexpr const char* kRoleUpdate = "update";   // protocol mismatch: update the admin client
+	constexpr const char* kRolePaired = "paired";   // proved the secret without the Admin flag: no admin tool, the rules flags apply
 	constexpr const char* kResultOk      = "ok";
 	constexpr const char* kResultChanged = "changed"; // base revision stale: "Changed elsewhere"
 	constexpr const char* kResultError   = "error";

@@ -358,7 +358,7 @@ namespace AdminClient
 
 	void Client::HandleWelcome(const Message& m)
 	{
-		if (m.role == kRoleAdmin)
+		if (m.role == kRoleAdmin || m.role == kRolePaired)
 		{
 			if (!pendingSecret_.empty() && !serverId_.empty() && !SaveSecret(serverId_, pendingAddress_, pendingSecret_))
 			{
@@ -367,7 +367,8 @@ namespace AdminClient
 			}
 			pendingSecret_.clear();
 			pendingAddress_.clear();
-			status_ = Status::Ready;   // the server pushes the snapshot with this welcome
+			// Admin: the server pushes the snapshot with this welcome. Paired: no admin tool.
+			status_ = m.role == kRoleAdmin ? Status::Ready : Status::NotAdmin;
 			return;
 		}
 		if (m.role == kRolePair && !pendingSecret_.empty())

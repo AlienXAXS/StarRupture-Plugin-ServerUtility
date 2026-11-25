@@ -42,6 +42,39 @@ namespace InGameAdminModel
 		return serverId_;
 	}
 
+	bool Server::CanProve(const std::string& id) const
+	{
+		return (env_.isAdmin && env_.isAdmin(id)) || (env_.canProve && env_.canProve(id));
+	}
+
+	void Server::SetProvenLocked(Conn& c, bool proven)
+	{
+		if (c.proven == proven) return;
+		c.proven = proven;
+		++provenEpoch_;
+	}
+
+	struct Server::ProofWatch
+	{
+		Server&  server;
+		uint64_t before;
+		explicit ProofWatch(Server& s) : server(s)
+		{
+			std::lock_guard<std::mutex> lk(server.mutex_);
+			before = server.provenEpoch_;
+		}
+		~ProofWatch()
+		{
+			uint64_t now;
+			{
+				std::lock_guard<std::mutex> lk(server.mutex_);
+				now = server.provenEpoch_;
+			}
+			if (now != before && server.env_.proofChanged)
+				server.env_.proofChanged();
+		}
+	};
+
 	bool Server::RandomHex(size_t bytes, std::string& out)
 	{
 		std::vector<uint8_t> b;
@@ -114,7 +147,7 @@ namespace InGameAdminModel
 		}
 		c.nonceExpires = (env_.now ? env_.now() : 0) + kNonceLifetimeSeconds;
 		c.challenged = true;
-		c.proven = false;
+		SetProvenLocked(c, false);
 		AdminWire::Message m;
 		m.tag = AdminWire::Tag::Challenge;
 		m.serverId = serverId_;
@@ -126,7 +159,7 @@ namespace InGameAdminModel
 	{
 		for (auto& kv : conns_)
 			if (kv.second.id == id)
-				kv.second.proven = false;
+				SetProvenLocked(kv.second, false);
 	}
 
 	std::vector<std::string> Server::SnapshotMessages(const std::string& sections) const
@@ -262,6 +295,7 @@ namespace InGameAdminModel
 		std::vector<std::string> out;
 		if (!env_.enabled || !env_.enabled() || !Ready())
 			return out;
+		ProofWatch watch(*this);
 
 		Message m;
 		const Decoded decoded = Decode(data, size, m);
@@ -270,26 +304,27 @@ namespace InGameAdminModel
 
 		// The Admin flag is read before the lock: the player list has its own lock.
 		const bool admin = !playerId.empty() && env_.isAdmin && env_.isAdmin(playerId);
+		const bool eligible = !playerId.empty() && CanProve(playerId);
 		const uint32_t revision = env_.revision ? env_.revision() : 0;
 		const std::string who = name.empty() ? playerId : name;
 
 		{
 			std::unique_lock<std::mutex> lk(mutex_);
 			Conn& c = conns_[conn];
-			if (c.silent)
-				return out;
 
 			// The server reads the ID again on every packet. A different ID, or one that lost
-			// the Admin flag, ends whatever this connection had earned.
+			// every flag that needs proof, ends whatever this connection had earned.
 			if (c.id != playerId)
 			{
 				c.id = playerId;
-				c.proven = false;
+				SetProvenLocked(c, false);
 				c.challenged = false;
 				c.nonce.clear();
 			}
-			if (c.proven && !admin)
-				c.proven = false;
+			if (c.proven && !eligible)
+				SetProvenLocked(c, false);
+			if (c.silent)
+				return out;
 
 			// Every decoded message takes tokens: one, or one per op in an ops message.
 			// Over the limit it is dropped with no reply, and logged once per burst.
@@ -321,9 +356,9 @@ namespace InGameAdminModel
 
 			if (m.tag == Tag::Hello)
 			{
-				c.proven = false;
+				SetProvenLocked(c, false);
 				c.nonce.clear();
-				if (!admin)
+				if (!eligible)
 				{
 					c.silent = true;
 					out.push_back(Welcome(kRoleNone, 0));
@@ -338,10 +373,10 @@ namespace InGameAdminModel
 			if (!c.challenged)
 				return out;   // nothing but a hello starts a conversation
 
-			if (!admin)
+			if (!eligible)
 			{
 				c.challenged = false;
-				c.proven = false;
+				SetProvenLocked(c, false);
 				c.silent = true;
 				out.push_back(Welcome(kRoleNone, 0));
 				return out;
@@ -364,7 +399,13 @@ namespace InGameAdminModel
 				if (AdminCrypto::MakeProof(it->second, nonce, serverId_, expected) &&
 				    AdminCrypto::ConstantTimeEqual(Lower(m.proof), expected))
 				{
-					c.proven = true;
+					SetProvenLocked(c, true);
+					if (!admin)
+					{
+						c.silent = true;   // proven for the rules flags only: no admin tool, nothing more to say
+						out.push_back(Welcome(kRolePaired, 0));
+						return out;
+					}
 					out.push_back(Welcome(kRoleAdmin, revision));
 					lk.unlock();   // the snapshot runs game-thread work, outside the model lock
 					return WithSnapshot(std::move(out));
@@ -452,16 +493,22 @@ namespace InGameAdminModel
 				if (it != codes_.end()) { ClaimModel::Wipe(it->second.code); codes_.erase(it); }
 				EraseClaimedLocked(playerId);
 				UnproveIdLocked(playerId);   // a new secret replaces the old one everywhere
-				c.proven = true;
+				SetProvenLocked(c, true);
 				c.nonce.clear();
 				if (env_.audit) env_.audit("[Admin] '" + who + "' paired");
+				if (!admin)
+				{
+					c.silent = true;   // paired for the rules flags only: no admin tool
+					out.push_back(Welcome(kRolePaired, 0));
+					return out;
+				}
 				out.push_back(Welcome(kRoleAdmin, revision));
 				lk.unlock();   // the snapshot runs game-thread work, outside the model lock
 				return WithSnapshot(std::move(out));
 			}
 
 			// Anything else is for a proven connection only.
-			if (!c.proven)
+			if (!c.proven || !admin)
 				return out;
 			if (m.tag != Tag::Snap && m.tag != Tag::Ops)
 				return out;
@@ -504,6 +551,13 @@ namespace InGameAdminModel
 		return it != conns_.end() && it->second.proven;
 	}
 
+	bool Server::IsProvenAs(ConnId conn, const std::string& currentId) const
+	{
+		std::lock_guard<std::mutex> lk(mutex_);
+		const auto it = conns_.find(conn);
+		return it != conns_.end() && it->second.proven && it->second.id == currentId;
+	}
+
 	bool Server::HasSecret(const std::string& playerId) const
 	{
 		std::lock_guard<std::mutex> lk(mutex_);
@@ -514,9 +568,9 @@ namespace InGameAdminModel
 	{
 		code.clear();
 		if (!Ready()) { error = "In-game admin is not available (no random source for the server id)"; return false; }
-		if (Blank(playerId) || !env_.isAdmin || !env_.isAdmin(playerId))
+		if (Blank(playerId) || !CanProve(playerId))
 		{
-			error = "That player does not have the Admin flag. Add it first: admin add <id|number>";
+			error = "That player has no Admin, ExemptRules or Sections flag. Add one first: admin add <id|number>, or player set <id|number> <flags>";
 			return false;
 		}
 
@@ -548,6 +602,7 @@ namespace InGameAdminModel
 
 	bool Server::Unpair(const std::string& playerId)
 	{
+		ProofWatch watch(*this);
 		std::lock_guard<std::mutex> lk(mutex_);
 		bool did = false;
 		if (secrets_.erase(playerId))
@@ -565,6 +620,7 @@ namespace InGameAdminModel
 
 	std::vector<Out> Server::OnPlayersChanged()
 	{
+		ProofWatch watch(*this);
 		// Look the flags up before taking the lock.
 		std::vector<std::string> ids, silentIds;
 		{
@@ -583,17 +639,20 @@ namespace InGameAdminModel
 		std::sort(silentIds.begin(), silentIds.end());
 		silentIds.erase(std::unique(silentIds.begin(), silentIds.end()), silentIds.end());
 
-		std::vector<std::string> lost, gained;
+		std::vector<std::string> lost, gainedAdmin, gainedProof;
 		for (const std::string& id : ids)
-			if (!env_.isAdmin || !env_.isAdmin(id))
+			if (!CanProve(id))
 				lost.push_back(id);
 		const bool on = env_.enabled && env_.enabled() && Ready();
 		for (const std::string& id : silentIds)
-			if (on && !Blank(id) && env_.isAdmin && env_.isAdmin(id))
-				gained.push_back(id);
+		{
+			if (!on || Blank(id)) continue;
+			if (env_.isAdmin && env_.isAdmin(id)) gainedAdmin.push_back(id);
+			if (CanProve(id)) gainedProof.push_back(id);
+		}
 
 		std::vector<Out> out;
-		if (lost.empty() && gained.empty()) return out;
+		if (lost.empty() && gainedAdmin.empty() && gainedProof.empty()) return out;
 
 		std::lock_guard<std::mutex> lk(mutex_);
 		bool changed = false;
@@ -611,11 +670,15 @@ namespace InGameAdminModel
 		}
 		if (changed) SaveLocked();
 
-		// Gained the flag while told "none": out of silence, with a challenge.
+		// Gained a flag while told "none": out of silence, with a challenge. A connection already
+		// proven without the Admin flag is challenged again only when the flag gained is Admin.
 		for (auto& kv : conns_)
 		{
 			Conn& c = kv.second;
-			if (!c.silent || !std::binary_search(gained.begin(), gained.end(), c.id)) continue;
+			if (!c.silent) continue;
+			const bool want = std::binary_search(gainedAdmin.begin(), gainedAdmin.end(), c.id) ||
+			                  (!c.proven && std::binary_search(gainedProof.begin(), gainedProof.end(), c.id));
+			if (!want) continue;
 			c.silent = false;
 			std::string challenge;
 			if (MakeChallengeLocked(c, challenge))

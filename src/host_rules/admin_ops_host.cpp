@@ -18,6 +18,8 @@
 
 #include <atomic>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace
 {
@@ -38,15 +40,22 @@ namespace
 		}
 	}
 
-	// Game thread only. The controller of the connected player with this ID.
-	SDK::APlayerController* FindController(const std::string& id)
+	// Game thread only. The controller of the one connected player with this ID; null, with
+	// the reason in error, when there is none or more than one.
+	SDK::APlayerController* FindController(const std::string& id, std::string& error)
 	{
 		SDK::APlayerController* controllers[kMaxControllers] = {};
 		const int count = HostRules::ConnectedControllers(controllers, kMaxControllers);
+		std::vector<std::string> ids;
+		std::vector<SDK::APlayerController*> live;
 		for (int i = 0; i < count; ++i)
-			if (controllers[i] && PlayerIds::OfController(controllers[i]) == id)
-				return controllers[i];
-		return nullptr;
+			if (controllers[i])
+			{
+				ids.push_back(PlayerIds::OfController(controllers[i]));
+				live.push_back(controllers[i]);
+			}
+		size_t position = 0;
+		return AdminOps::UniqueConnected(ids, id, position, error) ? live[position] : nullptr;
 	}
 
 	AdminOps::Backend MakeBackend()
@@ -63,11 +72,11 @@ namespace
 		be.refreshPlayers = [] { HostRules::RefreshPlayers(); };
 		be.reloadRules    = [](std::string& e) { return HostRules::Reload(e); };
 		be.reloadPlayers  = [](std::string& e) { return PlayerList::Reload(e); };
-		be.connected      = [](const std::string& id) { return FindController(id) != nullptr; };
+		be.connected      = [](const std::string& id) { std::string e; return FindController(id, e) != nullptr || e == AdminOps::kAmbiguousIdText; };   // the kick says why it refuses
 		be.kick           = [](const std::string& id, const std::string& reason, std::string& e)
 		{
-			SDK::APlayerController* pc = FindController(id);
-			if (!pc) { e = "player not found"; return false; }
+			SDK::APlayerController* pc = FindController(id, e);
+			if (!pc) return false;
 			if (!KickGuarded(pc, reason)) { e = "the kick failed"; return false; }
 			return true;
 		};
