@@ -147,32 +147,37 @@ static int CollectPlayersRaw_SEH(void* worldPtr, RawPlayerData* outRaw)
 {
 	__try
 	{
-		auto* world = static_cast<SDK::UWorld*>(worldPtr);
-		if (!world) return 0;
+		if (!ServerUtilityFields::PlayerList.On()) return 0;
 
-		SDK::AGameStateBase* gameState = world->GameState;
+		SDK::AGameStateBase* gameState = ListedPlayers::GameStateOf(worldPtr);
 		if (!gameState) return 0;
 
-		const int32_t count = gameState->PlayerArray.Num();
+		auto* players = ServerUtilityFields::GameStatePlayerArray.In(gameState);
+		if (!players) return 0;
+
+		const int32_t count = players->Num();
 		int written = 0;
 
 		for (int32_t i = 0; i < count && written < MAX_RAW_PLAYERS; ++i)
 		{
-			SDK::APlayerState* ps = gameState->PlayerArray[i];
+			SDK::APlayerState* ps = (*players)[i];
 			if (!ListedPlayers::IsListed(ps)) continue;
+
+			const SDK::FString* name = ServerUtilityFields::PlayerStateName.In(ps);
+			const auto* ping = ServerUtilityFields::PlayerStatePing.In(ps);
 
 			// Grab the raw TCHAR* – this is a wchar_t* internally.
 			// We'll do the conversion outside __try.
 			outRaw[written].namePtr = nullptr;
-			outRaw[written].nameLen = ps->PlayerNamePrivate.Num();
-			outRaw[written].ping = ps->CompressedPing;
+			outRaw[written].nameLen = name->Num();
+			outRaw[written].ping = ping ? *ping : 0;
 			outRaw[written].ps = ps;
 
 			// The SDK FString stores wchar_t internally; ToString() returns
 			// std::string, but that involves a destructor. Instead store the
 			// raw data ptr and length so we can convert safely outside SEH.
 			// FString's Data() returns the internal wchar_t buffer pointer.
-			outRaw[written].namePtr = reinterpret_cast<const char*>(ps->PlayerNamePrivate.CStr());
+			outRaw[written].namePtr = reinterpret_cast<const char*>(name->CStr());
 			++written;
 		}
 

@@ -27,13 +27,15 @@ static const char* KickPlayer_SEH(int playerIndex, const wchar_t* expectedName, 
 		auto* world = static_cast<SDK::UWorld*>(PluginSdkRuntime::GetWorld());
 		if (!world) return R"({"ok":false,"error":"world unavailable"})";
 
-		SDK::AGameStateBase* gs = world->GameState;
+		if (!ServerUtilityFields::PlayerActions.On()) return R"({"ok":false,"error":"player actions unavailable"})";
+
+		SDK::AGameStateBase* gs = ListedPlayers::GameStateOf(world);
 		if (!gs) return R"({"ok":false,"error":"game state unavailable"})";
 
 		SDK::APlayerState* ps = ListedPlayers::Find(gs, playerIndex, expectedName, expectedId);
 		if (!ps) return R"({"ok":false,"error":"player not found"})";
 
-		SDK::APlayerController* pc = static_cast<SDK::APlayerController*>(ps->GetOwner());
+		SDK::APlayerController* pc = static_cast<SDK::APlayerController*>(ListedPlayers::OwnerOf(ps));
 		if (!pc) return R"({"ok":false,"error":"player controller unavailable"})";
 
 		KickPlayerController(pc);

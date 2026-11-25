@@ -6,6 +6,7 @@
 
 #include "SDK/Engine_classes.hpp"
 #include "object_ref.h"
+#include "../server_utility_fields.h"
 
 #include <windows.h>
 
@@ -41,7 +42,6 @@ namespace
 		return &s_texts.emplace(reason, text).first->second;
 	}
 
-#if PLUGIN_INTERFACE_VERSION >= 79
 	// One removal per join. A join has its own player controller, so the
 	// controller is the key, kept as an ObjectRef and never as a raw pointer.
 	// A new controller can take a dead one's slot, so an entry also ends after
@@ -77,8 +77,11 @@ namespace
 
 	std::string PlayerName(SDK::APlayerController* pc)
 	{
-		if (pc->PlayerState && pc->PlayerState->PlayerNamePrivate.Num() > 0)
-			return pc->PlayerState->PlayerNamePrivate.ToString();
+		SDK::APlayerState** stateAt = ServerUtilityFields::ControllerPlayerState.In(pc);
+		SDK::APlayerState* state = stateAt ? *stateAt : nullptr;
+		const SDK::FString* name = ServerUtilityFields::PlayerStateName.In(state);
+		if (name && name->Num() > 0)
+			return name->ToString();
 		return "unknown";
 	}
 
@@ -179,7 +182,6 @@ namespace
 	}
 
 	bool g_registered = false;
-#endif
 }
 
 namespace Removal
@@ -191,7 +193,6 @@ namespace Removal
 
 	void Init()
 	{
-#if PLUGIN_INTERFACE_VERSION >= 79
 		auto* hooks = GetHooks();
 		if (!hooks || !hooks->HostRules || !GetSelf())
 		{
@@ -205,14 +206,10 @@ namespace Removal
 			hooks->Engine->RegisterOnTick(OnTick);
 			g_tickRegistered = true;
 		}
-#else
-		LOG_INFO("[HostRules] This build has no host rules support - minimum version removal is off");
-#endif
 	}
 
 	void Shutdown()
 	{
-#if PLUGIN_INTERFACE_VERSION >= 79
 		auto* hooks = GetHooks();
 		if (g_registered && hooks && hooks->HostRules && GetSelf())
 			hooks->HostRules->UnregisterOnClientBelowMinimum(GetSelf(), OnBelowMinimum);
@@ -221,6 +218,5 @@ namespace Removal
 			hooks->Engine->UnregisterOnTick(OnTick);
 		g_tickRegistered = false;
 		g_held.clear();
-#endif
 	}
 }

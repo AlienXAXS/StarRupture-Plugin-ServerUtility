@@ -10,6 +10,7 @@
 // Only available when the full SDK is compiled in.
 #if defined(MODLOADER_SERVER_BUILD) || defined(MODLOADER_CLIENT_BUILD)
 #  include "CoreUObject_classes.hpp"
+#  include "server_utility_fields.h"
 #  define CMD_SAVE_HAS_SDK 1
 #else
 #  define CMD_SAVE_HAS_SDK 0
@@ -64,6 +65,12 @@ namespace Cmd_Save
 		}
 
 #if CMD_SAVE_HAS_SDK
+		if (!ServerUtilityFields::SaveCommand.On())
+		{
+			LOG_WARN("[RCON] The loader has no row for the UObject class on this game build - save command off.");
+			return "Error: save command unavailable on this game build.\n";
+		}
+
 		// Find the UCrSaveSubsystem *instance* (not the UClass or CDO).
 		SDK::UObject* subsystem = nullptr;
 		{
@@ -72,13 +79,18 @@ namespace Cmd_Save
 			for (int32_t i = 0; i < count; ++i)
 			{
 				SDK::UObject* obj = GObjects->GetByIndex(i);
-				if (!obj || !obj->Class)
+				if (!obj)
+					continue;
+
+				SDK::UClass** classAt = ServerUtilityFields::ObjectClass.In(obj);
+				SDK::UClass* objClass = classAt ? *classAt : nullptr;
+				if (!objClass)
 					continue;
 
 				if (obj->IsDefaultObject())
 					continue;
 
-				if (obj->Class->GetName() == "CrSaveSubsystem")
+				if (objClass->GetName() == "CrSaveSubsystem")
 				{
 					subsystem = obj;
 					break;

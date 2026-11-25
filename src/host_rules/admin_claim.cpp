@@ -29,7 +29,6 @@
 
 #pragma comment(lib, "bcrypt.lib")
 
-#if PLUGIN_INTERFACE_VERSION >= 79
 namespace
 {
 	std::mutex             g_mutex;
@@ -223,13 +222,11 @@ namespace
 		}
 	}
 }
-#endif
 
 namespace AdminClaim
 {
 	void Init()
 	{
-#if PLUGIN_INTERFACE_VERSION >= 79
 		auto* hooks = GetHooks();
 		if (!hooks || !hooks->HostRules || !GetSelf())
 		{
@@ -244,26 +241,20 @@ namespace AdminClaim
 			return;
 		std::lock_guard<std::mutex> lk(g_mutex);
 		EnsureCodeLocked("");
-#else
-		LOG_INFO("[Admin] This build has no admin prompt - claim code is off, use RCON: admin add");
-#endif
 	}
 
 	void Shutdown()
 	{
-#if PLUGIN_INTERFACE_VERSION >= 79
 		auto* hooks = GetHooks();
 		if (g_registered && hooks && hooks->HostRules && GetSelf())
 			hooks->HostRules->UnregisterOnAdminAnswer(GetSelf(), OnAnswer);
 		g_registered = false;
 		std::lock_guard<std::mutex> lk(g_mutex);
 		ClaimModel::Wipe(g_code);
-#endif
 	}
 
 	void AskPlayer(void* playerController, const std::string& playerId)
 	{
-#if PLUGIN_INTERFACE_VERSION >= 79
 		IPluginHostRules* api = Api();
 		if (!g_registered || !api || !playerController || playerId.empty())
 			return;
@@ -284,24 +275,16 @@ namespace AdminClaim
 		}
 		else
 			LOG_INFO("[Admin] Asked player %s for the claim code", playerId.c_str());
-#else
-		(void)playerController; (void)playerId;
-#endif
 	}
 
 	void PlayerLeft(const std::string& playerId)
 	{
-#if PLUGIN_INTERFACE_VERSION >= 79
 		std::lock_guard<std::mutex> lk(g_mutex);
 		g_open.erase(playerId);
-#else
-		(void)playerId;
-#endif
 	}
 
 	std::string CodeReport()
 	{
-#if PLUGIN_INTERFACE_VERSION >= 79
 		std::lock_guard<std::mutex> lk(g_mutex);
 		if (!g_registered)
 			return "Claim code is off: this mod loader has no admin prompt. Use: admin add <id|number>\n";
@@ -309,8 +292,5 @@ namespace AdminClaim
 			return ListHasAdmin() ? "The server already has an admin, so there is no claim code.\n"
 			                      : "No claim code could be made. Use: admin add <id|number>\n";
 		return "Claim code: " + g_code + "\n";
-#else
-		return "Claim code is off: this build has no admin prompt. Use: admin add <id|number>\n";
-#endif
 	}
 }

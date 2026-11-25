@@ -1,6 +1,6 @@
 // Unit tests of the in-game admin client state model (no game needed).
 // From a Visual Studio developer prompt, in the repo root:
-//   cl /nologo /EHsc /std:c++17 /Isrc tests\admin_client_tests.cpp src\client\admin_client.cpp src\admin_wire\admin_wire.cpp src\admin_wire\admin_crypto.cpp /Fe:admin_client_tests.exe
+//   cl /nologo /EHsc /std:c++17 /Isrc tests\admin_client_tests.cpp src\client\admin_client.cpp src\client\admin_view.cpp src\admin_wire\admin_wire.cpp src\admin_wire\admin_crypto.cpp /Fe:admin_client_tests.exe
 //   admin_client_tests.exe
 #include "client/admin_client.h"
 #include "admin_wire/admin_crypto.h"

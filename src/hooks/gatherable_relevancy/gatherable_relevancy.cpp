@@ -85,6 +85,13 @@ static int32_t GetObjectSerialNumber(int32_t index)
 	return serial ? *serial : 0;
 }
 
+// The class of an object, read through the loader's row for UObject::ClassPrivate.
+static SDK::UClass* ClassOf(SDK::UObject* obj)
+{
+	SDK::UClass** at = ServerUtilityFields::ObjectClass.In(obj);
+	return at ? *at : nullptr;
+}
+
 // Live (non-CDO) instances of a class, by class name. Walks GObjects once.
 template <typename T>
 static std::vector<T*> FindInstances(const char* className)
@@ -98,9 +105,10 @@ static std::vector<T*> FindInstances(const char* className)
 	for (int32_t i = 0; i < count; ++i)
 	{
 		SDK::UObject* obj = gobjects->GetByIndex(i);
-		if (!obj || !obj->Class || obj->IsDefaultObject())
+		SDK::UClass* objClass = obj ? ClassOf(obj) : nullptr;
+		if (!objClass || obj->IsDefaultObject())
 			continue;
-		if (obj->Class->GetName() == className)
+		if (objClass->GetName() == className)
 			out.push_back(static_cast<T*>(obj));
 	}
 	return out;
@@ -120,7 +128,7 @@ static std::vector<T*> FindInstancesOf(SDK::UClass* cls)
 	for (int32_t i = 0; i < count; ++i)
 	{
 		SDK::UObject* obj = gobjects->GetByIndex(i);
-		if (!obj || !obj->Class || obj->IsDefaultObject())
+		if (!obj || !ClassOf(obj) || obj->IsDefaultObject())
 			continue;
 		if (obj->IsA(cls))
 			out.push_back(static_cast<T*>(obj));
@@ -188,7 +196,13 @@ static int PatchClassPolicy(SDK::UCrReplicationGraph* graph, SDK::UClass* cls, u
 		bits = heapBits;
 	}
 
-	const int32_t wantIndex  = cls->Index;
+	const int32_t* indexAt = ServerUtilityFields::ObjectIndex.In(cls);
+	if (!indexAt)
+	{
+		LOG_ERROR("[GatherableFix] The loader has no row for the object index - policy not patched");
+		return -1;
+	}
+	const int32_t wantIndex  = *indexAt;
 	const int32_t wantSerial = GetObjectSerialNumber(wantIndex);
 	if (wantSerial == 0)
 	{
@@ -243,13 +257,13 @@ static void ApplyToClassDefault()
 		return;
 	}
 
-	if (cdo->bAlwaysRelevant)
+	if (ServerUtilityFields::ActorAlwaysRelevant.Get(cdo))
 	{
 		LOG_INFO("[GatherableFix] CDO already bAlwaysRelevant - the game fixed this? Nothing to do for new graphs");
 		return;
 	}
 
-	cdo->bAlwaysRelevant = 1;
+	ServerUtilityFields::ActorAlwaysRelevant.Set(cdo, true);
 	LOG_INFO("[GatherableFix] ACrGatherableSpawnersRepActor CDO: bAlwaysRelevant set - "
 	         "replication graphs built from now on route it RelevantAllConnections");
 }
@@ -275,7 +289,7 @@ static bool ApplyToLiveGraph()
 		return true;
 
 	for (SDK::ACrGatherableSpawnersRepActor* actor : actors)
-		actor->bAlwaysRelevant = 1;
+		ServerUtilityFields::ActorAlwaysRelevant.Set(actor, true);
 
 	const bool canReroute = g_addNetworkActor && g_removeNetworkActor;
 	if (!canReroute)
@@ -477,6 +491,13 @@ void GatherableRelevancyFix::Install(bool seedResync)
 {
 	if (g_installed)
 		return;
+
+	if (!ServerUtilityFields::GatherableRelevancy.On())
+	{
+		LOG_WARN("[GatherableFix] The loader has no row for AActor::bAlwaysRelevant or the UObject class and index "
+		         "on this game build - the gatherable relevancy fix is off");
+		return;
+	}
 
 	g_seedResync = seedResync;
 

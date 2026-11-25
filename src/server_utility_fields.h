@@ -16,10 +16,10 @@
 // resolve. A rename in the map is a one-line edit here. The byte patterns the
 // plugin falls back on are in game_signatures.h. The engine members the player
 // lookup reads are here too, under the map's keys UWorld::GameState,
-// AGameStateBase::PlayerArray, AActor::Owner and APlayerController::PlayerState.
-// A few engine reads elsewhere (UObject::Index, bAlwaysRelevant, the GameState
-// reads in rcon.cpp and the admin endpoints) are not in the table yet and stay
-// compiled in.
+// AGameStateBase::PlayerArray, AActor::Owner and APlayerController::PlayerState,
+// as are the player name and ping, AActor::bAlwaysRelevant and the UObject class
+// and index. No game or engine member is read at an offset compiled into the
+// plugin: what is not in this table is the SDK's own inline code.
 
 // Minimal FString mirror so we can manipulate engine strings from outside.
 // Layout matches UE4/UE5 TArray<TCHAR> used as FString storage.
@@ -86,10 +86,25 @@ namespace ServerUtilityFields
 
 	// The engine members that lead from the world to a connected player's
 	// controller and from a controller to its player state (the player lookup).
+	// The player list and the admin player actions read the same game state.
 	inline auto WorldGameState         = SERVER_UTILITY_FIELD(UWorld, GameState);
 	inline auto GameStatePlayerArray   = SERVER_UTILITY_FIELD(AGameStateBase, PlayerArray);
 	inline auto ActorOwner             = SERVER_UTILITY_FIELD(AActor, Owner);
 	inline auto ControllerPlayerState  = SERVER_UTILITY_FIELD(APlayerController, PlayerState);
+
+	// What the player list shows of a player: the name, and the ping the query
+	// protocol reports.
+	inline auto PlayerStateName = SERVER_UTILITY_FIELD(APlayerState, PlayerNamePrivate);
+	inline auto PlayerStatePing = SERVER_UTILITY_FIELD(APlayerState, CompressedPing);
+
+	// The gatherable relevancy fix: AActor::bAlwaysRelevant on the rep actor and
+	// its class default object, and the class and index of an object, which the
+	// fix walks GObjects by and keys the replication graph's policy map on. The
+	// SDK names them Class and Index; the map names them as the engine does
+	// (ClassPrivate, InternalIndex).
+	inline auto ActorAlwaysRelevant = SR_BITFIELD(AActor, bAlwaysRelevant);
+	inline auto ObjectClass = SERVER_UTILITY_NATIVE(SDK::UClass*, UObject, ClassPrivate, offsetof(SDK::UObject, Class));
+	inline auto ObjectIndex = SERVER_UTILITY_NATIVE(int32_t,      UObject, InternalIndex, offsetof(SDK::UObject, Index));
 
 	// The part of the plugin that can be off while the rest runs: finding the
 	// connected players and the ID of each. Host rules, the player list, the
@@ -98,23 +113,55 @@ namespace ServerUtilityFields
 	// feature off and keeps the plugin; every key not listed here still refuses
 	// the plugin. While it is off, the lookup returns nothing: no controllers
 	// are listed and no player's ID is readable.
-	inline PluginMap::Feature PlayerLookup{ "player-lookup", "Player lookup", {
-		WorldGameState.key, GameStatePlayerArray.key, ActorOwner.key, ControllerPlayerState.key
-	} };
+	inline PluginMap::Feature PlayerLookup{ "player-lookup", "Player lookup", PluginMap::KeysOf(
+		WorldGameState, GameStatePlayerArray, ActorOwner, ControllerPlayerState) };
 
-	// Asks the loader for every member above. False when a key that is not in
-	// the player lookup did not resolve; the loader has then recorded the
-	// failure and refuses the plugin. A miss in the player lookup only turns
-	// that feature off.
+	// The player list the RCON and query protocols and the admin panel show:
+	// each connected player's name and ping. While it is off the list is empty.
+	inline PluginMap::Feature PlayerList{ "player-list", "Player list", PluginMap::KeysOf(
+		WorldGameState, GameStatePlayerArray, PlayerStateName, PlayerStatePing) };
+
+	// The admin panel's kick, ban and give: a player is found in the list by
+	// name and then taken to its controller. While it is off each answers
+	// "player not found".
+	inline PluginMap::Feature PlayerActions{ "player-actions", "Admin player actions", PluginMap::KeysOf(
+		WorldGameState, GameStatePlayerArray, PlayerStateName, ActorOwner) };
+
+	// Keeping the gatherable spawners' replication actor relevant to every
+	// client (see gatherable_relevancy.cpp). While it is off none of that runs.
+	inline PluginMap::Feature GatherableRelevancy{ "gatherable-relevancy", "Gatherable relevancy fix", PluginMap::KeysOf(
+		ActorAlwaysRelevant, ObjectClass, ObjectIndex) };
+
+	// The RCON save command finds the save subsystem among the live objects by
+	// its class. While it is off the command says so.
+	inline PluginMap::Feature SaveCommand{ "save-command", "RCON save command", PluginMap::KeysOf(
+		ObjectClass) };
+
+	// Asks the loader for every member above. False when a key that no feature
+	// lists did not resolve; the loader has then recorded the failure and
+	// refuses the plugin. A miss on a key a feature lists only turns that
+	// feature off.
 	inline bool Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
 	{
-		PluginMap::DeclareFeatures(scanner, self, PlayerLookup);
+		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand);
 
+		// A miss only turns off the features that list the key. Each group is
+		// asked even after a miss, so the loader's log lists them all.
 		const bool lookup = PluginMap::ResolveFields(scanner, self,
 			WorldGameState, GameStatePlayerArray, ActorOwner, ControllerPlayerState);
 		if (!lookup)
 			LOG_WARN("[PlayerLookup] The loader has no row for one of its engine members on this game build - "
-			         "host rules, player IDs and the player list are off");
+			         "host rules and player IDs are off");
+
+		const bool names = PluginMap::ResolveFields(scanner, self, PlayerStateName, PlayerStatePing);
+		if (!names)
+			LOG_WARN("[PlayerList] The loader has no row for a player's name or ping on this game build - "
+			         "the player list and the admin player actions are off");
+
+		const bool relevancy = PluginMap::ResolveFields(scanner, self, ActorAlwaysRelevant, ObjectClass, ObjectIndex);
+		if (!relevancy)
+			LOG_WARN("[GatherableFix] The loader has no row for AActor::bAlwaysRelevant or the UObject class and "
+			         "index on this game build - the gatherable relevancy fix and the RCON save command are off");
 
 		return PluginMap::ResolveFields(scanner, self,
 			SessionName, SaveGameName, SaveGameInterval, StartNewGame, LoadSavedGame,
