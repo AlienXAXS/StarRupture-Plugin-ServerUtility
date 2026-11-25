@@ -845,8 +845,16 @@ int main()
 
 	// Rule limit.
 	m = Model{};
-	for (int i = 0; i < 2047; ++i) CHECK(SetRule(m, "M.f" + std::to_string(i), true, e));
+	// The loader takes 2048 records: the header and every default row count against them.
+	const size_t ruleLimit = 2048 - 1 - DefaultRows().size();
+	for (size_t i = 0; i < ruleLimit; ++i) CHECK(SetRule(m, "M.f" + std::to_string(i), true, e));
 	CHECK(!SetRule(m, "M.over", true, e));
+	CHECK(RulesText(m, true).find("M.over") == std::string::npos);
+	{
+		size_t lines = 0;   // the header line counts as one
+		for (char c : RulesText(m, true)) if (c == '\n') ++lines;
+		CHECK(lines <= 2048);
+	}
 
 	// Versions.
 	CHECK(ValidVersion("0.11.0") && ValidVersion("v1.27") && ValidVersion("1.2.3.4") && ValidVersion("1.27.0-dev.1"));

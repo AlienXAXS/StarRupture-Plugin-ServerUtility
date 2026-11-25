@@ -8,7 +8,39 @@ namespace RulesModel
 {
 	namespace
 	{
-		constexpr size_t kMaxRules     = 2047;
+		// Every row is a deny. Mod names are the PluginInfo names, section ids the
+		// ones each mod declares. Information-only features have no row.
+		constexpr DefaultRow kDefaultRows[] = {
+			{ "BetterCheats", "stack-size" },
+			{ "BetterCheats", "player-stats" },
+			{ "BetterCheats", "movement" },
+			{ "BetterCheats", "weapons" },
+			{ "BetterCheats", "grenade-probe" },
+			{ "BetterCheats", "mining-tools" },
+			{ "BetterCheats", "inventory" },
+			{ "BetterCheats", "item-spawner" },
+			{ "BetterCheats", "skills" },
+			{ "BetterCheats", "build-free" },
+			{ "BetterCheats", "build-unlock" },
+			{ "BetterCheats", "build-anywhere" },
+			{ "BetterCheats", "deconstruct-windows" },
+			{ "BetterCheats", "enemies" },
+			{ "BetterCheats", "machine-power" },
+			{ "BetterCheats", "corporations" },
+			{ "BetterCheats", "rupture-wave" },
+			{ "Best Builder", "build-anywhere" },
+			{ "Best Builder", "deconstruct-windows" },
+			{ "Best Builder", "no-build-cost" },
+			{ "Best Builder", "no-stability-check" },
+			{ "Best Builder", "unlock-all-recipes" },
+			{ "Best Builder", "unlock-all-buildings" },
+			{ "CameraControls", "vitals" },
+			{ "WaveOptimiser", "heat-tools" },
+		};
+
+		// The loader takes at most 2048 records, the header counts as one, and every default row is one.
+		constexpr size_t kMaxRecords   = 2048;
+		constexpr size_t kMaxRules     = kMaxRecords - 1 - sizeof(kDefaultRows) / sizeof(kDefaultRows[0]);
 		constexpr size_t kMaxMessage   = 200;
 		constexpr size_t kMaxNameBytes = 128;
 		constexpr size_t kMaxPluginNameBytes = 64;
@@ -63,35 +95,7 @@ namespace RulesModel
 
 	const std::vector<DefaultRow>& DefaultRows()
 	{
-		// Every row is a deny. Mod names are the PluginInfo names, section ids the
-		// ones each mod declares. Information-only features have no row.
-		static const std::vector<DefaultRow> rows = {
-			{ "BetterCheats", "stack-size" },
-			{ "BetterCheats", "player-stats" },
-			{ "BetterCheats", "movement" },
-			{ "BetterCheats", "weapons" },
-			{ "BetterCheats", "grenade-probe" },
-			{ "BetterCheats", "mining-tools" },
-			{ "BetterCheats", "inventory" },
-			{ "BetterCheats", "item-spawner" },
-			{ "BetterCheats", "skills" },
-			{ "BetterCheats", "build-free" },
-			{ "BetterCheats", "build-unlock" },
-			{ "BetterCheats", "build-anywhere" },
-			{ "BetterCheats", "deconstruct-windows" },
-			{ "BetterCheats", "enemies" },
-			{ "BetterCheats", "machine-power" },
-			{ "BetterCheats", "corporations" },
-			{ "BetterCheats", "rupture-wave" },
-			{ "Best Builder", "build-anywhere" },
-			{ "Best Builder", "deconstruct-windows" },
-			{ "Best Builder", "no-build-cost" },
-			{ "Best Builder", "no-stability-check" },
-			{ "Best Builder", "unlock-all-recipes" },
-			{ "Best Builder", "unlock-all-buildings" },
-			{ "CameraControls", "vitals" },
-			{ "WaveOptimiser", "heat-tools" },
-		};
+		static const std::vector<DefaultRow> rows(std::begin(kDefaultRows), std::end(kDefaultRows));
 		return rows;
 	}
 
@@ -364,7 +368,7 @@ namespace RulesModel
 		r.deny = deny;
 		auto it = FindRule(m, r.plugin, r.id);
 		if (it != m.rules.end()) { it->deny = deny; return true; }
-		if (m.rules.size() >= kMaxRules) { error = "too many rules (most 2047)"; return false; }
+		if (m.rules.size() >= kMaxRules) { error = "too many rules (most " + std::to_string(kMaxRules) + ")"; return false; }
 		m.rules.push_back(r);
 		return true;
 	}

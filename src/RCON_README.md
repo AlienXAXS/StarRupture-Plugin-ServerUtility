@@ -179,7 +179,7 @@ Show and edit the host's rules for mod features: the `[Policy]`, `[Rules]` and `
 
 | Verb | What it does |
 |---|---|
-| `hostrules` or `hostrules list` | Show the rules, whether the mod loader received them, and the version minimums |
+| `hostrules` or `hostrules list` | Show the rules, whether the mod loader received them, and the version minimums. Built-in default deny rows no rule names are listed marked `(default)` |
 | `hostrules allow <Plugin.feature>` | Allow one feature (`Plugin.*` = every feature of that mod) |
 | `hostrules deny <Plugin.feature>` | Switch one feature off for players |
 | `hostrules unset <Plugin.feature>` | Take that rule away, so the default applies |
