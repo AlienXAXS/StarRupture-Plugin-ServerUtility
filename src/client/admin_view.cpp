@@ -157,6 +157,26 @@ namespace AdminView
 		return std::string();
 	}
 
+	// "plugin.id" with the plugin lower-cased, split at the first dot.
+	static std::string RuleKeyForMatch(const std::string& key)
+	{
+		const size_t dot = key.find('.');
+		if (dot == std::string::npos) return key;
+		std::string plugin = key.substr(0, dot);
+		for (char& c : plugin) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+		return plugin + key.substr(dot);
+	}
+
+	bool IsDefaultDenied(const Snapshot& s, const std::string& key)
+	{
+		const std::string k = RuleKeyForMatch(key);
+		bool isDefault = false;
+		for (const std::string& d : s.defaults) if (RuleKeyForMatch(d) == k) { isDefault = true; break; }
+		if (!isDefault) return false;
+		for (const Rule& r : s.rules) if (RuleKeyForMatch(r.key) == k) return false;
+		return true;
+	}
+
 	std::string MinValue(const Snapshot& s, const std::string& plugin)
 	{
 		for (const MinEntry& m : s.mins) if (m.plugin == plugin) return m.version;

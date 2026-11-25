@@ -139,6 +139,7 @@ namespace InGameAdminModel
 		if (snap.sections == AdminWire::kSectionMods)   // the catalog alone: no rules, minimums or players
 		{
 			snap.rules.clear();
+			snap.defaults.clear();
 			snap.mins.clear();
 			snap.players.clear();
 		}

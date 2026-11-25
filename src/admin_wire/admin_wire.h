@@ -37,7 +37,8 @@ namespace AdminWire
 		Hello, Welcome, Snap,
 		SnapBegin, SnapPolicy, SnapRule, SnapMin, SnapMod, SnapPlayer, SnapEnd,
 		Ops, Result, Changed,
-		Challenge, Prove, Pair
+		Challenge, Prove, Pair,
+		SnapDefault   // after Pair: the enum is append-only
 	};
 
 	// Welcome roles, result statuses, section names.
@@ -80,6 +81,7 @@ namespace AdminWire
 		std::string message;
 		std::vector<Rule> rules;
 		std::vector<MinEntry> mins;
+		std::vector<std::string> defaults;   // "Plugin.feature" keys the server denies unless a rule names them
 		std::vector<ModInfo> mods;
 		std::vector<PlayerInfo> players;
 	};
@@ -87,7 +89,7 @@ namespace AdminWire
 	// One decoded message. Which members are set depends on tag:
 	//   Welcome: role, revision      Snap: sections          Changed: revision, sections
 	//   SnapBegin: revision, sections   SnapPolicy: defaultPolicy, text
-	//   SnapRule: rules   SnapMin: mins   SnapMod: mod, cont   SnapPlayer: player, cont
+	//   SnapRule: rules   SnapMin: mins   SnapDefault: keys   SnapMod: mod, cont   SnapPlayer: player, cont
 	//   SnapEnd: revision, counts      Ops: requestId, baseRevision, ops
 	//   Result: requestId, status, text, revision
 	//   Challenge: serverId, nonce (hex)   Prove: proof (64 hex, or empty)   Pair: code (empty or 8 chars), secret (64 hex)
@@ -99,6 +101,7 @@ namespace AdminWire
 		std::string serverId, nonce, proof, code, secret;
 		std::vector<Rule> rules;
 		std::vector<MinEntry> mins;
+		std::vector<std::string> keys;   // SnapDefault
 		ModInfo mod;
 		PlayerInfo player;
 		bool cont = false;   // SnapMod / SnapPlayer: continues the previous message of the same mod or player
@@ -112,7 +115,7 @@ namespace AdminWire
 	// or an op is unknown. Snapshot messages come from EncodeSnapshot, which pages.
 	bool Encode(const Message& m, std::string& out);
 
-	// Encode a snapshot as snap-begin, snap-policy, snap-rule*, snap-min*, snap-mod*,
+	// Encode a snapshot as snap-begin, snap-policy, snap-rule*, snap-min*, snap-default*, snap-mod*,
 	// snap-player*, snap-end. Every message is under kMaxMessage.
 	std::vector<std::string> EncodeSnapshot(const Snapshot& s);
 

@@ -43,6 +43,8 @@ int main()
 	  Message o = RoundTrip(m); CHECK(o.rules.size() == 2 && o.rules[1].key == "BetterCheats.movement" && o.rules[1].value == "deny"); }
 	{ Message m; m.tag = Tag::SnapMin; m.mins = { { "", "v1.27.0" }, { "RuptureTimer", "wire" } };
 	  Message o = RoundTrip(m); CHECK(o.mins.size() == 2 && o.mins[0].plugin.empty() && o.mins[1].version == "wire"); }
+	{ Message m; m.tag = Tag::SnapDefault; m.keys = { "BetterCheats.god", "Best Builder.no-build-cost" };
+	  Message o = RoundTrip(m); CHECK(o.keys.size() == 2 && o.keys[0] == "BetterCheats.god" && o.keys[1] == "Best Builder.no-build-cost"); }
 	{ Message m; m.tag = Tag::SnapMod; m.mod.plugin = "BetterCheats"; m.mod.version = "1.4.0"; m.mod.wire = "3";
 	  m.mod.features = { { "movement", "Movement" }, { "god", "" } }; m.cont = true;
 	  Message o = RoundTrip(m);
@@ -213,6 +215,33 @@ int main()
 		CHECK(mods == 30 && players == 20 && rules == 150 && ends == 1 && feats5 == 120);
 		Message last; CHECK(Decode(msgs.back(), last) == Decoded::Ok && last.tag == Tag::SnapEnd);
 		std::printf("snapshot: %zu messages, largest %zu bytes\n", msgs.size(), maxSize);
+	}
+
+	// snap-default sits between snap-min and snap-mod, is absent when there are no defaults,
+	// and a decoder without the tag sees an unknown tag, which decodes as Garbage and is dropped.
+	{
+		Snapshot s; s.revision = 1; s.sections = "all";
+		s.mins.push_back({ "", "v1.27.0" });
+		ModInfo mod; mod.plugin = "P"; mod.version = "1"; mod.wire = "1"; s.mods.push_back(mod);
+		for (int withDefaults = 0; withDefaults < 2; ++withDefaults)
+		{
+			if (withDefaults) s.defaults = { "P.f1", "P.f2" };
+			size_t minAt = 0, defAt = 0, modAt = 0, defKeys = 0, i = 0;
+			for (const std::string& e : EncodeSnapshot(s))
+			{
+				Message o; CHECK(Decode(e, o) == Decoded::Ok);
+				if (o.tag == Tag::SnapMin) minAt = i;
+				if (o.tag == Tag::SnapDefault) { defAt = i; defKeys += o.keys.size(); }
+				if (o.tag == Tag::SnapMod) modAt = i;
+				++i;
+			}
+			if (withDefaults) CHECK(defKeys == 2 && minAt < defAt && defAt < modAt);
+			else CHECK(defKeys == 0 && defAt == 0);
+		}
+		Message o;
+		CHECK(Decode(std::string("snap-future") + kUS + "1" + kUS + "P.f1", o) == Decoded::Garbage);
+		CHECK(Decode(std::string("snap-default") + kUS + "1", o) == Decoded::Garbage);
+		CHECK(Decode(std::string("snap-default") + kUS + "1" + kUS + "", o) == Decoded::Garbage);
 	}
 
 	std::printf("%d checks, %d failed\n", g_checks, g_failed);

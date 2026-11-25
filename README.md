@@ -153,7 +153,7 @@ Precedence: a `[Rules]` line that names the exact section (`Plugin.section`, `al
 BetterCheats.stack-size=allow
 ```
 
-or `hostrules allow BetterCheats.stack-size`. A player's own `Sections=` key opens a default row only when it names the exact section (`BetterCheats.stack-size`); `BetterCheats.*` does not. Mod names are matched without regard to case; section ids must match exactly. The in-game admin window does not mark default rows yet.
+or `hostrules allow BetterCheats.stack-size`. A player's own `Sections=` key opens a default row only when it names the exact section (`BetterCheats.stack-size`); `BetterCheats.*` does not. Mod names are matched without regard to case; section ids must match exactly. In the in-game admin window (F8, Mods tab) a default-denied section reads `Deny (default)`; allowing it there writes the exact `[Rules]` line, and setting it back to Default removes that line so the default applies again. The server tells the window which sections are defaults; against a server without this, the window shows none.
 
 Easiest is RCON (see [RCON_README.md](src/RCON_README.md) for every verb):
 

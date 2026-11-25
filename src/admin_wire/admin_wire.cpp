@@ -31,6 +31,7 @@ namespace
 		{ Tag::SnapMin, "snap-min" }, { Tag::SnapMod, "snap-mod" }, { Tag::SnapPlayer, "snap-player" },
 		{ Tag::SnapEnd, "snap-end" }, { Tag::Ops, "ops" }, { Tag::Result, "result" }, { Tag::Changed, "changed" },
 		{ Tag::Challenge, "challenge" }, { Tag::Prove, "prove" }, { Tag::Pair, "pair" },
+		{ Tag::SnapDefault, "snap-default" },
 	};
 
 	const char* NameOf(Tag t)
@@ -170,6 +171,9 @@ bool Encode(const Message& m, std::string& out)
 	case Tag::SnapMin:
 		for (const MinEntry& e : m.mins) { h.push_back(CleanText(e.plugin, kMaxName)); h.push_back(CleanText(e.version, kMaxName)); }
 		break;
+	case Tag::SnapDefault:
+		for (const std::string& k : m.keys) h.push_back(CleanText(k, kMaxName));
+		break;
 	case Tag::SnapMod:
 		h.push_back(CleanText(m.mod.plugin, kMaxName)); h.push_back(CleanText(m.mod.version, kMaxName));
 		h.push_back(CleanText(m.mod.wire, kMaxName)); h.push_back(m.cont ? "1" : "0");
@@ -233,6 +237,11 @@ std::vector<std::string> EncodeSnapshot(const Snapshot& s)
 	items.clear();
 	for (const MinEntry& e : s.mins) items.push_back({ CleanText(e.plugin, kMaxName), CleanText(e.version, kMaxName) });
 	Pack(out, Head(Tag::SnapMin), -1, items, false);
+
+	// Older clients drop this record as unknown, so it adds nothing they have to understand.
+	items.clear();
+	for (const std::string& k : s.defaults) items.push_back({ CleanText(k, kMaxName) });
+	Pack(out, Head(Tag::SnapDefault), -1, items, false);
 
 	for (const ModInfo& m : s.mods)
 	{
@@ -309,6 +318,14 @@ Decoded Decode(const std::string& data, Message& out)
 		{
 			if (f[i + 1].empty()) ok = false;
 			else m.mins.push_back({ f[i], f[i + 1] });
+		}
+		break;
+	case Tag::SnapDefault:
+		ok = n >= 3;
+		for (size_t i = 2; ok && i < n; ++i)
+		{
+			if (f[i].empty()) ok = false;
+			else m.keys.push_back(f[i]);
 		}
 		break;
 	case Tag::SnapMod:

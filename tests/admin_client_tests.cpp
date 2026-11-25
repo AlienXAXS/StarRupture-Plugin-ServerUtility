@@ -819,6 +819,46 @@ int main()
 		CHECK(r.addrCalls == calls);   // read once the answer is in
 	}
 
+	// Default keys from the server land in the snapshot; a mods-only refresh keeps them.
+	{
+		Rig r;
+		MakeReady(r);
+		Snapshot s;
+		s.revision = 3;
+		s.rules.push_back({ "BetterCheats.god", "allow" });
+		s.defaults = { "BetterCheats.god", "BetterCheats.stack-size" };
+		for (const std::string& e : EncodeSnapshot(s)) r.FeedRaw(e);
+		AdminClient::View v = r.View();
+		CHECK(v.haveSnapshot && v.snapshot.defaults.size() == 2 && v.snapshot.defaults[1] == "BetterCheats.stack-size");
+
+		Snapshot mods;
+		mods.revision = 4;
+		mods.sections = kSectionMods;
+		ModInfo mod; mod.plugin = "P"; mod.version = "1"; mod.wire = "1"; mod.features.push_back({ "f1", "Feature 1" });
+		mods.mods.push_back(mod);
+		for (const std::string& e : EncodeSnapshot(mods)) r.FeedRaw(e);
+		v = r.View();
+		CHECK(v.snapshot.mods.size() == 1 && v.snapshot.defaults.size() == 2);
+	}
+
+	// An older server sends no snap-default: no defaults and no error. An unknown record inside the stream is dropped.
+	{
+		Rig r;
+		MakeReady(r);
+		FeedSnapshot(r, 5);
+		AdminClient::View v = r.View();
+		CHECK(v.status == Status::Ready && v.haveSnapshot && v.snapshot.defaults.empty() && !v.lastResultIsError);
+
+		Snapshot s;
+		s.revision = 6;
+		s.rules.push_back({ "a", "allow" });
+		std::vector<std::string> pages = EncodeSnapshot(s);
+		r.FeedRaw(std::string("snap-future") + kUS + "1" + kUS + "x");
+		for (const std::string& e : pages) r.FeedRaw(e);
+		v = r.View();
+		CHECK(v.status == Status::Ready && v.snapshot.revision == 6 && v.snapshot.defaults.empty() && !v.lastResultIsError);
+	}
+
 	std::printf("%d checks, %d failed\n", g_checks, g_failed);
 	return g_failed ? 1 : 0;
 }

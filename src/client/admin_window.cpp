@@ -136,11 +136,12 @@ namespace
 		if (!f.client->Stage(op)) g_ui.tooManyChanges = true;
 	}
 
-	const char* RuleLabel(const std::string& value)
+	// A key with no rule reads "Default", or "Deny (default)" when a built-in default row denies it.
+	const char* RuleLabel(const std::string& value, bool defaultDenied = false)
 	{
 		if (value == "allow") return "Allow";
 		if (value == "deny") return "Deny";
-		return "Default";
+		return defaultDenied ? "Deny (default)" : "Default";
 	}
 
 	// Default / Allow / Deny for one rule key.
@@ -148,14 +149,15 @@ namespace
 	{
 		IModLoaderImGui* ui = f.ui;
 		const std::string cur = AdminView::RuleValue(f.eff, key);
+		const bool defaultDenied = AdminView::IsDefaultDenied(f.eff, key);
 		ui->SetNextItemWidth(-FLT_MIN);
-		if (ui->BeginCombo("##rule", RuleLabel(cur)))
+		if (ui->BeginCombo("##rule", RuleLabel(cur, defaultDenied)))
 		{
 			static const char* const values[] = { "unset", "allow", "deny" };
 			for (const char* v : values)
 			{
 				const std::string val = v;
-				const std::string shown = RuleLabel(val == "unset" ? std::string() : val);
+				const std::string shown = RuleLabel(val == "unset" ? std::string() : val, defaultDenied);
 				if (ui->Selectable(shown.c_str(), (val == "unset" ? std::string() : val) == cur))
 					Edit(f, MakeOp("rule.set", { key, val }));
 			}

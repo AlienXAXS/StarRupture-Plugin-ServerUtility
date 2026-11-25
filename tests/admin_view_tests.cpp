@@ -183,6 +183,29 @@ int main()
 		CHECK(p.size() == 3 && p[0] == "Alpha" && p[1] == "Beta" && p[2] == "Gone");
 	}
 
+	// Built-in defaults: a key the server denies unless a rule names it. The rule overrides, removing it brings the default back.
+	{
+		Snapshot s = Base();
+		s.defaults = { "Alpha.fly", "Beta.fly", "Alpha.build" };
+		CHECK(IsDefaultDenied(s, "Alpha.fly") && IsDefaultDenied(s, "Alpha.build"));
+		CHECK(!IsDefaultDenied(s, "Beta.fly"));                              // a rule names it (allow)
+		CHECK(!IsDefaultDenied(s, "Alpha.*") && !IsDefaultDenied(s, "Alpha.other"));
+		CHECK(IsDefaultDenied(s, "alpha.fly") && !IsDefaultDenied(s, "Alpha.Fly"));   // mod name without case, id exact
+		CHECK(RuleValue(s, "Alpha.fly").empty());                            // no rule line: the default is not a rule
+		Snapshot allowed = ApplyStaged(s, { MakeOp("rule.set", { "Alpha.fly", "allow" }) });
+		CHECK(RuleValue(allowed, "Alpha.fly") == "allow" && !IsDefaultDenied(allowed, "Alpha.fly"));
+		Snapshot back = ApplyStaged(allowed, { MakeOp("rule.set", { "Alpha.fly", "unset" }) });
+		CHECK(IsDefaultDenied(back, "Alpha.fly"));
+		Snapshot denied = ApplyStaged(s, { MakeOp("rule.set", { "Alpha.fly", "deny" }) });
+		CHECK(RuleValue(denied, "Alpha.fly") == "deny" && !IsDefaultDenied(denied, "Alpha.fly"));
+		CHECK(!IsNoop(s, MakeOp("rule.set", { "Alpha.fly", "deny" })) && IsNoop(s, MakeOp("rule.set", { "Alpha.fly", "unset" })));
+		// Defaults are not rules: none appear among the unknown rules, even for a mod the catalog lacks.
+		s.defaults.push_back("Missing.feature");
+		std::vector<std::string> unknown = UnknownRuleKeys(s);
+		CHECK(unknown.size() == 1 && unknown[0] == "Gone.thing");
+		CHECK(!IsDefaultDenied(Base(), "Alpha.fly"));                        // an older server: no defaults
+	}
+
 	// Count labels: singular only for one.
 	CHECK(CountLabel(0, "mod") == "0 mods" && CountLabel(1, "mod") == "1 mod" && CountLabel(2, "mod") == "2 mods");
 
