@@ -129,6 +129,9 @@ namespace ServerUtilityConfig
 			return s_self ? s_self->config->ReadBool(s_self, "AdminPanel", "Enabled", false) : false;
 		}
 
+		// The panel's login has one shared lockout, so a short key is not accepted.
+		static constexpr size_t kMinAdminApiKeyLength = 16;
+
 		static std::string GetAdminApiKey()
 		{
 			if (!s_self) return {};

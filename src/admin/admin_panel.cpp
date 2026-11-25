@@ -164,6 +164,12 @@ namespace AdminPanel
 			LOG_WARN("[AdminPanel] No ApiKey configured - admin panel will not start");
 			return;
 		}
+		if (apiKey.size() < ServerUtilityConfig::Config::kMinAdminApiKeyLength)
+		{
+			LOG_WARN("[AdminPanel] ApiKey is shorter than %zu characters - admin panel will not start",
+			         ServerUtilityConfig::Config::kMinAdminApiKeyLength);
+			return;
+		}
 
 		IPluginHttpServer* http = self->hooks->HttpServer;
 		if (!http)
