@@ -45,7 +45,6 @@ namespace
 		return PlayerIds::OfController(playerController);
 	}
 
-#if PLUGIN_INTERFACE_VERSION >= 79
 	// A controller whose ID is not readable yet is kept as a weak reference and
 	// tried again each tick, until it resolves, dies or waits too long (RulesModel::kLateIdGraceMs). Game
 	// thread only.
@@ -271,15 +270,12 @@ namespace
 		ApplyRules(playerController, id, true);
 		AdminClaim::AskPlayer(playerController, id);
 	}
-#endif
 
 	void OnPlayerLeft(void* exitingController)
 	{
 		// Called from the game's Logout, on the game thread, before the controller is torn down.
-#if PLUGIN_INTERFACE_VERSION >= 79
 		auto* pc = static_cast<SDK::APlayerController*>(exitingController);
 		g_waiting.erase(std::remove_if(g_waiting.begin(), g_waiting.end(), [&](const Waiting& w) { return w.pc.Get() == pc; }), g_waiting.end());
-#endif
 
 		InGameAdmin::PlayerLeft(exitingController);
 
@@ -298,7 +294,6 @@ namespace
 	std::string PushText(const std::string& text)
 	{
 		std::string status;
-#if PLUGIN_INTERFACE_VERSION >= 79
 		auto* hooks = GetHooks();
 		IPluginHostRules* api = hooks ? hooks->HostRules : nullptr;
 		if (!api)
@@ -316,10 +311,6 @@ namespace
 				LOG_WARN("[HostRules] The loader refused the rules: %s", err);
 			}
 		}
-#else
-		(void)text;
-		status = "not sent: this build has no host rules support";
-#endif
 		static bool s_logged = false;
 		if (!s_logged && status.find("no host rules support") != std::string::npos)
 		{
@@ -335,7 +326,6 @@ namespace
 	void PushMinimums(const std::string& text)
 	{
 		std::string status;
-#if PLUGIN_INTERFACE_VERSION >= 79
 		auto* hooks = GetHooks();
 		IPluginHostRules* api = hooks ? hooks->HostRules : nullptr;
 		if (!api)
@@ -353,10 +343,6 @@ namespace
 				LOG_WARN("[HostRules] The loader refused the version minimums: %s", err);
 			}
 		}
-#else
-		(void)text;
-		status = "not sent: this build has no host rules support";
-#endif
 		std::lock_guard<std::mutex> lk(g_mutex);
 		g_minStatus = status;
 	}
@@ -419,7 +405,6 @@ namespace HostRules
 		if (!featuresPath.empty())
 			KnownFeatures::Init(featuresPath);
 
-#if PLUGIN_INTERFACE_VERSION >= 79
 		auto* hooks = GetHooks();
 		if (hooks && hooks->HostRules && GetSelf())
 			hooks->HostRules->RegisterOnClientFeatures(GetSelf(), OnClientFeatures);
@@ -428,7 +413,6 @@ namespace HostRules
 			hooks->Engine->RegisterOnTick(OnTick);
 			g_tickRegistered = true;
 		}
-#endif
 		auto* hooks2 = GetHooks();
 		if (hooks2 && hooks2->Players)
 			hooks2->Players->RegisterOnPlayerLeft(OnPlayerLeft);
@@ -436,12 +420,7 @@ namespace HostRules
 
 	int ConnectedControllers(SDK::APlayerController** out, int max)
 	{
-#if PLUGIN_INTERFACE_VERSION >= 79
 		return CollectControllers(PluginSdkRuntime::GetWorld(), out, max);
-#else
-		(void)out; (void)max;
-		return 0;
-#endif
 	}
 
 	void PushWhenGameThreadRuns()
@@ -453,7 +432,6 @@ namespace HostRules
 
 	void RefreshPlayers()
 	{
-#if PLUGIN_INTERFACE_VERSION >= 79
 		auto* hooks = GetHooks();
 		if (!hooks || !hooks->Engine || !hooks->HostRules)
 			return;
@@ -461,7 +439,6 @@ namespace HostRules
 			RefreshNow(nullptr);
 		else
 			hooks->Engine->PostToGameThread(RefreshNow, nullptr);
-#endif
 	}
 
 	void Shutdown()
@@ -469,14 +446,12 @@ namespace HostRules
 		auto* hooks = GetHooks();
 		if (!hooks)
 			return;
-#if PLUGIN_INTERFACE_VERSION >= 79
 		if (hooks->HostRules && GetSelf())
 			hooks->HostRules->UnregisterOnClientFeatures(GetSelf(), OnClientFeatures);
 		if (g_tickRegistered && hooks->Engine)
 			hooks->Engine->UnregisterOnTick(OnTick);
 		g_tickRegistered = false;
 		g_waiting.clear();
-#endif
 		KnownFeatures::Flush();
 		if (hooks->Players)
 			hooks->Players->UnregisterOnPlayerLeft(OnPlayerLeft);
@@ -527,12 +502,8 @@ namespace HostRules
 
 	bool LoaderReceives()
 	{
-#if PLUGIN_INTERFACE_VERSION >= 79
 		auto* hooks = GetHooks();
 		return hooks && hooks->HostRules;
-#else
-		return false;
-#endif
 	}
 
 	std::string PushStatus()
@@ -549,7 +520,6 @@ namespace HostRules
 
 	FeaturesState ClientFeatures(const std::string& playerId, std::string& text)
 	{
-#if PLUGIN_INTERFACE_VERSION >= 79
 		auto* hooks = GetHooks();
 		IPluginHostRules* api = hooks ? hooks->HostRules : nullptr;
 		if (!api)
@@ -567,10 +537,6 @@ namespace HostRules
 			return ReadFeatures(api, controllers[i], text) ? FeaturesState::Ok : FeaturesState::NoReport;
 		}
 		return FeaturesState::NotConnected;
-#else
-		(void)playerId; (void)text;
-		return FeaturesState::NoLoaderSupport;
-#endif
 	}
 
 	bool WhoReported(const std::string& playerId, Reported& out)
