@@ -106,6 +106,18 @@
 // → { "ok": true }</pre>
 </div>
 
+<h2>Server Settings</h2>
+<div class="endpoint">
+  <h3><span class="method">POST</span> <span class="url">/ServerUtility/api/rules/stacksize</span></h3>
+  <p>Raise every stackable item's stack to one size on the server. <code>0</code> or <code>"off"</code> uses the game's own sizes. Without <code>stack_size</code> it returns the state, with <code>stack_size</code> and <code>stack_size_available</code>.</p>
+  <table>
+    <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>stack_size</code></td><td>int or "off"</td><td>0 to 9999</td></tr>
+  </table>
+  <pre>{ "session_token": "...", "stack_size": 500 }
+// → { "ok": true, "state": { "stack_size": 500, "stack_size_available": true, ... } }</pre>
+</div>
+
 <h2>Configuration (ServerUtility.ini)</h2>
 <pre>[AdminPanel]
 Enabled=true

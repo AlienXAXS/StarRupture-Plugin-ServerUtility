@@ -136,6 +136,8 @@ static void RulesRouteHandler(const PluginHttpRequest* req, PluginHttpResponse* 
 		Ep_RulesAdmin::MinVersion(req, resp);
 	else if (UrlEndsWith(req->url, "/modmin"))
 		Ep_RulesAdmin::ModMin(req, resp);
+	else if (UrlEndsWith(req->url, "/stacksize"))
+		Ep_RulesAdmin::StackSize(req, resp);
 	else
 	{
 		std::string body;

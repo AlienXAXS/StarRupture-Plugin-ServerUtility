@@ -21,4 +21,6 @@ namespace Ep_RulesAdmin
 	void MinVersion(const PluginHttpRequest* req, PluginHttpResponse* resp);
 	// api/rules/modmin: {plugin, version: x.y.z|wire|off}; without version, the state.
 	void ModMin(const PluginHttpRequest* req, PluginHttpResponse* resp);
+	// api/rules/stacksize: {stack_size: 0..9999|off}; without it, the state.
+	void StackSize(const PluginHttpRequest* req, PluginHttpResponse* resp);
 }
