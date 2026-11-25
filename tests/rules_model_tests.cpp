@@ -1517,11 +1517,12 @@ int main()
 		PlayerFlags plain;
 
 		// The table: every row is a deny, and a mod name matches without case, a section id exactly.
-		CHECK(DefaultRows().size() == 25 && IsDefaultRow("bettercheats", "stack-size") && !IsDefaultRow("BetterCheats", "Stack-Size") && IsDefaultRow("best builder", "no-build-cost")
-		      && IsDefaultRow("CameraControls", "vitals") && IsDefaultRow("WaveOptimiser", "heat-tools") && !IsDefaultRow("BetterCheats", "wind-mute"));
+		CHECK(DefaultRows().size() == 26 && IsDefaultRow("bettercheats", "stack-size") && !IsDefaultRow("BetterCheats", "Stack-Size") && IsDefaultRow("best builder", "no-build-cost")
+		      && IsDefaultRow("CameraControls", "vitals") && IsDefaultRow("WaveOptimiser", "heat-tools") && IsDefaultRow("BetterCheats", "inventory-slot-size") && !IsDefaultRow("BetterCheats", "wind-mute"));
 
 		// A non-admin is denied; a remote set carries it, a set for no remote connection does not.
 		CHECK(has(RulesText(none, true), "BetterCheats.stack-size=deny") && has(RulesText(none, true), "Best Builder.unlock-all-buildings=deny"));
+		CHECK(has(RulesText(none, true), "BetterCheats.inventory-slot-size=deny") && has(PlayerRulesText(none, plain, true), "BetterCheats.inventory-slot-size=deny"));
 		CHECK(RulesText(none, false) == "default=allow\n");
 		CHECK(PlayerRulesText(none, plain, true) == RulesText(none, true));
 		PlayerFlags sec;
@@ -1532,11 +1533,11 @@ int main()
 		CHECK(!has(RulesText(allow1, true), "BetterCheats.stack-size=deny") && has(RulesText(allow1, true), "BetterCheats.stack-size=allow"));
 		CHECK(RulesText(deny1, true).find("tack-") != std::string::npos && !has(RulesText(deny1, true), "BetterCheats.stack-size=deny")
 		      && has(RulesText(deny1, true), "BetterCheats.movement=deny"));
-		CHECK(ActiveDefaultRows(allow1).size() == 24 && ActiveDefaultRows(deny1).size() == 24 && ActiveDefaultRows(none).size() == 25);
+		CHECK(ActiveDefaultRows(allow1).size() == 25 && ActiveDefaultRows(deny1).size() == 25 && ActiveDefaultRows(none).size() == 26);
 
 		// A different-case id is another section to the loader, so it does not replace the default.
 		const Model oddCase = ParseText({ "[Rules]", "BetterCheats.Stack-Size=allow" }, dw);
-		CHECK(ActiveDefaultRows(oddCase).size() == 25);
+		CHECK(ActiveDefaultRows(oddCase).size() == 26);
 
 		// Plugin.* = allow and [Policy] Default = allow do not open it.
 		CHECK(has(RulesText(star, true), "BetterCheats.*=allow") && has(RulesText(star, true), "BetterCheats.stack-size=deny"));
@@ -1547,6 +1548,7 @@ int main()
 		CHECK(PlayerRulesText(none, admin, true) == "default=allow\n");
 		admin.sections = { "BetterCheats.stack-size" };
 		CHECK(PlayerRulesText(none, admin, true) == "default=allow\n");
+		CHECK(PlayerRulesText(none, admin, true).find("inventory-slot-size") == std::string::npos);
 
 		// A player's Sections= grant: Plugin.* leaves the default denied, the exact key opens it.
 		PlayerFlags wide; wide.sections = { "BetterCheats.*" };

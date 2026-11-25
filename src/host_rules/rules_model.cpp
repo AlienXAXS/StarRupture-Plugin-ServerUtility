@@ -12,6 +12,7 @@ namespace RulesModel
 		// ones each mod declares. Information-only features have no row.
 		constexpr DefaultRow kDefaultRows[] = {
 			{ "BetterCheats", "stack-size" },
+			{ "BetterCheats", "inventory-slot-size" },
 			{ "BetterCheats", "player-stats" },
 			{ "BetterCheats", "movement" },
 			{ "BetterCheats", "weapons" },

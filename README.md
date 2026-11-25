@@ -139,7 +139,7 @@ ServerUtility ships with rows that deny the cheat-style features of these mods, 
 
 | Mod | Sections |
 |---|---|
-| BetterCheats | `stack-size`, `player-stats`, `movement`, `weapons`, `grenade-probe`, `mining-tools`, `inventory`, `item-spawner`, `skills`, `build-free`, `build-unlock`, `build-anywhere`, `deconstruct-windows`, `enemies`, `machine-power`, `corporations`, `rupture-wave` |
+| BetterCheats | `stack-size`, `inventory-slot-size`, `player-stats`, `movement`, `weapons`, `grenade-probe`, `mining-tools`, `inventory`, `item-spawner`, `skills`, `build-free`, `build-unlock`, `build-anywhere`, `deconstruct-windows`, `enemies`, `machine-power`, `corporations`, `rupture-wave` |
 | Best Builder | `build-anywhere`, `deconstruct-windows`, `no-build-cost`, `no-stability-check`, `unlock-all-recipes`, `unlock-all-buildings` |
 | CameraControls | `vitals` |
 | WaveOptimiser | `heat-tools` |
