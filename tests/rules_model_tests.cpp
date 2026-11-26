@@ -1455,34 +1455,51 @@ int main()
 		}
 
 		// A full catalog of declared rows refuses a new reported one; a declared row is never evicted.
+		// Rows go through the production parse and merge, as the admin client's push does.
 		{
-			Catalog g;
-			for (size_t i = 1; g.Size() < kMaxRows; ++i)
+			auto fillDeclared = [&](Catalog& cat, const std::string& day)
 			{
-				Report r = rep("Plug", ("d" + std::to_string(i)).c_str(), "", "", false);
-				r.source = "declared";
-				g.Merge(r, d1);
-			}
+				for (size_t i = 1; cat.Size() < kMaxRows;)
+				{
+					std::vector<std::string> rows;
+					for (size_t n = 0; n < kMaxRowsPerReport && cat.Size() + rows.size() < kMaxRows; ++n, ++i)
+						rows.push_back("Plug	1.0	d" + std::to_string(i) + "	on	T");
+					for (const Report& r : ParseDeclaredRows(rows)) cat.Merge(r, day);
+				}
+			};
+			Catalog g;
+			fillDeclared(g, d1);
+			for (const auto& en : g.Entries()) CHECK(en.source == kSourceDeclared);
 			CHECK(g.Size() == kMaxRows && !g.Merge(rep("Plug", "late", "", "", false), d2) && g.Size() == kMaxRows);
 			// One reported row among them is the one that goes.
 			Catalog h;
-			Report rr = rep("Plug", "rep", "", "", false);
-			h.Merge(rr, d1);
-			for (size_t i = 1; h.Size() < kMaxRows; ++i)
-			{
-				Report r = rep("Plug", ("d" + std::to_string(i)).c_str(), "", "", false);
-				r.source = "declared";
-				h.Merge(r, d2);
-			}
+			h.Merge(rep("Plug", "rep", "", "", false), d1);
+			fillDeclared(h, d2);
 			CHECK(h.Merge(rep("Plug", "late", "", "", false), d2) && h.Size() == kMaxRows);
 			bool hasRep = false, hasLate = false;
 			for (const auto& en : h.Entries()) { hasRep |= en.id == "rep"; hasLate |= en.id == "late"; }
 			CHECK(!hasRep && hasLate);
+			// A reported row a loader then declares is kept, not evicted.
+			Catalog u;
+			u.Merge(rep("Plug", "up", "", "", false), d1);
+			CHECK(u.Entries()[0].source == kSourceReported);
+			CHECK(u.Merge(ParseDeclaredRows({ "Plug	1.0	up	on	T" })[0], d1));
+			CHECK(u.Entries()[0].source == kSourceDeclared);
+			fillDeclared(u, d2);
+			CHECK(u.Size() == kMaxRows && !u.Merge(rep("Plug", "late", "", "", false), d2));
+			bool hasUp = false;
+			for (const auto& en : u.Entries()) hasUp |= en.id == "up";
+			CHECK(hasUp);
 		}
 
 		// Reply lines: control characters go, and a long line is cut on a character boundary.
 		{
 			CHECK(LineText::OneLine("a\nb\rc\td") == "a b c d");
+			CHECK(LineText::OneLine("a\x7F" "b") == "a b");
+			CHECK(LineText::OneLine("a\xC2\x85" "b") == "a b");          // U+0085
+			CHECK(LineText::OneLine("a\xE2\x80\xA8" "b") == "a b");      // U+2028
+			CHECK(LineText::OneLine("a\xE2\x80\xA9" "b") == "a b");      // U+2029
+			CHECK(LineText::OneLine("\xC3\xA9\xE2\x82\xAC") == "\xC3\xA9\xE2\x82\xAC");   // other text is untouched
 			CHECK(LineText::Clip("short", 120) == "short");
 			const std::string longLine(500, 'x');
 			CHECK(LineText::Clip(longLine, 120).size() == 120 && LineText::Clip(longLine, 120).substr(117) == "...");

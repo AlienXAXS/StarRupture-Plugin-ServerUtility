@@ -274,7 +274,7 @@ namespace AdminClaim
 			g_open.erase(playerId);   // no prompt on that client (vanilla or an older loader)
 		}
 		else
-			LOG_INFO("[Admin] Asked player %s for the claim code", playerId.c_str());
+			LOG_INFO("[Admin] Asked player %s for the claim code", LineText::OneLine(playerId).c_str());
 	}
 
 	void PlayerLeft(const std::string& playerId)

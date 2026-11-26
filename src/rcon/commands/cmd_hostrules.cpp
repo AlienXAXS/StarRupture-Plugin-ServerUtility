@@ -49,11 +49,11 @@ namespace Cmd_HostRules
 		constexpr size_t kMaxLine        = 120;
 		constexpr size_t kMaxKnownListed = 10;   // unmatched-rule warnings
 
-		// Adds one line (cut to kMaxLine) when it fits; false when it does not.
-		bool AddLine(std::string& out, const std::string& line)
+		// Adds one line (cut to kMaxLine) when it fits under limit; false when it does not.
+		bool AddLine(std::string& out, const std::string& line, size_t limit = kMaxReply)
 		{
 			const std::string cut = LineText::Clip(LineText::OneLine(line), kMaxLine);
-			if (out.size() + cut.size() + 1 > kMaxReply) return false;
+			if (out.size() + cut.size() + 1 > limit) return false;
 			out += cut + "\n";
 			return true;
 		}
@@ -63,18 +63,22 @@ namespace Cmd_HostRules
 		std::string Known()
 		{
 			const RulesModel::Model m = HostRules::Get();
-			std::ostringstream oss;
 			const std::vector<KnownFeatures::Entry> known = KnownFeatures::Snapshot();
 			std::vector<std::string> keys;
 			for (const auto& r : m.rules) keys.push_back(r.plugin + "." + r.id);
-			oss << KnownFeatures::UnmatchedWarnings(KnownFeatures::UnmatchedKeys(keys, known), kMaxKnownListed);
+
+			// Each warning line goes through AddLine, so the reply holds its cap.
+			std::string out;
+			std::istringstream warnings(KnownFeatures::UnmatchedWarnings(KnownFeatures::UnmatchedKeys(keys, known), kMaxKnownListed));
+			std::string warning;
+			while (std::getline(warnings, warning))
+				if (!AddLine(out, warning)) break;
 
 			if (known.empty())
 			{
-				oss << "  known features: none yet (a player's mod loader lists them when they join)\n";
-				return oss.str();
+				AddLine(out, "  known features: none yet (a player's mod loader lists them when they join)");
+				return out;
 			}
-			std::string out = oss.str();
 			AddLine(out, "  known features (" + std::to_string(known.size()) + "):");
 			size_t shown = 0;
 			for (const KnownFeatures::Entry& e : known)
@@ -99,25 +103,49 @@ namespace Cmd_HostRules
 			return out;
 		}
 
+		// Lines of a list go in while they fit under limit; the rest are counted as "... and M more".
+		void AddList(std::string& out, const std::vector<std::string>& lines, size_t limit)
+		{
+			for (size_t i = 0; i < lines.size(); ++i)
+				if (!AddLine(out, lines[i], limit))
+				{
+					out += "  ... and " + std::to_string(lines.size() - i) + " more\n";
+					return;
+				}
+		}
+
 		std::string State()
 		{
 			const RulesModel::Model m = HostRules::Get();
-			std::ostringstream oss;
-			oss << "Host rules (" << HostRules::PushStatus() << "):\n";
-			oss << "  default: " << (m.defaultDeny ? "deny" : "allow") << "\n";
-			oss << "  message: " << (m.message.empty() ? "(none)" : m.message) << "\n";
+			std::string out;
+			AddLine(out, std::string("Host rules (") + HostRules::PushStatus() + "):");
+			AddLine(out, std::string("  default: ") + (m.defaultDeny ? "deny" : "allow"));
+			AddLine(out, "  message: " + (m.message.empty() ? std::string("(none)") : m.message));
+
+			// The lines after the lists are short and fixed; the lists give up room for them.
+			std::string tail;
+			AddLine(tail, "  minimum loader version: " + (m.minLoaderVersion.empty() ? std::string("off") : m.minLoaderVersion));
+			if (!HostRules::LoaderReceives())
+				AddLine(tail, "  This mod loader has no host rules support, so the rules are saved but not sent.");
+			AddLine(tail, std::string("  version minimums: ") + HostRules::MinimumsStatus());
+			const size_t limit = kMaxReply - tail.size() - 40;   // 40: the "... and M more" line
+
 			// Default rows are built in; an exact rule above replaces one. Admins are exempt.
 			const std::vector<RulesModel::DefaultRow> defaults = RulesModel::ActiveDefaultRows(m);
-			if (m.rules.empty() && defaults.empty()) oss << "  rules: none\n";
-			for (const auto& r : m.rules) oss << "  " << r.plugin << "." << r.id << " = " << (r.deny ? "deny" : "allow") << "\n";
-			for (const auto& d : defaults) oss << "  " << d.plugin << "." << d.id << " = deny (default)\n";
-			oss << "  minimum loader version: " << (m.minLoaderVersion.empty() ? "off" : m.minLoaderVersion) << "\n";
-			if (m.modMins.empty()) oss << "  minimum mod versions: none\n";
-			else for (const auto& r : m.modMins) oss << "  minimum " << r.plugin << ": " << r.version << "\n";
-			if (!HostRules::LoaderReceives())
-				oss << "  This mod loader has no host rules support, so the rules are saved but not sent.\n";
-			oss << "  version minimums: " << HostRules::MinimumsStatus() << "\n";
-			return oss.str();
+			std::vector<std::string> rules;
+			for (const auto& r : m.rules) rules.push_back("  " + r.plugin + "." + r.id + " = " + (r.deny ? "deny" : "allow"));
+			for (const auto& d : defaults) rules.push_back(std::string("  ") + d.plugin + "." + d.id + " = deny (default)");
+			if (rules.empty()) AddLine(out, "  rules: none");
+			else AddList(out, rules, limit);
+
+			if (m.modMins.empty()) AddLine(out, "  minimum mod versions: none");
+			else
+			{
+				std::vector<std::string> mins;
+				for (const auto& r : m.modMins) mins.push_back("  minimum " + r.plugin + ": " + r.version);
+				AddList(out, mins, limit);
+			}
+			return out + tail;
 		}
 
 		std::string Saved() { return "Saved.\n" + State(); }
