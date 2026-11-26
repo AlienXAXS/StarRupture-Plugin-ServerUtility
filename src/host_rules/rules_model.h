@@ -70,6 +70,13 @@ namespace RulesModel
 	// keys are allowed, ahead of any global rule for the same mod.
 	std::string PlayerRulesText(const Model& m, const PlayerFlags& f, bool remote);
 
+	// May this player use plugin.id: the answer PlayerRulesText gives them, read the way the loader
+	// reads it (the exact row, then Plugin.*, then the default; a proven admin gets the "admins only"
+	// rows as allows and no default rows; ExemptRules is never denied). A remote player is meant.
+	// why is for the server log only.
+	struct Decision { bool allowed = false; const char* why = ""; };
+	Decision Resolve(const Model& m, const PlayerFlags& f, const std::string& plugin, const std::string& id);
+
 	// What SetVersionMinimums takes: loader=version first (when set), then one
 	// Plugin=version line per mod minimum. Empty when every minimum is off.
 	std::string VersionMinimumsText(const Model& m);

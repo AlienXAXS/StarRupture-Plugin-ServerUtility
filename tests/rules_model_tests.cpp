@@ -8,6 +8,7 @@
 #include "host_rules/known_features.h"
 #include "host_rules/line_text.h"
 #include "host_rules/ini_file.h"
+#include "cheats/cheat_authority.h"
 #include "host_rules/player_list.h"
 #include "admin/url_match.h"
 #include "admin/admin_json.h"
@@ -2362,6 +2363,140 @@ int main()
 		CHECK(reported.rows.size() == 1 && *reported.Find(1) == "B");
 		reported.Erase(7);          // an unknown connection changes nothing
 		CHECK(reported.rows.size() == 1);
+	}
+
+	// Resolve: may a player use plugin.id. Held to PlayerRulesText by reading its text the way the loader does.
+	{
+		// Test-only reader of a rules text: the exact row, then Plugin.*, then default= (mod names without case).
+		const auto textAllows = [](const std::string& text, const std::string& plugin, const std::string& id)
+		{
+			const auto low = [](std::string s) { for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); return s; };
+			bool def = true, haveExact = false, exact = true, haveAll = false, all = true;
+			size_t pos = 0;
+			while (pos < text.size())
+			{
+				size_t end = text.find('\n', pos);
+				if (end == std::string::npos) end = text.size();
+				const std::string line = text.substr(pos, end - pos);
+				pos = end + 1;
+				const size_t eq = line.find('=');
+				if (eq == std::string::npos) continue;
+				const std::string key = line.substr(0, eq), val = line.substr(eq + 1);
+				if (key == "default") { def = val == "allow"; continue; }
+				if (key == "message") continue;
+				const size_t dot = key.rfind('.');
+				if (dot == std::string::npos || low(key.substr(0, dot)) != low(plugin)) continue;
+				const std::string rid = key.substr(dot + 1);
+				if (rid == id) { haveExact = true; exact = val == "allow"; }
+				else if (rid == "*") { haveAll = true; all = val == "allow"; }
+			}
+			return haveExact ? exact : haveAll ? all : def;
+		};
+
+		std::vector<std::string> rw;
+		const std::vector<std::vector<std::string>> models = {
+			{},
+			{ "[Rules]", "BetterCheats.stack-size=allow" },
+			{ "[Rules]", "BetterCheats.stack-size=deny" },
+			{ "[Rules]", "BetterCheats.stack-size=admins" },
+			{ "[Rules]", "BetterCheats.*=deny" },
+			{ "[Rules]", "BetterCheats.*=admins" },
+			{ "[Rules]", "BetterCheats.*=allow", "BetterCheats.movement=deny" },
+			{ "[Policy]", "Default=deny" },
+			{ "[Policy]", "Default=deny", "[Rules]", "BetterCheats.*=allow" },
+			{ "[Policy]", "Default=deny", "[Rules]", "BetterCheats.skills=allow" },
+			{ "[Rules]", "bettercheats.movement=allow", "Other.thing=deny" },
+		};
+		std::vector<PlayerFlags> flagSets;
+		flagSets.push_back(PlayerFlags());
+		{ PlayerFlags f; f.admin = true; flagSets.push_back(f); }
+		{ PlayerFlags f; f.exemptRules = true; flagSets.push_back(f); }
+		{ PlayerFlags f; f.sections = { "BetterCheats.movement" }; flagSets.push_back(f); }
+		{ PlayerFlags f; f.sections = { "BetterCheats.*" }; flagSets.push_back(f); }
+		{ PlayerFlags f; f.sections = { "BetterCheats.*", "BetterCheats.stack-size" }; flagSets.push_back(f); }
+		{ PlayerFlags f; f.admin = true; f.sections = { "BetterCheats.skills" }; flagSets.push_back(f); }
+		{ PlayerFlags f; f.admin = true; f.exemptRules = true; flagSets.push_back(f); }
+
+		std::vector<std::string> ids = { "no-such-feature", "stack-size", "movement", "skills" };
+		for (const DefaultRow& d : DefaultRows()) if (std::string(d.plugin) == "BetterCheats") ids.push_back(d.id);
+		int drift = 0;
+		for (const auto& lines : models)
+		{
+			const Model m = ParseText(lines, rw);
+			for (const PlayerFlags& f : flagSets)
+			{
+				const std::string text = PlayerRulesText(m, f, true);
+				for (const std::string& id : ids)
+				{
+					const bool viaText = f.exemptRules ? true : textAllows(text, "BetterCheats", id);
+					if (Resolve(m, f, "BetterCheats", id).allowed != viaText) { ++drift; std::printf("drift: %s admin=%d exempt=%d\n", id.c_str(), f.admin, f.exemptRules); }
+				}
+			}
+		}
+		CHECK(drift == 0);
+
+		const Model none = ParseText({}, rw);
+		PlayerFlags admin; admin.admin = true;
+		PlayerFlags exempt; exempt.exemptRules = true;
+		// A non-admin is denied every default row, a proven admin gets them, a listed admin not proven is a non-admin.
+		CHECK(!Resolve(none, PlayerFlags(), "BetterCheats", "movement").allowed);
+		CHECK(Resolve(none, admin, "BetterCheats", "movement").allowed);
+		CHECK(!Resolve(none, FlagsFor(true, false, {}, false), "BetterCheats", "movement").allowed);
+		CHECK(Resolve(none, FlagsFor(true, false, {}, true), "BetterCheats", "movement").allowed);
+		CHECK(Resolve(none, PlayerFlags(), "BetterCheats", "no-such-feature").allowed);   // no row, default allow
+		// An exact deny beats the default "admins only" row, for a proven admin too.
+		const Model exactDeny = ParseText({ "[Rules]", "BetterCheats.movement=deny" }, rw);
+		CHECK(!Resolve(exactDeny, admin, "BetterCheats", "movement").allowed);
+		// "admins" on a row: only a proven admin.
+		const Model adminsRow = ParseText({ "[Rules]", "BetterCheats.skills=admins" }, rw);
+		CHECK(!Resolve(adminsRow, PlayerFlags(), "BetterCheats", "skills").allowed);
+		CHECK(Resolve(adminsRow, admin, "BetterCheats", "skills").allowed);
+		// An exact allow opens a default row for everyone.
+		const Model exactAllow = ParseText({ "[Rules]", "BetterCheats.movement=allow" }, rw);
+		CHECK(Resolve(exactAllow, PlayerFlags(), "BetterCheats", "movement").allowed);
+		// A player's own exact Sections= entry beats their own whole-mod entry and the rules.
+		PlayerFlags own; own.sections = { "BetterCheats.movement" };
+		CHECK(Resolve(exactDeny, own, "BetterCheats", "movement").allowed);
+		CHECK(!Resolve(exactDeny, own, "BetterCheats", "skills").allowed);
+		PlayerFlags ownAll; ownAll.sections = { "BetterCheats.*" };
+		CHECK(Resolve(ParseText({ "[Rules]", "BetterCheats.*=deny" }, rw), ownAll, "BetterCheats", "no-such-feature").allowed);
+		// BetterCheats.*=deny: a proven admin is denied, an ExemptRules player is allowed.
+		const Model modDeny = ParseText({ "[Rules]", "BetterCheats.*=deny" }, rw);
+		CHECK(!Resolve(modDeny, admin, "BetterCheats", "movement").allowed);
+		CHECK(!Resolve(modDeny, admin, "BetterCheats", "no-such-feature").allowed);
+		CHECK(Resolve(modDeny, exempt, "BetterCheats", "movement").allowed);
+		// [Policy] Default=deny with no row: denied (an id with no row falls to Plugin.*, then Default).
+		const Model closed = ParseText({ "[Policy]", "Default=deny" }, rw);
+		CHECK(!Resolve(closed, PlayerFlags(), "BetterCheats", "no-such-feature").allowed);
+		CHECK(!Resolve(closed, admin, "BetterCheats", "movement").allowed);
+		CHECK(Resolve(closed, exempt, "BetterCheats", "movement").allowed);
+		const Model closedMod = ParseText({ "[Policy]", "Default=deny", "[Rules]", "BetterCheats.*=allow" }, rw);
+		CHECK(Resolve(closedMod, PlayerFlags(), "BetterCheats", "no-such-feature").allowed);
+		CHECK(!Resolve(closedMod, PlayerFlags(), "BetterCheats", "movement").allowed);   // the default row still holds
+	}
+
+	// CheatAuthority::Decide: the rules decide, and a listed admin counts as one only once proven.
+	{
+		std::vector<std::string> cw;
+		PlayerList::Entry listedAdmin; listedAdmin.id = "A"; listedAdmin.admin = true;
+		PlayerList::Entry plain;       plain.id = "P";
+		bool proven = false;
+		Model rules = ParseText({ "[Rules]", "BetterCheats.movement=allow" }, cw);
+		CheatAuthority::Env env;
+		env.findPlayer = [&](const std::string& id, PlayerList::Entry& out) { if (id == "A") { out = listedAdmin; return true; } if (id == "P") { out = plain; return true; } return false; };
+		env.isProven   = [&](const std::string&) { return proven; };
+		env.model      = [&] { return rules; };
+		// An explicit allow opens the feature to everyone; a default row stays admins-only.
+		CHECK(CheatAuthority::Decide(env, "P", "BetterCheats", "movement").allowed);
+		CHECK(!CheatAuthority::Decide(env, "P", "BetterCheats", "skills").allowed);
+		CHECK(!CheatAuthority::Decide(env, "A", "BetterCheats", "skills").allowed);   // listed, not proven
+		proven = true;
+		CHECK(CheatAuthority::Decide(env, "A", "BetterCheats", "skills").allowed);
+		CHECK(!CheatAuthority::Decide(env, "nobody", "BetterCheats", "skills").allowed);
+		// Reasons: the admins-only deny and the rule deny read differently.
+		const Model denyRow = ParseText({ "[Rules]", "BetterCheats.skills=deny" }, cw);
+		CHECK(std::string(Resolve(ParseText({}, cw), PlayerFlags(), "BetterCheats", "skills").why) == "Only this server's admins can use this.");
+		CHECK(std::string(Resolve(denyRow, PlayerFlags(), "BetterCheats", "skills").why) == "Turned off by this server's rules. Ask the server's admin.");
 	}
 
 	std::printf("%d checks, %d failed\n", g_checks, g_failed);

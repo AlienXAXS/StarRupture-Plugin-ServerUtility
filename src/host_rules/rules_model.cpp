@@ -342,6 +342,53 @@ namespace RulesModel
 		return f.admin || f.exemptRules || !f.sections.empty();
 	}
 
+	namespace
+	{
+		// The rows one player is sent, before the text is written: the global rows with the flags
+		// applied (not for an ExemptRules player, who gets no rows).
+		Model PlayerModel(const Model& m, const PlayerFlags& f)
+		{
+			std::vector<Rule> rules = m.rules;
+			// A proven admin: "admins only" rows are allows. The built-in default rows are left out
+			// (RulesText adds none for an admin), so the host's own rules decide for them.
+			if (f.admin)
+				for (Rule& r : rules)
+					if (r.adminsOnly) { r.deny = false; r.adminsOnly = false; }
+			std::vector<Rule> own;   // the player's keys, checked and split
+			for (const std::string& key : f.sections)
+			{
+				Rule r;
+				std::string error;
+				if (ParseKey(key, r.plugin, r.id, error)) own.push_back(r);
+			}
+
+			// A whole-mod key opens every denied row of that mod first. Allow rows stay,
+			// so an exact allow that opened a default row keeps doing so.
+			for (const Rule& o : own)
+			{
+				if (o.id != "*") continue;
+				rules.erase(std::remove_if(rules.begin(), rules.end(),
+					[&](const Rule& r) { return SamePlugin(r.plugin, o.plugin) && (r.deny || r.id == "*"); }), rules.end());
+				rules.push_back({ o.plugin, "*", false });
+			}
+			for (const Rule& o : own)
+			{
+				if (o.id == "*") continue;
+				const bool covered = std::any_of(rules.begin(), rules.end(),
+					[&](const Rule& r) { return SamePlugin(r.plugin, o.plugin) && r.id == "*" && !r.deny; });
+				auto it = std::find_if(rules.begin(), rules.end(),
+					[&](const Rule& r) { return SamePlugin(r.plugin, o.plugin) && r.id == o.id; });
+				if (it != rules.end()) it->deny = false;
+				// A default row stays denied under a covering Plugin.*, so the exact key is written.
+				else if (!covered || m.defaultDeny || IsDefaultRow(o.plugin, o.id)) rules.push_back({ o.plugin, o.id, false });
+			}
+
+			Model own2 = m;
+			own2.rules = rules;
+			return own2;
+		}
+	}
+
 	std::string PlayerRulesText(const Model& m, const PlayerFlags& f, bool remote)
 	{
 		if (!NeedsOwnRules(f))
@@ -355,44 +402,36 @@ namespace RulesModel
 			return t;
 		}
 
-		std::vector<Rule> rules = m.rules;
-		// A proven admin: "admins only" rows are allows. The built-in default rows are left out
-		// (RulesText below adds none for an admin), so the host's own rules decide for them.
-		if (f.admin)
-			for (Rule& r : rules)
-				if (r.adminsOnly) { r.deny = false; r.adminsOnly = false; }
-		std::vector<Rule> own;   // the player's keys, checked and split
-		for (const std::string& key : f.sections)
-		{
-			Rule r;
-			std::string error;
-			if (ParseKey(key, r.plugin, r.id, error)) own.push_back(r);
-		}
+		return RulesText(PlayerModel(m, f), remote && !f.admin);
+	}
 
-		// A whole-mod key opens every denied row of that mod first. Allow rows stay,
-		// so an exact allow that opened a default row keeps doing so.
-		for (const Rule& o : own)
+	Decision Resolve(const Model& m, const PlayerFlags& f, const std::string& plugin, const std::string& id)
+	{
+		static const char* const kRuleDeny   = "Turned off by this server's rules. Ask the server's admin.";
+		static const char* const kAdminsOnly = "Only this server's admins can use this.";
+		if (f.exemptRules) return { true, "ExemptRules" };
+		// The rows the player's text holds, read the way the loader reads them: the exact row, then
+		// Plugin.*, then the default. A remote player is meant (default rows apply, except for an admin).
+		const Model eff = NeedsOwnRules(f) ? PlayerModel(m, f) : m;
+		const auto row = [&](const std::string& rid) -> const Rule*
 		{
-			if (o.id != "*") continue;
-			rules.erase(std::remove_if(rules.begin(), rules.end(),
-				[&](const Rule& r) { return SamePlugin(r.plugin, o.plugin) && (r.deny || r.id == "*"); }), rules.end());
-			rules.push_back({ o.plugin, "*", false });
-		}
-		for (const Rule& o : own)
+			if (IsOwnMod(plugin)) return nullptr;   // RulesText leaves the host's rows for this mod out
+			for (const Rule& r : eff.rules)
+				if (SamePlugin(r.plugin, plugin) && r.id == rid) return &r;
+			return nullptr;
+		};
+		if (const Rule* r = row(id))
+			return { !r->deny, !r->deny ? "allowed by a rule" : r->adminsOnly ? kAdminsOnly : kRuleDeny };
+		if (!f.admin && !IsOwnMod(plugin))
 		{
-			if (o.id == "*") continue;
-			const bool covered = std::any_of(rules.begin(), rules.end(),
-				[&](const Rule& r) { return SamePlugin(r.plugin, o.plugin) && r.id == "*" && !r.deny; });
-			auto it = std::find_if(rules.begin(), rules.end(),
-				[&](const Rule& r) { return SamePlugin(r.plugin, o.plugin) && r.id == o.id; });
-			if (it != rules.end()) it->deny = false;
-			// A default row stays denied under a covering Plugin.*, so the exact key is written.
-			else if (!covered || m.defaultDeny || IsDefaultRow(o.plugin, o.id)) rules.push_back({ o.plugin, o.id, false });
+			const std::vector<DefaultRow> defaults = ActiveDefaultRows(eff);
+			if (std::any_of(defaults.begin(), defaults.end(),
+				[&](const DefaultRow& d) { return SamePlugin(d.plugin, plugin) && id == d.id; }))
+				return { false, kAdminsOnly };
 		}
-
-		Model own2 = m;
-		own2.rules = rules;
-		return RulesText(own2, remote && !f.admin);
+		if (const Rule* r = row("*"))
+			return { !r->deny, !r->deny ? "allowed for the whole mod" : r->adminsOnly ? kAdminsOnly : kRuleDeny };
+		return { !m.defaultDeny, m.defaultDeny ? kRuleDeny : "allowed by the default" };
 	}
 
 	std::string VersionMinimumsText(const Model& m)
