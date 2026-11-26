@@ -8,8 +8,9 @@
 //   Toggle   a player's own switch (fly, a stat lock). Reverts when the player leaves, when the
 //            feature is denied for them and at server stop.
 //   Override a server-wide setting (stack size, a paused wave). Stays when the admin who set it
-//            leaves; reverts when the feature is denied for that admin while they are connected,
-//            when an admin or RCON releases it and at server stop.
+//            leaves or at world end; reverts when the feature is denied for that admin (connected or
+//            not: the entry keeps the proof state the owner last had), when an admin or RCON
+//            releases it and at server stop.
 // A grant (items, data points, unlocks, skill levels) gets no entry: Grant() only logs it.
 //
 // Restore writes the prior value only while the live value is still the one SU wrote. Otherwise
@@ -56,6 +57,7 @@ namespace CheatLedger
 		Value       prior, applied;              // prior is captured once, on the first apply
 		uint64_t    appliedAtMs = 0;
 		uint32_t    reqId = 0;
+		bool        ownerProven = false;         // the owner's admin proof as last seen; decides a deny once they are gone
 	};
 
 	struct Request
@@ -68,6 +70,7 @@ namespace CheatLedger
 		Weak        target;
 		Value       value;                       // what to write
 		uint32_t    reqId = 0;
+		bool        ownerProven = false;
 	};
 
 	enum class Allowance { Allowed, Denied };
@@ -79,9 +82,9 @@ namespace CheatLedger
 		// Write a value to the entry's slot; false when it could not be written.
 		std::function<bool(const Entry&, const Value&)>   write;
 		std::function<bool(const Weak&)>                  alive;
-		// Whether the feature is still allowed for the entry's owner. An Override whose owner has
-		// left is Allowed by the glue.
-		std::function<Allowance(const Entry&)>            allowed;
+		// Whether the feature is still allowed for the entry's owner. While the owner is connected
+		// the glue refreshes e.ownerProven; once they are gone it decides from the stored value.
+		std::function<Allowance(Entry&)>                  allowed;
 		std::function<uint64_t()>                         nowMs;
 		std::function<bool()>                             isGameThread;
 		// One line per commit, never per tick.
@@ -117,8 +120,8 @@ namespace CheatLedger
 		void Reconcile();
 		void ReconcilePlayer(const std::string& playerId);
 
-		// Travel: Toggles are dropped without a write (the pawns are gone). Overrides stay, unless
-		// their target is gone too.
+		// World end: Toggles are dropped without a write (the pawns are gone). Overrides stay (not
+		// restored), unless their target is gone too.
 		void OnWorldEnd();
 
 		// Server stop. Does nothing (and says so) off the game thread.

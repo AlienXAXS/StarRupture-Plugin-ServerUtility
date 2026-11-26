@@ -94,7 +94,7 @@ namespace CheatLedger
 		{
 			e.playerId = req.playerId; e.playerName = req.playerName; e.conn = req.conn;
 			e.feature = req.feature; e.slot = req.slot; e.kind = req.kind; e.pin = req.pin;
-			e.target = req.target; e.reqId = req.reqId;
+			e.target = req.target; e.reqId = req.reqId; e.ownerProven = req.ownerProven;
 			e.prior = m_env.read(e);
 			if (std::holds_alternative<std::monostate>(e.prior))
 			{
@@ -117,7 +117,7 @@ namespace CheatLedger
 		const bool changed = isNew || !(e.applied == req.value) || e.playerId != req.playerId;
 		// The last admin to set an Override takes it over; the first prior stays.
 		e.playerId = req.playerId; e.playerName = req.playerName; e.conn = req.conn;
-		e.pin = req.pin; e.reqId = req.reqId;
+		e.pin = req.pin; e.reqId = req.reqId; e.ownerProven = req.ownerProven;
 		e.applied = req.value;
 		e.appliedAtMs = m_env.nowMs ? m_env.nowMs() : 0;
 		if (isNew)
