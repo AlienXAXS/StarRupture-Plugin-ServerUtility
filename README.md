@@ -181,14 +181,14 @@ What works today and what does not:
 
 ### Server-wide stack size (Unreleased)
 
-On a dedicated server the host can raise every stackable item's stack to one size, for all players. The size is the `StackSize` key in the `[Server]` section of `Plugins\config\HostRules.ini`; `0` or no key uses the game's own sizes.
+On a dedicated server the host can raise every stackable item's stack to one size, for all players. The size is the `StackSize` key in the `[Server]` section of `Plugins\config\HostRules.ini`; `0` or no key uses the game's own sizes. The file is read when the server starts; to change the size on a running server use `stacksize`, the Server tab or the panel route below (a hand edit of the file takes effect at the next restart, and `rules.reload` does not re-read it).
 
 ```
 [Server]
 StackSize=500
 ```
 
-Set it from RCON (`stacksize 500`, `stacksize off`, `stacksize` to read it), from the Server tab of the in-game admin window, or from the admin panel's `/rules/stacksize` route (`stack_size` is a number or `off`; the rules `state` also carries `stack_size` and `stack_size_available`). The range is 0-9999. A change is saved and used within a second.
+Set it from RCON (`stacksize 500`, `stacksize off`, `stacksize` to read it), from the Server tab of the in-game admin window, or from the admin panel's `/rules/stacksize` route (`stack_size` is a number or `off`; the rules `state` also carries `stack_size` and `stack_size_available`). The range is 0-9999. A change is saved and used within a second. Items the game adds to its item list later are picked up within a few seconds.
 
 An item the game gives no stack limit (single items) is left alone, and an item whose own size is already above the setting keeps it. Setting `0`, switching the feature off, or shutting the server down puts every item back to its own size. Solo play and a listen host are not changed. The size is read from the mod loader's version object map (the version map); on a game build with no entry for it the feature turns itself off with one line in the log and `stacksize` says it is not available.
 
