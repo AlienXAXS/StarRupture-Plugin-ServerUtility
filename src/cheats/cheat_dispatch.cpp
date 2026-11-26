@@ -1,4 +1,5 @@
 #include "cheat_dispatch.h"
+#include "op_give.h"
 
 #include <algorithm>
 #include <cstring>
@@ -41,7 +42,7 @@ namespace CheatDispatch
 		// four features; its slice picks the one a request names, and until then the strictest
 		// default (admins only) applies.
 		static const std::vector<OpEntry> table = {
-			{ "cheat.give",  1, "item-spawner",   &NotYet },
+			{ "cheat.give",  1, "item-spawner",   &OpGive::Handle, &OpGive::Available },
 			{ "cheat.wave",  1, "rupture-wave",   &NotYet },
 			{ "cheat.stack", 1, "stack-size",     &NotYet },
 			{ "cheat.stat",  1, "player-stats",   &NotYet },
@@ -72,7 +73,7 @@ namespace CheatDispatch
 		std::vector<std::pair<std::string, std::string>> fields;
 		fields.emplace_back("su", m_env.suVersion);
 		for (const OpEntry& op : Ops())
-			fields.emplace_back(op.name, std::to_string(op.version) + (op.run != &NotYet ? ",on" : ",off"));
+			fields.emplace_back(op.name, std::to_string(op.version) + (op.run != &NotYet && (!op.available || op.available()) ? ",on" : ",off"));
 		return CheatWire::EncodeReply(id, CheatWire::Status::Ok, "", fields);
 	}
 

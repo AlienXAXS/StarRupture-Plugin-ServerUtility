@@ -66,6 +66,8 @@ namespace CheatDispatch
 		int         version;   // handler version, as `cap` reports it
 		const char* feature;   // the BetterCheats feature id the rules decide on
 		Handler     run;
+		// Optional: whether the op can run on this server right now. `cap` reports it off when this says no.
+		bool      (*available)() = nullptr;
 	};
 
 	// The one table. A later slice replaces `NotYet` in its entry.

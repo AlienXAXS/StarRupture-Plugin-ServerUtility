@@ -58,6 +58,7 @@ namespace ServerUtilityFields
 	inline constexpr const char* SaveNextSaveGame       = "UCrSaveSubsystem::SaveNextSaveGame";
 	inline constexpr const char* AddNetworkActor        = "UReplicationGraph::AddNetworkActor";
 	inline constexpr const char* RemoveNetworkActor     = "UReplicationGraph::RemoveNetworkActor";
+	inline constexpr const char* AddNewItem             = "UAuItemsComponent::AddNewItem";
 
 	// UCrDedicatedServerSettingsComp, which ParseSettings fills in.
 	inline auto SessionName      = SERVER_UTILITY_NATIVE(EngineString, UCrDedicatedServerSettingsComp, SessionName,      0xB8);
@@ -83,6 +84,13 @@ namespace ServerUtilityFields
 
 	// The item catalogue the admin give-item endpoint searches.
 	inline auto ItemDataBaseArray = SERVER_UTILITY_FIELD(UAuItemDataBaseSubsystem, ItemDataBaseArray);
+
+	// What the su.cheat give op reads: the item's display name, the player's inventory component,
+	// and the entries AddNewItem reports back. The entry size is stepped by (PluginMap::ElementAt).
+	inline auto ItemName            = SERVER_UTILITY_FIELD(UAuItemDataBase, ItemName);
+	inline auto InventoryComponent  = SERVER_UTILITY_FIELD(ACrCharacterPlayerBase, InventoryComponent);
+	inline auto AuAddedItem_Amount  = SERVER_UTILITY_FIELD(FAuAddedItem, Amount);
+	inline auto AuAddedItem_Size    = SR_SIZE(FAuAddedItem);
 
 	// The engine members that lead from the world to a connected player's
 	// controller and from a controller to its player state (the player lookup).
@@ -137,24 +145,30 @@ namespace ServerUtilityFields
 	inline PluginMap::Feature SaveCommand{ "save-command", "RCON save command", PluginMap::KeysOf(
 		ObjectClass) };
 
+	// The su.cheat give op: AddNewItem on the server, and the members around it. While it is off
+	// (no server row for AddNewItem yet) `cap` reports the op off and a request is refused.
+	inline PluginMap::Feature CheatGive{ "cheat-give", "Item giving", PluginMap::KeysOf(
+		AddNewItem, ItemName, InventoryComponent, AuAddedItem_Amount, AuAddedItem_Size) };
+
 	// Asks the loader for every member above. False when a key that no feature
 	// lists did not resolve; the loader has then recorded the failure and
 	// refuses the plugin. A miss on a key a feature lists only turns that
 	// feature off.
 	inline bool Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
 	{
-		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand);
+		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand, CheatGive);
 
 		// A miss only turns off the features that list the key. Every row is
 		// asked even after a miss, so the loader's log lists them all.
 		PluginMap::ResolveFields(scanner, self,
 			WorldGameState, GameStatePlayerArray, ActorOwner, ControllerPlayerState,
 			PlayerStateName, PlayerStatePing,
-			ActorAlwaysRelevant, ObjectClass, ObjectIndex);
+			ActorAlwaysRelevant, ObjectClass, ObjectIndex,
+			ItemName, InventoryComponent, AuAddedItem_Amount, AuAddedItem_Size);
 
 		// One line per feature the loader switched off, so the text names
 		// exactly what is off and follows the feature's key list.
-		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand })
+		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand, &CheatGive })
 		{
 			if (!f->On())
 				LOG_WARN("[%s] The loader has no row for one of its engine members on this game build - %s is off",
