@@ -18,7 +18,6 @@ using namespace StackSizeModel;
 static State Server(int target, int lastApplied = 0, int tracked = 10)
 {
 	State s;
-	s.isServerBinary = true;
 	s.featureAvailable = true;
 	s.target = target;
 	s.lastApplied = lastApplied;
@@ -84,18 +83,6 @@ int main()
 
 	// Decide.
 	{
-		// Solo game and listen host: never act, whatever the other inputs say.
-		for (int shut = 0; shut < 2; ++shut)
-			for (int world = 0; world < 2; ++world)
-				for (int target : { 0, 500 })
-				{
-					State s = Server(target, 500, 0);
-					s.isServerBinary = false;
-					s.shuttingDown = shut != 0;
-					s.worldChanged = world != 0;
-					CHECK(Decide(s) == Action::None);
-				}
-
 		// Missing map key: restore once, then nothing, with a target set.
 		{
 			State s = Server(500, 500);
@@ -114,17 +101,25 @@ int main()
 		CHECK(Decide(Server(0, 0)) == Action::None);
 		CHECK(Decide(Server(0, 0, 0)) == Action::None);
 
-		// Shutdown restores whatever the target.
-		for (int target : { 0, 1, 500, 9999 })
+		// A rescan keeps raised items (lastApplied 0): a target of 0 or the feature turning off still restores.
 		{
-			State s = Server(target, 500);
-			s.shuttingDown = true;
+			State s = Server(0, 0);
+			s.itemsRaised = 3;
 			CHECK(Decide(s) == Action::Restore);
+			s = Server(500, 0);
+			s.featureAvailable = false;
+			s.itemsRaised = 3;
+			CHECK(Decide(s) == Action::Restore);
+			s.itemsRaised = 0;
+			CHECK(Decide(s) == Action::None);
 		}
+
+		// The game's item list changed length: rescan, only while a size is wanted.
 		{
 			State s = Server(500, 500);
-			s.shuttingDown = true;
-			s.featureAvailable = false;
+			s.catalogueChanged = true;
+			CHECK(Decide(s) == Action::Rescan);
+			s.target = 0;
 			CHECK(Decide(s) == Action::Restore);
 		}
 

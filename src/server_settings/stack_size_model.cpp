@@ -47,11 +47,9 @@ namespace StackSizeModel
 
 	Action Decide(const State& s)
 	{
-		if (!s.isServerBinary) return Action::None;
-		if (s.shuttingDown) return Action::Restore;
 		if (!s.featureAvailable || s.target <= 0)
-			return s.lastApplied != 0 ? Action::Restore : Action::None;
-		if (s.itemsTracked <= 0 || s.worldChanged) return Action::Rescan;
+			return (s.lastApplied != 0 || s.itemsRaised > 0) ? Action::Restore : Action::None;
+		if (s.itemsTracked <= 0 || s.worldChanged || s.catalogueChanged) return Action::Rescan;
 		if (s.target != s.lastApplied) return Action::Apply;
 		return Action::None;
 	}

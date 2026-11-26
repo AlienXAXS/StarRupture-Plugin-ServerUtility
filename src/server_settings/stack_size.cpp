@@ -48,10 +48,26 @@ namespace
 	ULONGLONG                     g_lastGuardMs = 0;
 	ULONGLONG                     g_nextRescanMs = 0;
 	bool                          g_tickRegistered = false;
+	int32_t                       g_scanCount = -1;   // length of the game's item list at the last scan
+	bool                          g_warnedEmpty = false;
 
 	bool FeatureOn()
 	{
 		return Feature().On() && ItemStackLimits::Available();
+	}
+
+	SDK::UAuItemDataBaseSubsystem* Subsystem(SDK::UWorld* world)
+	{
+		return static_cast<SDK::UAuItemDataBaseSubsystem*>(
+			SDK::USubsystemBlueprintLibrary::GetWorldSubsystem(world, SDK::UAuItemDataBaseSubsystem::StaticClass()));
+	}
+
+	// How many entries the game's item list holds now, -1 when it is not there.
+	int32_t CatalogueCount(SDK::UWorld* world)
+	{
+		auto* subsystem = Subsystem(world);
+		const auto* list = subsystem ? ServerUtilityFields::ItemDataBaseArray.In(subsystem) : nullptr;
+		return list ? list->Num() : -1;
 	}
 
 	// Find every item the game has loaded in this world and hand them to the
@@ -59,14 +75,14 @@ namespace
 	void Rescan(SDK::UWorld* world)
 	{
 		std::vector<SDK::UAuItemDataBase*> items;
-		auto* subsystem = static_cast<SDK::UAuItemDataBaseSubsystem*>(
-			SDK::USubsystemBlueprintLibrary::GetWorldSubsystem(world, SDK::UAuItemDataBaseSubsystem::StaticClass()));
+		int32_t count = -1;
+		auto* subsystem = Subsystem(world);
 		if (subsystem)
 		{
 			const auto* list = ServerUtilityFields::ItemDataBaseArray.In(subsystem);
 			if (list)
 			{
-				const int32_t count = list->Num();
+				count = list->Num();
 				items.reserve(static_cast<size_t>(count));
 				for (int32_t i = 0; i < count; ++i)
 					if ((*list)[i])
@@ -76,15 +92,20 @@ namespace
 
 		g_limits.SetItems(items);
 		g_world.Set(world);
+		g_scanCount = count;
 		g_lastApplied = 0;
 		g_tracked.store(g_limits.Tracked());
+		g_raised.store(g_limits.Raised());
 		if (items.empty())
 		{
 			g_nextRescanMs = GetTickCount64() + kRescanMs;
-			LOG_WARN("[StackSize] No items found yet - trying again in a few seconds");
+			if (!g_warnedEmpty)
+				LOG_WARN("[StackSize] No items found yet - trying again in a few seconds");
+			g_warnedEmpty = true;
 		}
 		else
 		{
+			g_warnedEmpty = false;
 			LOG_INFO("[StackSize] target %d, %d items", g_target.load(), g_limits.Tracked());
 		}
 	}
@@ -110,12 +131,14 @@ namespace
 		auto* world = static_cast<SDK::UWorld*>(PluginSdkRuntime::GetWorld());
 
 		StackSizeModel::State s;
-		s.isServerBinary   = true;
 		s.featureAvailable = g_available.load();
 		s.target           = target;
 		s.lastApplied      = (guard && target > 0) ? 0 : g_lastApplied;
 		s.itemsTracked     = g_limits.Tracked();
+		s.itemsRaised      = g_raised.load();
 		s.worldChanged     = world && !(ObjectRef<SDK::UWorld>(world) == g_world);
+		// Items the game adds to its list after a scan: looked at once a second, only while a size is set.
+		s.catalogueChanged = guard && world && target > 0 && g_tracked.load() > 0 && CatalogueCount(world) != g_scanCount;
 
 		switch (StackSizeModel::Decide(s))
 		{

@@ -33,14 +33,14 @@ namespace StackSizeModel
 
 	struct State
 	{
-		bool isServerBinary    = false;   // a dedicated server; a listen host or solo game is not
 		bool featureAvailable  = false;   // the game build's version map has the stack fields
 		int  target            = 0;       // the wanted size, 0 = game default
 		int  lastApplied       = 0;       // the size last written to the items, 0 = nothing applied
 		                                  // (pass 0 on a guard tick to have it written again)
 		int  itemsTracked      = 0;       // items the item limits hold
+		int  itemsRaised       = 0;       // items still above their own size (as of the last write)
 		bool worldChanged      = false;   // the world is not the one the items were found in
-		bool shuttingDown      = false;
+		bool catalogueChanged  = false;   // the game's item list has a different length than at the last scan
 	};
 
 	// What the tick does next.
