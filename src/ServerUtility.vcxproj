@@ -433,6 +433,9 @@
     <ClInclude Include="host_rules\ingame_admin_model.h" />
     <ClInclude Include="host_rules\rules_model.h" />
     <ClInclude Include="cheats\cheat_authority.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
+    <ClInclude Include="cheats\cheat_wire.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
+    <ClInclude Include="cheats\cheat_dispatch.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
+    <ClInclude Include="cheats\cheat_net.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClInclude Include="host_rules\player_list.h" />
     <ClInclude Include="host_rules\ini_file.h" />
     <ClInclude Include="host_rules\host_rules.h" />
@@ -496,6 +499,9 @@
     <ClCompile Include="host_rules\ingame_admin_model.cpp" />
     <ClCompile Include="host_rules\rules_model.cpp" />
     <ClCompile Include="cheats\cheat_authority.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
+    <ClCompile Include="cheats\cheat_wire.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
+    <ClCompile Include="cheats\cheat_dispatch.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
+    <ClCompile Include="cheats\cheat_net.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClCompile Include="host_rules\player_list.cpp" />
     <ClCompile Include="host_rules\ini_file.cpp" />
     <ClCompile Include="host_rules\host_rules.cpp" />

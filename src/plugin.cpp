@@ -21,6 +21,9 @@
 #include "host_rules/ingame_admin.h"
 #include "host_rules/player_list.h"
 #include "host_rules/host_rules.h"
+#ifdef MODLOADER_SERVER_BUILD
+#include "cheats/cheat_net.h"
+#endif
 
 // -----------------------------------------------------------------------
 // Global plugin self pointer
@@ -81,6 +84,9 @@ static void OnEngineShutdown()
 {
 	LOG_INFO("Engine shutting down - removing hooks...");
 	AdminPanel::Shutdown(g_self);
+#ifdef MODLOADER_SERVER_BUILD
+	CheatNet::Shutdown();
+#endif
 	InGameAdmin::Shutdown();
 	AdminClaim::Shutdown();
 	Removal::Shutdown();
@@ -176,6 +182,9 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 	Removal::Init();
 	AdminClaim::Init();
 	InGameAdmin::Init();
+#ifdef MODLOADER_SERVER_BUILD
+	CheatNet::Init();
+#endif
 
 	g_self->hooks->Engine->RegisterOnInit(OnEngineInit);
 	LOG_DEBUG("Registered for engine init callback");
