@@ -9,3 +9,4 @@ Unreleased
 - The admin panel's kick, ban and give take an optional `player_id`; without it `player_name` must match exactly one connected player.
 - The admin panel's `ApiKey` must be at least 16 characters, or the panel does not start. Login is locked for everyone after 5 wrong keys within 60 seconds. The panel is still off in this build.
 - The admin panel now matches its endpoints when the mod loader adds a trailing `/` to the address, so `/players/list/` and the other calls no longer answer 404. The panel is still off in this build.
+- ServerUtility is now listed in the mod loader's Browse list (marked Server), with a link to its GitHub page. Server mods can't be installed from Browse.
