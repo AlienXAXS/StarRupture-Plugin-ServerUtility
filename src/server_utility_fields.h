@@ -145,23 +145,21 @@ namespace ServerUtilityFields
 	{
 		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand);
 
-		// A miss only turns off the features that list the key. Each group is
+		// A miss only turns off the features that list the key. Every row is
 		// asked even after a miss, so the loader's log lists them all.
-		const bool lookup = PluginMap::ResolveFields(scanner, self,
-			WorldGameState, GameStatePlayerArray, ActorOwner, ControllerPlayerState);
-		if (!lookup)
-			LOG_WARN("[PlayerLookup] The loader has no row for one of its engine members on this game build - "
-			         "host rules and player IDs are off");
+		PluginMap::ResolveFields(scanner, self,
+			WorldGameState, GameStatePlayerArray, ActorOwner, ControllerPlayerState,
+			PlayerStateName, PlayerStatePing,
+			ActorAlwaysRelevant, ObjectClass, ObjectIndex);
 
-		const bool names = PluginMap::ResolveFields(scanner, self, PlayerStateName, PlayerStatePing);
-		if (!names)
-			LOG_WARN("[PlayerList] The loader has no row for a player's name or ping on this game build - "
-			         "the player list and the admin player actions are off");
-
-		const bool relevancy = PluginMap::ResolveFields(scanner, self, ActorAlwaysRelevant, ObjectClass, ObjectIndex);
-		if (!relevancy)
-			LOG_WARN("[GatherableFix] The loader has no row for AActor::bAlwaysRelevant or the UObject class and "
-			         "index on this game build - the gatherable relevancy fix and the RCON save command are off");
+		// One line per feature the loader switched off, so the text names
+		// exactly what is off and follows the feature's key list.
+		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand })
+		{
+			if (!f->On())
+				LOG_WARN("[%s] The loader has no row for one of its engine members on this game build - %s is off",
+				         f->id, f->title);
+		}
 
 		return PluginMap::ResolveFields(scanner, self,
 			SessionName, SaveGameName, SaveGameInterval, StartNewGame, LoadSavedGame,

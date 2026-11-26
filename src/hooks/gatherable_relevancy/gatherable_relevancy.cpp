@@ -492,12 +492,9 @@ void GatherableRelevancyFix::Install(bool seedResync)
 	if (g_installed)
 		return;
 
+	// Resolve already logged why the feature is off.
 	if (!ServerUtilityFields::GatherableRelevancy.On())
-	{
-		LOG_WARN("[GatherableFix] The loader has no row for AActor::bAlwaysRelevant or the UObject class and index "
-		         "on this game build - the gatherable relevancy fix is off");
 		return;
-	}
 
 	g_seedResync = seedResync;
 
