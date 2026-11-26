@@ -49,6 +49,7 @@ namespace InGameAdmin
 		int                                       g_listener = 0;
 		bool                                      g_handlerRegistered = false;
 		bool                                      g_worldRegistered = false;
+		KnownFeatures::PushGate                   g_catalogGate;   // game thread only
 
 		double NowSeconds()
 		{
@@ -149,6 +150,7 @@ namespace InGameAdmin
 				snap.mins.push_back({ m.plugin, m.version });
 
 			std::map<std::string, size_t> modIndex;   // plugin -> index in snap.mods
+			std::vector<std::vector<KnownFeatures::Entry>> modRows;   // the same order
 			for (const KnownFeatures::Entry& e : KnownFeatures::Snapshot())
 			{
 				const auto it = modIndex.find(e.plugin);
@@ -160,14 +162,16 @@ namespace InGameAdmin
 					AdminWire::ModInfo info;
 					info.plugin = e.plugin;
 					snap.mods.push_back(info);
+					modRows.emplace_back();
 				}
 				else
 					at = it->second;
 				AdminWire::ModInfo& info = snap.mods[at];
-				if (!e.version.empty() && (info.version.empty() || KnownFeatures::CompareVersions(e.version, info.version) > 0))
-					info.version = e.version;
+				modRows[at].push_back(e);
 				info.features.push_back({ e.id, e.title.empty() ? e.id : e.title });
 			}
+			for (size_t i = 0; i < snap.mods.size(); ++i)
+				snap.mods[i].version = KnownFeatures::ModVersion(modRows[i]);
 
 			std::set<std::string> online;
 			SDK::APlayerController* controllers[kMaxControllers] = {};
@@ -325,6 +329,18 @@ namespace InGameAdmin
 		env.isAdmin   = [](const std::string& id) { PlayerList::Entry e; return PlayerList::Find(id, e) && e.admin; };
 		env.canProve  = [](const std::string& id) { PlayerList::Entry e; return PlayerList::Find(id, e) && e.NeedsProof(); };
 		env.proofChanged = [] { HostRules::RefreshPlayers(); };
+		env.proofRejected = [](ConnId conn)
+		{
+			ObjectRef<SDK::APlayerController> ref;
+			{
+				std::lock_guard<std::mutex> lk(g_mutex);
+				const auto it = std::find_if(g_conns.begin(), g_conns.end(), [&](const Connection& c) { return c.id == conn; });
+				if (it == g_conns.end()) return;
+				ref = it->ref;
+			}
+			if (SDK::APlayerController* pc = ref.Get())
+				HostRules::EndAdminHold(pc);
+		};
 		env.revision  = [] { return static_cast<uint32_t>(AdminOps::Revision()); };
 		env.now       = &NowSeconds;
 		env.audit     = [](const std::string& line) { LOG_INFO("%s", line.c_str()); };
@@ -333,8 +349,10 @@ namespace InGameAdmin
 		env.runOps    = &RunOps;
 		env.catalogPush = [](const std::vector<std::string>& rows)
 		{
-			if (KnownFeatures::NoteDeclaredRows(rows))
-				AdminOps::NoteCatalogChanged();   // the mods list only; the ops revision stays
+			// The mods list only; the ops revision stays. A paced batch is many messages, so the
+			// admins are told at most once per KnownFeatures::PushGate::kIntervalMs.
+			if (KnownFeatures::NoteDeclaredRows(rows) && g_catalogGate.Changed(GetTickCount64()))
+				AdminOps::NoteCatalogChanged();
 		};
 
 		auto model = std::make_unique<InGameAdminModel::Server>(env);
@@ -377,9 +395,16 @@ namespace InGameAdmin
 			LOG_INFO("[Admin] In-game admin tool is off ([Policy] InGameAdmin=0)");
 	}
 
+	void Tick(uint64_t nowMs)
+	{
+		if (g_catalogGate.Due(nowMs))
+			AdminOps::NoteCatalogChanged();
+	}
+
 	void Shutdown()
 	{
 		auto* hooks = GetHooks();
+		g_catalogGate = KnownFeatures::PushGate();
 		if (g_listener)
 			AdminOps::RemoveListener(g_listener);
 		g_listener = 0;
@@ -428,6 +453,12 @@ namespace InGameAdmin
 				}
 		}
 		return conn && model->IsProvenAs(conn, playerId);
+	}
+
+	bool HasSecret(const std::string& playerId)
+	{
+		const std::shared_ptr<InGameAdminModel::Server> model = ModelPtr();
+		return model && !playerId.empty() && model->HasSecret(playerId);
 	}
 
 	void OnClaimed(void* playerController, const std::string& playerId)

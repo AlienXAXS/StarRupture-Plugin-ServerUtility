@@ -170,9 +170,31 @@ namespace AdminClient
 				QueueCatalog(rows);
 			}
 		}
+		{
+			std::lock_guard<std::mutex> lock(mu_);
+			PumpCatalog();
+		}
 	}
 
-	// One or more ops messages, each as many rows as fit. Their results are not shown.
+	// Sends the queued catalog messages the row budget allows. Caller holds mu_.
+	void Client::PumpCatalog()
+	{
+		if (status_ != Status::Ready || catalogPending_.empty()) return;
+		const double now = env_.now ? env_.now() : 0;
+		if (now > catalogBudgetAt_)
+			catalogRowBudget_ = std::min(kCatalogBurstRows, catalogRowBudget_ + (now - catalogBudgetAt_) * kCatalogRowsPerSecond);
+		catalogBudgetAt_ = now;
+		while (!catalogPending_.empty() && catalogRowBudget_ >= static_cast<double>(catalogPending_.front().rows))
+		{
+			catalogRowBudget_ -= static_cast<double>(catalogPending_.front().rows);
+			outbox_.push_back(std::move(catalogPending_.front().wire));
+			catalogPending_.pop_front();
+		}
+	}
+
+	// One or more ops messages, each as many rows as fit up to kCatalogRowsPerMessage. They go
+	// out through PumpCatalog: a burst now, the rest from Tick as the row budget refills.
+	// Their results are not shown.
 	void Client::QueueCatalog(const std::vector<std::string>& rows)
 	{
 		std::vector<Op> batch;
@@ -184,7 +206,7 @@ namespace AdminClient
 			{
 				catalogReqIds_.insert(nextReqId_);
 				++nextReqId_;
-				outbox_.push_back(std::move(enc));
+				catalogPending_.push_back({ std::move(enc), batch.size() });
 			}
 			batch.clear();
 		};
@@ -193,6 +215,7 @@ namespace AdminClient
 			Op op;
 			op.name = "catalog.push";
 			op.args = { row };
+			if (batch.size() >= kCatalogRowsPerMessage) flush();
 			batch.push_back(op);
 			std::string enc;
 			if (!EncodeBatch(batch, nextReqId_, 0, enc))
@@ -203,6 +226,9 @@ namespace AdminClient
 			}
 		}
 		flush();
+		catalogRowBudget_ = kCatalogBurstRows;
+		catalogBudgetAt_ = env_.now ? env_.now() : 0;
+		PumpCatalog();
 	}
 
 	void Client::SendSnapReq(const char* sections)
@@ -222,6 +248,7 @@ namespace AdminClient
 		haveHeldChallenge_ = false;
 		catalogSent_ = false;
 		catalogReqIds_.clear();
+		catalogPending_.clear();
 		outbox_.clear();
 		serverId_.clear();
 		pendingSecret_.clear();

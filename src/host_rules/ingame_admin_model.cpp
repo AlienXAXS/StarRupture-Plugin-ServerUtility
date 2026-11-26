@@ -390,11 +390,17 @@ namespace InGameAdminModel
 				c.nonce.clear();   // one proof per challenge
 				const bool fresh = (env_.now ? env_.now() : 0) < c.nonceExpires;
 				const auto it = secrets_.find(playerId);
-				if (m.proof.empty() || nonce.empty() || !fresh || it == secrets_.end())
+				// The reply for a refused proof. The host hears of it with the lock released.
+				const auto refused = [&]()
 				{
 					out.push_back(Welcome(kRolePair, revision));
+					lk.unlock();
+					if (env_.proofRejected)
+						env_.proofRejected(conn);
 					return out;
-				}
+				};
+				if (m.proof.empty() || nonce.empty() || !fresh || it == secrets_.end())
+					return refused();
 				std::string expected;
 				if (AdminCrypto::MakeProof(it->second, nonce, serverId_, expected) &&
 				    AdminCrypto::ConstantTimeEqual(Lower(m.proof), expected))
@@ -412,8 +418,7 @@ namespace InGameAdminModel
 				}
 				if (++c.wrongProofs <= kMaxWrongPerConnection && env_.audit)
 					env_.audit("[Admin] '" + who + "' proof failed");
-				out.push_back(Welcome(kRolePair, revision));
-				return out;
+				return refused();
 			}
 
 			if (m.tag == Tag::Pair)

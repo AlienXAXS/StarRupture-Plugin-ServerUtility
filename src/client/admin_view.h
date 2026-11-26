@@ -38,6 +38,9 @@ namespace AdminView
 	// True when the server denies key by a built-in default row and no rule names it.
 	// The mod name matches without regard to case, the feature id exactly, as the loader does.
 	bool IsDefaultDenied(const AdminWire::Snapshot& s, const std::string& key);
+	// True when that default row leaves the feature to admins. Under default=deny or a
+	// "<mod>.*=deny" rule an admin gets no default rows either, so the row is a plain deny.
+	bool IsDefaultAdminsOnly(const AdminWire::Snapshot& s, const std::string& key);
 	// Minimum version: plugin empty = the loader. "" = no minimum (Off).
 	std::string MinValue(const AdminWire::Snapshot& s, const std::string& plugin);
 	const AdminWire::PlayerInfo* FindPlayer(const AdminWire::Snapshot& s, const std::string& id);

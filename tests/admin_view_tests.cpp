@@ -206,6 +206,25 @@ int main()
 		CHECK(!IsDefaultDenied(Base(), "Alpha.fly"));                        // an older server: no defaults
 	}
 
+	// A default row is admins-only unless default=deny or a "<mod>.*=deny" rule takes it from admins too.
+	{
+		Snapshot s;
+		s.defaultPolicy = "allow";
+		s.defaults = { "Alpha.fly", "Beta.fly" };
+		CHECK(IsDefaultDenied(s, "Alpha.fly") && IsDefaultAdminsOnly(s, "Alpha.fly") && IsDefaultAdminsOnly(s, "Beta.fly"));
+		CHECK(!IsDefaultAdminsOnly(s, "Alpha.other"));                       // not a default row at all
+		Snapshot closed = ApplyStaged(s, { MakeOp("policy.default", { "deny" }) });
+		CHECK(IsDefaultDenied(closed, "Alpha.fly") && !IsDefaultAdminsOnly(closed, "Alpha.fly") && !IsDefaultAdminsOnly(closed, "Beta.fly"));
+		Snapshot star = ApplyStaged(s, { MakeOp("rule.set", { "alpha.*", "deny" }) });
+		CHECK(!IsDefaultAdminsOnly(star, "Alpha.fly") && IsDefaultAdminsOnly(star, "Beta.fly"));   // only that mod, mod name without case
+		Snapshot starAllow = ApplyStaged(s, { MakeOp("rule.set", { "Alpha.*", "allow" }) });
+		CHECK(IsDefaultAdminsOnly(starAllow, "Alpha.fly"));                  // Plugin.*=allow does not take the row away
+		Snapshot starAdmins = ApplyStaged(s, { MakeOp("rule.set", { "Alpha.*", "admins" }) });
+		CHECK(IsDefaultAdminsOnly(starAdmins, "Alpha.fly"));                 // Plugin.*=admins still lets an admin through
+		Snapshot reopened = ApplyStaged(closed, { MakeOp("policy.default", { "allow" }) });
+		CHECK(IsDefaultAdminsOnly(reopened, "Alpha.fly"));
+	}
+
 	// "Admins only" is a rule value: staged, read back, a no-op only when it matches, and "unset" removes it.
 	{
 		Snapshot s = Base();

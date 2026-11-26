@@ -130,11 +130,11 @@ namespace Cmd_HostRules
 			AddLine(tail, std::string("  version minimums: ") + HostRules::MinimumsStatus());
 			const size_t limit = kMaxReply - tail.size() - 40;   // 40: the "... and M more" line
 
-			// Default rows are built in (admins only); an exact rule above replaces one.
+			// Default rows are built in (admins only; plain deny under default=deny or a Plugin.*=deny); an exact rule above replaces one.
 			const std::vector<RulesModel::DefaultRow> defaults = RulesModel::ActiveDefaultRows(m);
 			std::vector<std::string> rules;
 			for (const auto& r : m.rules) rules.push_back("  " + r.plugin + "." + r.id + " = " + (r.adminsOnly ? "admins" : r.deny ? "deny" : "allow"));
-			for (const auto& d : defaults) rules.push_back(std::string("  ") + d.plugin + "." + d.id + " = admins (default)");
+			for (const auto& d : defaults) rules.push_back(std::string("  ") + d.plugin + "." + d.id + (RulesModel::DefaultRowAdminsOnly(m, d.plugin) ? " = admins (default)" : " = deny (default)"));
 			if (rules.empty()) AddLine(out, "  rules: none");
 			else AddList(out, rules, limit);
 

@@ -177,6 +177,16 @@ namespace AdminView
 		return true;
 	}
 
+	bool IsDefaultAdminsOnly(const Snapshot& s, const std::string& key)
+	{
+		if (!IsDefaultDenied(s, key)) return false;
+		if (s.defaultPolicy == "deny") return false;
+		const size_t dot = key.find('.');
+		const std::string whole = RuleKeyForMatch(dot == std::string::npos ? key : key.substr(0, dot) + ".*");
+		for (const Rule& r : s.rules) if (r.value == "deny" && RuleKeyForMatch(r.key) == whole) return false;
+		return true;
+	}
+
 	std::string MinValue(const Snapshot& s, const std::string& plugin)
 	{
 		for (const MinEntry& m : s.mins) if (m.plugin == plugin) return m.version;

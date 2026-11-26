@@ -11,6 +11,7 @@
 
 #include "admin_wire/admin_wire.h"
 
+#include <deque>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -42,7 +43,14 @@ namespace AdminClient
 	// Rows of a catalog.push, from the mod loader's declared-features text. One row per
 	// feature: "<plugin>\t<version>\t<id>\t<on|off>\t<title>". The header rows (format,
 	// kind, game_cl, loader) and plugin rows are read, not sent; titles are cut to 80 bytes.
-	constexpr size_t kMaxCatalogRows = 64;   // under one connection's request burst
+	// A message holds what fits kMaxMessage (about ten rows) and at most kCatalogRowsPerMessage
+	// (under the 64 a server reads from one). A server drops requests over a budget of one
+	// per row (100, refilling 20 a second), so the rows go out against a smaller budget of
+	// our own: kCatalogBurstRows at once, then kCatalogRowsPerSecond.
+	constexpr size_t kMaxCatalogRows = 256;
+	constexpr size_t kCatalogRowsPerMessage = 48;
+	constexpr double kCatalogBurstRows = 64;
+	constexpr double kCatalogRowsPerSecond = 16;
 	std::vector<std::string> ParseDeclaredFeatures(const std::string& text);
 
 	struct Env
@@ -124,7 +132,12 @@ namespace AdminClient
 		bool addressRead_ = false;                     // the loader gave an address on this connection
 		bool catalogSent_ = false;                     // catalog.push went out on this connection
 		std::set<uint32_t> catalogReqIds_;             // their results are not shown
+		struct CatalogMessage { std::string wire; size_t rows = 0; };
+		std::deque<CatalogMessage> catalogPending_;    // encoded catalog messages not yet sent, in order
+		double catalogRowBudget_ = 0;                  // rows that may go now
+		double catalogBudgetAt_ = 0;                   // the clock when the budget was last topped up
 		void QueueCatalog(const std::vector<std::string>& rows);
+		void PumpCatalog();
 		std::string address_ = kUnknownAddress;        // current connection address, read in Tick through Env::readAddress
 
 		Status status_ = Status::Waiting;

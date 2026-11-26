@@ -471,6 +471,29 @@ namespace RulesModel
 		return true;
 	}
 
+	bool ProofHoldOn(const HoldInputs& in, unsigned long long sinceJoinMs, unsigned long long sinceFeaturesMs)
+	{
+		if (!in.listedAdmin || !in.secretOnFile || in.proven || sinceJoinMs >= kProofHoldCapMs)
+			return false;
+		if (sinceFeaturesMs == kNoFeatures)
+			return true;   // the list has not arrived: whether the client part exists is not known yet
+		return in.clientHasTool && sinceFeaturesMs < kProofHoldMs;
+	}
+
+	PlayerFlags HoldFlags()
+	{
+		PlayerFlags f;
+		f.admin = true;
+		return f;
+	}
+
+	bool DefaultRowAdminsOnly(const Model& m, const std::string& plugin)
+	{
+		if (m.defaultDeny) return false;
+		return std::none_of(m.rules.begin(), m.rules.end(),
+			[&](const Rule& r) { return r.id == "*" && r.deny && !r.adminsOnly && SamePlugin(r.plugin, plugin); });
+	}
+
 	HeldStep NextHeldStep(bool alive, bool idRead, unsigned long long heldMs)
 	{
 		if (!alive) return HeldStep::Drop;

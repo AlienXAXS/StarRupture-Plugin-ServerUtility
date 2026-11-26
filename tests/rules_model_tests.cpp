@@ -14,8 +14,10 @@
 #include "host_rules/ingame_admin_model.h"
 #include "admin_wire/admin_wire.h"
 #include "admin_wire/admin_crypto.h"
+#include "client/admin_client.h"   // only its catalog limits are used
 #include "rcon/commands/word_split.h"
 
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -50,6 +52,7 @@ namespace
 		std::set<std::string> admins;
 		std::set<std::string> rulesFlagged;   // IDs with ExemptRules or Sections= but no Admin
 		int proofChanges = 0;
+		std::vector<uint64_t> rejected;   // connections whose proof was refused, in order
 		double now = 1000;
 		bool on = true;
 		std::vector<std::string> audit;
@@ -68,6 +71,7 @@ namespace
 		env.isAdmin = [&e](const std::string& id) { return e.admins.count(id) > 0; };
 		env.canProve = [&e](const std::string& id) { return e.rulesFlagged.count(id) > 0; };
 		env.proofChanged = [&e] { ++e.proofChanges; };
+		env.proofRejected = [&e](uint64_t conn) { e.rejected.push_back(conn); };
 		env.revision = [] { return 7u; };
 		env.now = [&e] { return e.now; };
 		env.audit = [&e](const std::string& line) { e.audit.push_back(line); };
@@ -737,6 +741,42 @@ static void InGameAdminOpsTests()
 		std::filesystem::remove(path);
 	}
 
+	// A big catalog push, paced as the admin client sends it (a burst of kCatalogBurstRows, then
+	// kCatalogRowsPerSecond, in messages of about ten rows, what fits kMaxMessage): every row arrives and the request
+	// limit never trips. Sent back to back it does trip, which is why the client paces.
+	{
+		auto run = [&](size_t rowCount, bool paced, std::vector<std::string>& got)
+		{
+			IgaEnv e; e.path = path; e.admins = { "p1" };
+			e.catalogPush = [&](const std::vector<std::string>& rows) { got.insert(got.end(), rows.begin(), rows.end()); };
+			auto s = MakeIga(e);
+			IgaMakeProven(*s, 1, "p1");
+			uint32_t req = 50;
+			size_t at = 0;
+			double budget = AdminClient::kCatalogBurstRows;
+			while (at < rowCount)
+			{
+				const size_t n = std::min<size_t>(std::min<size_t>(10, rowCount - at), paced ? static_cast<size_t>(budget) : 10);
+				if (n == 0) { e.now += 0.25; budget += 0.25 * AdminClient::kCatalogRowsPerSecond; continue; }
+				std::vector<AdminWire::Op> ops;
+				for (size_t i = at; i < at + n; ++i)
+					ops.push_back({ "catalog.push", { "Paced	1.0	f" + std::to_string(i) + "	on	T" } });
+				IgaRaw(*s, 1, "p1", IgaOps(req++, 0, ops));
+				at += n;
+				budget -= static_cast<double>(n);
+			}
+			for (const std::string& line : e.audit)
+				if (line.find("too many requests") != std::string::npos) return true;
+			return false;
+		};
+		std::vector<std::string> got;
+		CHECK(!run(82, true, got) && got.size() == 82);
+		got.clear();
+		CHECK(!run(256, true, got) && got.size() == 256);
+		got.clear();
+		CHECK(run(256, false, got) && got.size() < 256);     // back to back: dropped past the burst
+	}
+
 	// Unmatched-rule warnings stop at the cap with a count of the rest.
 	{
 		std::vector<std::string> keys;
@@ -888,6 +928,349 @@ static void ProofGateTests()
 		CHECK(RulesModel::NeedsOwnRules(RulesModel::FlagsFor(false, false, { "x.y" }, true)));
 		CHECK(RulesModel::NeedsOwnRules(RulesModel::FlagsFor(true, false, {}, true)));
 		CHECK(RulesModel::NeedsOwnRules(RulesModel::FlagsFor(false, true, {}, true)));
+	}
+}
+
+// The join hold, through RulesModel::JoinHolds (the unit the host calls): a listed admin with a secret
+// on file gets the admin's set from the join until the admin check passes (same text, so nothing is
+// sent again), is refused, or runs out kProofHoldMs after the client's feature list (kProofHoldCapMs
+// after the join when no list arrives).
+static void ProofHoldTests()
+{
+	using namespace RulesModel;
+	std::vector<std::string> dw;
+	const std::string path = (std::filesystem::temp_directory_path() / "su-iga-hold-test.txt").string();
+	std::filesystem::remove(path);
+
+	// One connection as the host sees it when it applies rules.
+	struct Conn { bool listed = false, admin = false, secret = false, proven = false, tool = false; };
+	// What ApplyRules sends one connection: the hold decides first, then the server rules or its own set.
+	const auto sent = [](const Model& m, JoinHolds<int>& holds, int key, unsigned long long now, const Conn& c)
+	{
+		PlayerFlags flags;
+		if (c.listed) flags = FlagsFor(c.admin, false, {}, c.proven);
+		HoldInputs in;
+		in.listedAdmin = c.listed && c.admin; in.secretOnFile = c.secret; in.proven = c.proven; in.clientHasTool = c.tool;
+		if (holds.Step(key, now, in) == HoldStep::Held) flags = HoldFlags();
+		return NeedsOwnRules(flags) ? PlayerRulesText(m, flags, true) : RulesText(m, true);
+	};
+	const auto denied = [](const std::string& t) { return t.find("BetterCheats.stack-size=deny") != std::string::npos; };
+	const auto admin = [](bool secret, bool proven, bool tool)
+	{
+		Conn c; c.listed = c.admin = true; c.secret = secret; c.proven = proven; c.tool = tool;
+		return c;
+	};
+
+	const Model none = ParseText({ "[Policy]", "Default=allow" }, dw);
+	const std::string denies = RulesText(none, true);
+	const std::string adminText = PlayerRulesText(none, FlagsFor(true, false, {}, true), true);
+	CHECK(denied(denies) && !denied(adminText) && adminText == "default=allow\n");
+	CHECK(NeedsOwnRules(HoldFlags()) && PlayerRulesText(none, HoldFlags(), true) == adminText);
+	CHECK(kProofHoldMs == 8000 && kProofHoldCapMs == 30000);
+
+	const unsigned long long t0 = 1000000;
+
+	// Join: the hold starts and the admin's set is sent at once, before any feature list.
+	{
+		JoinHolds<int> h;
+		CHECK(!h.Has(1) && h.Size() == 0);
+		CHECK(sent(none, h, 1, t0, admin(true, false, false)) == denies);   // never began: the server rules
+		h.Begin(1, t0);
+		CHECK(h.Has(1) && h.Size() == 1);
+		CHECK(sent(none, h, 1, t0, admin(true, false, false)) == adminText);
+		CHECK(h.Has(1));
+		// A second Begin for the same connection starts over.
+		h.Begin(1, t0 + 5000);
+		CHECK(h.Size() == 1);
+		CHECK(sent(none, h, 1, t0 + 5000 + kProofHoldCapMs - 1, admin(true, false, false)) == adminText);
+	}
+
+	// Which set applies while held: the admin's set, at every step until the hold ends. The time is
+	// counted from the feature list, so a slow load (list at 4.3 s) is still held 4.3 s + 8 s after join.
+	{
+		JoinHolds<int> h;
+		h.Begin(1, t0);
+		CHECK(sent(none, h, 1, t0 + 100, admin(true, false, false)) == adminText);
+		CHECK(sent(none, h, 1, t0 + 4300, admin(true, false, false)) == adminText);
+		h.FeaturesArrived(1, t0 + 4300);
+		CHECK(sent(none, h, 1, t0 + 4300, admin(true, false, true)) == adminText);
+		CHECK(sent(none, h, 1, t0 + 4300 + kProofHoldMs - 1, admin(true, false, true)) == adminText);   // past 8 s from the join
+		CHECK(h.Has(1));
+		// Ended by the timeout counted from the list.
+		CHECK(denied(sent(none, h, 1, t0 + 4300 + kProofHoldMs, admin(true, false, true))));
+		CHECK(!h.Has(1));
+		CHECK(denied(sent(none, h, 1, t0 + 4300 + kProofHoldMs + 1, admin(true, false, true))));   // not held again
+	}
+	// Only the first feature list counts: a later one does not extend the hold.
+	{
+		JoinHolds<int> h;
+		h.Begin(1, t0);
+		h.FeaturesArrived(1, t0 + 1000);
+		h.FeaturesArrived(1, t0 + 6000);
+		CHECK(denied(sent(none, h, 1, t0 + 1000 + kProofHoldMs, admin(true, false, true))));
+	}
+
+	// The cap: no feature list ever arrives, the hold ends 30 s after the join.
+	{
+		JoinHolds<int> h;
+		h.Begin(1, t0);
+		CHECK(sent(none, h, 1, t0 + kProofHoldMs + 1, admin(true, false, false)) == adminText);   // 8 s with no list: still held
+		CHECK(sent(none, h, 1, t0 + kProofHoldCapMs - 1, admin(true, false, false)) == adminText);
+		CHECK(denied(sent(none, h, 1, t0 + kProofHoldCapMs, admin(true, false, false))));
+		CHECK(!h.Has(1));
+	}
+	// The cap also bounds a list that arrives late: held to 30 s from the join, not 8 s after a late list.
+	{
+		JoinHolds<int> h;
+		h.Begin(1, t0);
+		h.FeaturesArrived(1, t0 + 29000);
+		CHECK(sent(none, h, 1, t0 + 29999, admin(true, false, true)) == adminText);
+		CHECK(denied(sent(none, h, 1, t0 + kProofHoldCapMs, admin(true, false, true))));
+	}
+
+	// The check passed: the hold ends and the proven text is the held text, so the loader is sent nothing new.
+	{
+		JoinHolds<int> h;
+		h.Begin(1, t0);
+		h.FeaturesArrived(1, t0 + 2000);
+		CHECK(sent(none, h, 1, t0 + 2200, admin(true, false, true)) == adminText);
+		CHECK(sent(none, h, 1, t0 + 2260, admin(true, true, true)) == adminText);   // the pass
+		CHECK(!h.Has(1));
+		CHECK(sent(none, h, 1, t0 + 60000, admin(true, true, true)) == adminText);  // proven long after: the admin's rules
+	}
+
+	// The same property under the other rule shapes: the held text is the proven text.
+	{
+		const Model hostDeny = ParseText({ "[Rules]", "BetterCheats.*=deny" }, dw);
+		const Model adminsRow = ParseText({ "[Rules]", "BetterCheats.stack-size=admins", "P.f=deny" }, dw);
+		const Model closed = ParseText({ "[Policy]", "Default=deny" }, dw);
+		for (const Model* m : { &hostDeny, &adminsRow, &closed })
+		{
+			JoinHolds<int> h, h2;
+			h.Begin(1, t0); h2.Begin(1, t0);
+			CHECK(sent(*m, h, 1, t0 + 100, admin(true, false, true)) == sent(*m, h2, 1, t0 + 100, admin(true, true, true)));
+		}
+		CHECK(PlayerRulesText(closed, FlagsFor(true, false, {}, true), true) == "default=deny\n");   // T3
+		CHECK(!DefaultRowAdminsOnly(closed, "BetterCheats") && DefaultRowAdminsOnly(none, "BetterCheats"));
+		CHECK(!DefaultRowAdminsOnly(hostDeny, "bettercheats") && DefaultRowAdminsOnly(hostDeny, "Best Builder"));
+		CHECK(DefaultRowAdminsOnly(adminsRow, "BetterCheats"));
+	}
+
+	// The first join during `admin pair`: no secret yet, so no hold and the denies; once paired and proven, the allows.
+	{
+		IgaEnv e; e.path = path; e.admins = { "p1" };
+		auto s = MakeIga(e);
+		JoinHolds<int> h;
+		h.Begin(1, t0);
+		CHECK(!s->HasSecret("p1") && denied(sent(none, h, 1, t0, admin(s->HasSecret("p1"), false, true))));
+		CHECK(!h.Has(1));                                      // nothing is pending, so no hold
+		std::string code, err;
+		CHECK(s->IssueCode("p1", code, err));
+		CHECK(IgaChallenge(*s, 1, "p1") != "");
+		CHECK(IgaRole(IgaSend(*s, 1, "p1", IgaPair(code, kSecretA))) == "admin");
+		CHECK(s->HasSecret("p1") && s->IsProvenAs(1, "p1"));
+		CHECK(sent(none, h, 1, t0 + 5000, admin(true, s->IsProvenAs(1, "p1"), true)) == adminText);
+
+		// A rejoin now: a secret is on file, so the hold applies until the check passes.
+		h.Begin(2, t0 + 9000);
+		CHECK(!s->IsProvenAs(2, "p1") && sent(none, h, 2, t0 + 9000, admin(s->HasSecret("p1"), false, false)) == adminText);
+
+		// A failed check: the wrong secret never proves. The server refuses the proof, which tells the host,
+		// and the host ends the hold at once (EndAdminHold calls End): the denies, long before the limit.
+		CHECK(IgaChallenge(*s, 2, "p1") != "");
+		CHECK(e.rejected.empty());
+		AdminWire::Message bad; bad.tag = AdminWire::Tag::Prove; bad.proof = std::string(64, '0');
+		IgaSend(*s, 2, "p1", bad);
+		CHECK(!s->IsProvenAs(2, "p1"));
+		CHECK(e.rejected.size() == 1 && e.rejected[0] == 2);
+		CHECK(h.End(2) && !h.Has(2));
+		CHECK(!h.End(2));                                      // already over
+		CHECK(denied(sent(none, h, 2, t0 + 9040, admin(true, false, true))));
+		// The same refusal for a proof with no challenge behind it, and one that is empty.
+		IgaSend(*s, 2, "p1", bad);
+		CHECK(e.rejected.size() == 2);
+		AdminWire::Message empty; empty.tag = AdminWire::Tag::Prove;
+		CHECK(IgaChallenge(*s, 2, "p1") != "");
+		IgaSend(*s, 2, "p1", empty);
+		CHECK(e.rejected.size() == 3 && e.rejected[2] == 2);
+		// A right proof is not refused.
+		AdminWire::Message good; good.tag = AdminWire::Tag::Prove;
+		AdminCrypto::MakeProof(kSecretA, IgaChallenge(*s, 3, "p1"), s->ServerId(), good.proof);
+		CHECK(IgaRole(IgaSend(*s, 3, "p1", good)) == "admin");
+		CHECK(e.rejected.size() == 3);
+		// Without the early end the hold still runs out and then ends on the denies.
+		h.Begin(4, t0 + 20000);
+		h.FeaturesArrived(4, t0 + 20500);
+		CHECK(sent(none, h, 4, t0 + 20500 + kProofHoldMs - 1, admin(true, false, true)) == adminText);
+		CHECK(denied(sent(none, h, 4, t0 + 20500 + kProofHoldMs, admin(true, false, true))));
+		std::filesystem::remove(path);
+	}
+
+	// A refused check ends the hold even when the hold would otherwise still have time.
+	{
+		JoinHolds<int> h;
+		h.Begin(1, t0);
+		h.FeaturesArrived(1, t0 + 500);
+		CHECK(h.End(1));
+		CHECK(denied(sent(none, h, 1, t0 + 600, admin(true, false, true))));
+		CHECK(!h.End(1));
+		CHECK(!h.End(99));                                     // a connection that never held
+	}
+
+	// A client without the ServerUtility client part can never prove: once its list is in, the hold ends at once.
+	// Before the list the part is not known yet, so the hold runs.
+	{
+		JoinHolds<int> h;
+		h.Begin(1, t0);
+		CHECK(sent(none, h, 1, t0 + 100, admin(true, false, false)) == adminText);
+		h.FeaturesArrived(1, t0 + 1000);
+		CHECK(denied(sent(none, h, 1, t0 + 1000, admin(true, false, false))));
+		CHECK(!h.Has(1));
+	}
+
+	// A hold with no secret on file ends the first time it is looked at: nothing for the client to answer.
+	{
+		JoinHolds<int> h;
+		h.Begin(1, t0);
+		CHECK(denied(sent(none, h, 1, t0, admin(false, false, true))));
+		CHECK(!h.Has(1));
+	}
+
+	// `admin remove` before the feature list arrives: the very next apply (the loader's first send) is the denies,
+	// and so is the one after. After the list the same.
+	{
+		JoinHolds<int> h;
+		h.Begin(1, t0);
+		CHECK(sent(none, h, 1, t0 + 500, admin(true, false, false)) == adminText);
+		Conn removed; removed.secret = true; removed.tool = false;       // unlisted: no Admin flag any more
+		CHECK(denied(sent(none, h, 1, t0 + 1500, removed)));
+		CHECK(!h.Has(1));
+		CHECK(denied(sent(none, h, 1, t0 + 1600, removed)));
+		JoinHolds<int> g;
+		g.Begin(1, t0);
+		g.FeaturesArrived(1, t0 + 100);
+		Conn listedNotAdmin; listedNotAdmin.listed = true; listedNotAdmin.secret = true; listedNotAdmin.tool = true;   // Admin flag taken off
+		CHECK(denied(sent(none, g, 1, t0 + 2000, listedNotAdmin)));
+		CHECK(!g.Has(1));
+	}
+
+	// A rules reload during the hold: the held text follows the new model; after it, the proven text does.
+	{
+		const Model reloaded = ParseText({ "[Rules]", "BetterCheats.*=deny" }, dw);
+		JoinHolds<int> h;
+		h.Begin(1, t0);
+		h.FeaturesArrived(1, t0 + 100);
+		CHECK(sent(none, h, 1, t0 + 3000, admin(true, false, true)) == "default=allow\n");
+		CHECK(sent(reloaded, h, 1, t0 + 3100, admin(true, false, true)) == "default=allow\nBetterCheats.*=deny\n");
+		CHECK(sent(reloaded, h, 1, t0 + 20000, admin(true, true, true)) == "default=allow\nBetterCheats.*=deny\n");
+		// A reload does not end the hold, and the timeout still does: no pass 8 s after the list, so the player is on the server rules.
+		JoinHolds<int> g;
+		g.Begin(1, t0);
+		g.FeaturesArrived(1, t0 + 100);
+		CHECK(sent(reloaded, g, 1, t0 + 3100, admin(true, false, true)) == "default=allow\nBetterCheats.*=deny\n");
+		CHECK(sent(reloaded, g, 1, t0 + 100 + kProofHoldMs + 1, admin(true, false, true)) == RulesText(reloaded, true));
+	}
+
+	// Expired: the connections whose time is up, for the host to look at. Not before, not twice a hold.
+	{
+		JoinHolds<int> h;
+		h.Begin(1, t0);                                         // no list ever
+		h.Begin(2, t0);
+		h.FeaturesArrived(2, t0 + 3000);
+		h.Begin(3, t0 + 10000);
+		CHECK(h.Expired(t0 + 3000 + kProofHoldMs - 1).empty());
+		const std::vector<int> a = h.Expired(t0 + 3000 + kProofHoldMs);
+		CHECK(a.size() == 1 && a[0] == 2);
+		const std::vector<int> b = h.Expired(t0 + kProofHoldCapMs);
+		CHECK(b.size() == 2 && b[0] == 1 && b[1] == 2);
+		const std::vector<int> c = h.Expired(t0 + 10000 + kProofHoldCapMs);
+		CHECK(c.size() == 3);
+		// What the host does with an expired connection: apply the rules, which ends it.
+		CHECK(denied(sent(none, h, 2, t0 + 3000 + kProofHoldMs, admin(true, false, true))));
+		CHECK(h.Has(1) && !h.Has(2) && h.Has(3) && h.Size() == 2);
+	}
+
+	// Connections are independent: the same player on two connections, one leaves, the other keeps its hold.
+	{
+		JoinHolds<int> h;
+		h.Begin(1, t0); h.Begin(2, t0 + 1000);
+		CHECK(h.End(1));
+		CHECK(h.Has(2) && sent(none, h, 2, t0 + 2000, admin(true, false, false)) == adminText);
+		CHECK(denied(sent(none, h, 1, t0 + 2000, admin(true, false, false))));
+	}
+
+	// A non-admin: never held, the denies at once, at every moment and whatever else is true.
+	{
+		for (unsigned long long age : { 0ull, 1000ull, kProofHoldMs - 1, kProofHoldMs, 60000ull })
+			for (int secret = 0; secret < 2; ++secret)
+				for (int tool = 0; tool < 2; ++tool)
+				{
+					Conn unlisted; unlisted.secret = secret != 0; unlisted.tool = tool != 0;
+					Conn plain = unlisted; plain.listed = true;
+					JoinHolds<int> h;
+					h.Begin(1, t0); h.Begin(2, t0);
+					CHECK(denied(sent(none, h, 1, t0 + age, unlisted)));
+					CHECK(denied(sent(none, h, 2, t0 + age, plain)));
+				}
+	}
+}
+
+// Announcing catalog changes to the admins: the first goes out at once, changes within the interval
+// go out as one, and the tick sends it.
+static void PushGateTests()
+{
+	using namespace KnownFeatures;
+	const uint64_t t0 = 500000;
+	CHECK(PushGate::kIntervalMs == 1000);
+
+	// The first push goes at once; nothing is held.
+	{
+		PushGate g;
+		CHECK(!g.Held() && !g.Due(t0));
+		CHECK(g.Changed(t0) && !g.Held());
+	}
+	// A burst inside 1 s: one trailing push, sent by Tick (Due) once the interval is over, and only once.
+	{
+		PushGate g;
+		CHECK(g.Changed(t0));
+		for (int i = 1; i <= 23; ++i)
+			CHECK(!g.Changed(t0 + 500u * i / 23));              // 24 messages in 12 s would be one per 500 ms; here all within 500 ms
+		CHECK(g.Held());
+		CHECK(!g.Due(t0 + 500) && !g.Due(t0 + 999));
+		CHECK(g.Due(t0 + 1000));                               // the trailing push
+		CHECK(!g.Held() && !g.Due(t0 + 1000) && !g.Due(t0 + 5000));
+	}
+	// A change after the trailing push starts a new interval from it.
+	{
+		PushGate g;
+		CHECK(g.Changed(t0));
+		CHECK(!g.Changed(t0 + 100));
+		CHECK(g.Due(t0 + 1000));
+		CHECK(!g.Changed(t0 + 1500));                          // inside 1 s of the trailing push
+		CHECK(!g.Due(t0 + 1999) && g.Due(t0 + 2000));
+	}
+	// A change with the interval over goes out at once and clears anything held.
+	{
+		PushGate g;
+		CHECK(g.Changed(t0));
+		CHECK(!g.Changed(t0 + 200) && g.Held());
+		CHECK(g.Changed(t0 + 1200) && !g.Held());
+		CHECK(!g.Due(t0 + 5000));
+	}
+	// A paced batch of 24 messages over 12 s (one per 500 ms): at most one push per second.
+	{
+		PushGate g;
+		int pushes = 0;
+		uint64_t last = 0;
+		for (int i = 0; i < 24; ++i)
+		{
+			const uint64_t now = t0 + 500u * i;
+			if (g.Due(now)) { ++pushes; CHECK(last == 0 || now - last >= 1000); last = now; }
+			if (g.Changed(now)) { ++pushes; CHECK(last == 0 || now - last >= 1000); last = now; }
+		}
+		for (uint64_t now = t0 + 12000; now < t0 + 14000; now += 50)
+			if (g.Due(now)) { ++pushes; CHECK(now - last >= 1000); last = now; }
+		CHECK(pushes >= 12 && pushes <= 13 && !g.Held());
 	}
 }
 
@@ -1543,13 +1926,100 @@ int main()
 
 		// Newest version wins (numbers, not text).
 		CHECK(CompareVersions("1.10.0", "1.9.0") > 0 && CompareVersions("v1.2", "1.2.0") == 0);
-		CHECK(CompareVersions("1.2.0-dev.3", "1.2.0") == 0 && CompareVersions("", "0.0.1") < 0);
+		CHECK(CompareVersions("1.2.0-dev.3", "1.2.0") < 0 && CompareVersions("", "0.0.1") < 0);
+
+		// Pre-releases: SemVer order on equal numbers (dev < rc < release), numbers by value.
+		CHECK(CompareVersions("0.26.0-rc.6", "0.26.0-dev.1") > 0 && CompareVersions("0.26.0-dev.1", "0.26.0-rc.6") < 0);
+		CHECK(CompareVersions("0.26.0", "0.26.0-rc.6") > 0 && CompareVersions("0.26.0-rc.6", "0.26.0") < 0);
+		CHECK(CompareVersions("1.0.0-rc.10", "1.0.0-rc.2") > 0 && CompareVersions("1.0.0-rc.9", "1.0.0-rc.10") < 0);
+		CHECK(CompareVersions("1.0.0-dev.9", "1.0.0-dev.10") < 0 && CompareVersions("1.0.0-rc.007", "1.0.0-rc.7") == 0);
+		CHECK(CompareVersions("1.0.0-rc.1", "1.0.0-rc") > 0);                      // the longer list is higher
+		CHECK(CompareVersions("1.0.0-1", "1.0.0-a") < 0);                           // a number is below text
+		CHECK(CompareVersions("v0.11.0-dev.9", "0.11.0-rc.2") < 0);
+		CHECK(CompareVersions("1.2.0+b1", "1.2.0") == 0 && CompareVersions("1.2.0-rc.1+b2", "1.2.0-rc.1") == 0);
+		CHECK(CompareVersions("2.4.0-beta.4", "2.4.0") < 0 && CompareVersions("2.4.0-beta.4", "2.3.9") > 0);
+		CHECK(CompareVersions("0.19.0-rc.4", "0.19.0-rc.4") == 0 && CompareVersions("1.0.0-", "1.0.0") == 0);
 		Catalog v;
 		v.Merge(rep("P", "f", "1.9.0", "", false, "Old title"), d1);
 		CHECK(v.Merge(rep("P", "f", "1.10.0", "", false, "New title"), d1));
 		CHECK(v.Entries()[0].version == "1.10.0" && v.Entries()[0].title == "New title");
 		CHECK(!v.Merge(rep("P", "f", "1.9.5", "", false, "Older title"), d1));
 		CHECK(v.Entries()[0].version == "1.10.0" && v.Entries()[0].title == "New title");
+
+		// A declared row sets the running version, up or down; a reported row only raises it.
+		{
+			auto decl = [&](const char* plugin, const char* id, const char* version, const char* title = "")
+			{
+				Report r = rep(plugin, id, version, "", false, title);
+				r.source = kSourceDeclared;
+				return r;
+			};
+			Catalog dv;
+			bool shown = false;
+			CHECK(dv.Merge(decl("Cheats", "move", "0.26.0-dev.1", "Move"), d1, &shown) && shown);
+			CHECK(dv.Merge(decl("Cheats", "move", "0.26.0-rc.6", "Move now"), d1, &shown) && shown);
+			CHECK(dv.Entries()[0].version == "0.26.0-rc.6" && dv.Entries()[0].title == "Move now");
+			CHECK(!dv.Merge(decl("Cheats", "move", "0.26.0-rc.6", "Move now"), d1, &shown) && !shown);   // same again, same day
+			CHECK(dv.Merge(decl("Cheats", "move", "0.26.0", "Move now"), d1, &shown) && shown);         // a release replaces the rc
+			CHECK(dv.Entries()[0].version == "0.26.0");
+			CHECK(dv.Merge(decl("Cheats", "move", "0.26.0-rc.6", "Move now"), d1, &shown) && shown);    // a downgrade shows
+			CHECK(dv.Entries()[0].version == "0.26.0-rc.6");
+			dv.Merge(decl("Cheats", "move", "", "Move now"), d2, &shown);                              // no version: kept
+			CHECK(!shown && dv.Entries()[0].version == "0.26.0-rc.6");
+
+			// A stored plain version is replaced by the pre-release an untagged build later runs.
+			Catalog dp;
+			dp.Merge(decl("Cam", "zoom", "v0.2.0"), d1);
+			CHECK(dp.Merge(decl("Cam", "zoom", "0.2.0-rc.2"), d1, &shown) && shown && dp.Entries()[0].version == "0.2.0-rc.2");
+
+			// A report (an older pre-release of equal numbers) never lowers it; a newer one raises it.
+			CHECK(!dv.Merge(rep("Cheats", "move", "0.26.0-dev.1", "", false), d1, &shown) && !shown);
+			CHECK(dv.Entries()[0].version == "0.26.0-rc.6");
+			CHECK(dv.Merge(rep("Cheats", "move", "0.26.0", "", false), d1, &shown) && shown && dv.Entries()[0].version == "0.26.0");
+		}
+
+		// Two pushes through the shared catalog, dev then rc: the snapshot shows the rc.
+		{
+			NoteDeclaredRows({ "Stale Probe	0.26.0-dev.1	a	on	A", "Stale Probe	0.26.0-dev.1	b	off	B" });
+			NoteDeclaredRows({ "Stale Probe	0.26.0-rc.6	a	on	A", "Stale Probe	0.26.0-rc.6	b	off	B" });
+			std::vector<Entry> rows;
+			for (const Entry& x : Snapshot()) if (x.plugin == "Stale Probe") rows.push_back(x);
+			CHECK(rows.size() == 2 && rows[0].version == "0.26.0-rc.6" && rows[1].version == "0.26.0-rc.6");
+			CHECK(ModVersion(rows) == "0.26.0-rc.6");
+		}
+
+		// The version a mod shows: the newest declared row wins over a higher leftover; no declared row, the highest.
+		{
+			auto ent = [](const char* version, const std::string& day, const char* source)
+			{
+				Entry x; x.plugin = "P"; x.id = version; x.version = version; x.lastSeen = day; x.source = source;
+				return x;
+			};
+			CHECK(ModVersion({}).empty() && ModVersion({ ent("", d2, "declared") }).empty());
+			// After a downgrade a removed feature's row still holds the higher version, one push older.
+			CHECK(ModVersion({ ent("2.0.0", d1, "declared"), ent("1.9.0", d2, "declared") }) == "1.9.0");
+			CHECK(ModVersion({ ent("1.9.0", d2, "declared"), ent("2.0.0", d1, "declared") }) == "1.9.0");
+			// Same day: the highest of the declared rows. A declared row beats a reported one.
+			CHECK(ModVersion({ ent("1.8.0", d2, "declared"), ent("1.9.0-rc.1", d2, "declared") }) == "1.9.0-rc.1");
+			// Same day and the same source, a downgrade: the row merged last (arrival order in this
+			// process, not saved) wins over the higher number a dropped feature's row still holds.
+			auto seq = [&](const char* version, uint64_t n) { Entry x = ent(version, d2, "declared"); x.declaredSeq = n; return x; };
+			CHECK(ModVersion({ seq("2.0.0", 1), seq("1.0.0", 3) }) == "1.0.0");
+			CHECK(ModVersion({ seq("1.0.0", 3), seq("2.0.0", 1) }) == "1.0.0");
+			CHECK(ModVersion({ seq("2.0.0", 0), seq("1.0.0", 0) }) == "2.0.0");   // no arrival order known (loaded from the file): the highest
+			Catalog tie;
+			const auto declare = [&](const char* id, const char* version)
+			{
+				Report r = rep("Tie", id, version, "", false);
+				r.source = kSourceDeclared;
+				tie.Merge(r, d2);
+			};
+			declare("a", "2.0.0"); declare("b", "2.0.0");        // the first run
+			declare("b", "1.0.0");                               // a downgrade that no longer declares "a"
+			CHECK(tie.Size() == 2 && ModVersion(tie.Entries()) == "1.0.0");
+			CHECK(ModVersion({ ent("3.0.0", d2, "reported"), ent("1.0.0", d1, "declared") }) == "1.0.0");
+			CHECK(ModVersion({ ent("1.0.0", d1, "reported"), ent("1.1.0", d1, "reported") }) == "1.1.0");
+		}
 
 		// Off by build accumulates; an on report does not clear it.
 		Catalog b;
@@ -1614,6 +2084,8 @@ int main()
 	InGameAdminTests();
 	InGameAdminOpsTests();
 	ProofGateTests();
+	ProofHoldTests();
+	PushGateTests();
 
 	// Mod names with single inner spaces, as the mod loader allows them.
 	{
@@ -1852,7 +2324,7 @@ int main()
 		// An unknown value is still refused, with the new wording.
 		aw.clear();
 		Model bad = ParseText({ "[Rules]", "A.b=sometimes" }, aw);
-		CHECK(bad.rules.empty() && aw.size() == 1);
+		CHECK(bad.rules.empty() && aw.size() == 1 && aw[0].find("allow, deny or admins") != std::string::npos);
 		// Old file: only allow and deny. It loads the same as before.
 		aw.clear();
 		Model old = ParseText({ "[Rules]", "A.b=deny", "C.d=allow" }, aw);
@@ -1868,8 +2340,12 @@ int main()
 		aw.clear();
 		Model own = ParseText({ "[Rules]", "ServerUtility.admin-window=deny", "serverutility.*=admins", "P.f=deny" }, aw);
 		PlayerFlags adm2; adm2.admin = true;
-		CHECK(RulesText(own, true).find("erverUtility") == std::string::npos && RulesText(own, true).find("P.f=deny\n") != std::string::npos);
-		CHECK(PlayerRulesText(own, adm2, true).find("erverUtility") == std::string::npos);
+		const auto lowered = [](std::string t) { for (char& c : t) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); return t; };
+		CHECK(own.rules.size() >= 1 && lowered(RulesText(own, true)).find("serverutility") == std::string::npos && RulesText(own, true).find("P.f=deny\n") != std::string::npos);
+		CHECK(lowered(PlayerRulesText(own, adm2, true)).find("serverutility") == std::string::npos);
+		// The same row for a plugin the loader rules: the lowercase check above would catch it.
+		Model other = ParseText({ "[Rules]", "serverother.*=admins", "P.f=deny" }, aw);
+		CHECK(lowered(RulesText(other, true)).find("serverother") != std::string::npos);
 	}
 
 	// Records are kept per connection: two connections that read the same ID, one

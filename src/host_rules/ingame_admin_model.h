@@ -47,6 +47,9 @@ namespace InGameAdminModel
 		// Some connection started or stopped being proven. Called with no lock held, on the thread
 		// that made the change, so the host can re-send that connection's rules.
 		std::function<void()>                          proofChanged;
+		// A connection's proof was refused (wrong, empty, stale or no secret on file). Called with
+		// no lock held, on the thread that handled the packet, before the reply is returned.
+		std::function<void(ConnId)>                    proofRejected;
 		std::function<uint32_t()>                      revision;   // AdminOps::Revision
 		std::function<double()>                        now;        // seconds, steady
 		std::function<bool(size_t, std::vector<uint8_t>&)> random; // empty = the system generator

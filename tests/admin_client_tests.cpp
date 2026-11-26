@@ -3,7 +3,9 @@
 //   cl /nologo /EHsc /std:c++17 /Isrc tests\admin_client_tests.cpp src\client\admin_client.cpp src\client\admin_view.cpp src\admin_wire\admin_wire.cpp src\admin_wire\admin_crypto.cpp /Fe:admin_client_tests.exe
 //   admin_client_tests.exe
 #include "client/admin_client.h"
+#include "client/admin_view.h"
 #include "admin_wire/admin_crypto.h"
+#include "host_rules/ingame_admin_model.h"   // only its request limits are used
 
 #include <algorithm>
 #include <cstdio>
@@ -805,6 +807,96 @@ int main()
 		CHECK(n.Count(Tag::Ops) == 0);
 	}
 
+	// A big declared list: 82 and 300 feature rows read as 82 and the cap of 256. The push splits
+	// into messages and goes out against the server's request budget (checked here with the
+	// server model's own limits): none is refused, all rows arrive in order, and nothing is
+	// left once the budget has refilled.
+	{
+		auto declared = [](int n)
+		{
+			std::string t = "format\t1\nkind\tdeclared\ngame_cl\t1\nloader\tx\nplugin\tProductionViewer\t0.19.0-rc.3\n";
+			for (int i = 0; i < n; ++i)
+				t += "feature\tProductionViewer\tbasecores-" + std::to_string(i) + "\ton\tShow the base core overlay " + std::to_string(i) + "\n";
+			return t;
+		};
+		CHECK(AdminClient::ParseDeclaredFeatures(declared(82)).size() == 82);
+		CHECK(AdminClient::ParseDeclaredFeatures(declared(300)).size() == AdminClient::kMaxCatalogRows && AdminClient::kMaxCatalogRows == 256);
+
+		for (int n : { 82, 256 })
+		{
+			Rig r;
+			r.featFn = FakeRead(declared(n));
+			r.Ready();
+			r.Feed(Challenge());
+			r.Feed(Welcome(kRoleAdmin));
+			r.Clear();
+			const double start = r.clock;
+			double tokens = InGameAdminModel::kOpsBurst - 5;   // what the handshake and snapshot request spent
+			double tokenTime = start;
+			size_t seen = 0, messages = 0, rows = 0, firstTick = 0;
+			bool small = true, refused = false, only = true;
+			std::vector<std::string> back;
+			auto drain = [&]
+			{
+				r.client->Flush();
+				for (; seen < r.sent.size(); ++seen)
+				{
+					const Message& m = r.sent[seen];
+					if (m.tag != Tag::Ops) continue;
+					++messages;
+					small = small && m.ops.size() <= AdminClient::kCatalogRowsPerMessage;
+					tokens = std::min(InGameAdminModel::kOpsBurst, tokens + (r.clock - tokenTime) * InGameAdminModel::kOpsPerSecond);
+					tokenTime = r.clock;
+					refused = refused || tokens < static_cast<double>(m.ops.size());
+					tokens -= static_cast<double>(m.ops.size());
+					for (const Op& o : m.ops) { only = only && o.name == "catalog.push" && o.args.size() == 1; back.push_back(o.args[0]); }
+					rows += m.ops.size();
+				}
+			};
+			r.client->Tick();
+			drain();
+			firstTick = rows;
+			CHECK(firstTick > 0 && firstTick <= static_cast<size_t>(AdminClient::kCatalogBurstRows));   // a burst at once, no more
+			int steps = 0;
+			while (rows < static_cast<size_t>(n) && steps++ < 1000)
+			{
+				r.clock += 0.1;
+				r.client->Tick();
+				drain();
+			}
+			const double took = r.clock - start;
+			CHECK(rows == static_cast<size_t>(n) && !refused && small && only);
+			CHECK(back == AdminClient::ParseDeclaredFeatures(declared(n)));
+			r.clock += 60;
+			r.client->Tick();
+			drain();
+			CHECK(rows == static_cast<size_t>(n));                   // nothing left to send
+			std::printf("catalog push of %d rows: %zu messages, %zu rows at once, all sent after %.1f s\n", n, messages, firstTick, took);
+		}
+
+		// A disconnect drops the messages not yet sent; the next connection starts over.
+		Rig d;
+		d.featFn = FakeRead(declared(256));
+		d.Ready();
+		d.Feed(Challenge());
+		d.Feed(Welcome(kRoleAdmin));
+		d.Clear();
+		d.client->Tick();
+		const size_t firstCount = d.Count(Tag::Ops);
+		CHECK(firstCount > 0);
+		d.client->OnWorldEnd();
+		d.Clear();
+		d.clock += 30;
+		d.client->Tick();
+		CHECK(d.Count(Tag::Ops) == 0);
+		d.Ready();
+		d.Feed(Challenge());
+		d.Feed(Welcome(kRoleAdmin));
+		d.Clear();
+		d.client->Tick();
+		CHECK(d.Count(Tag::Ops) == firstCount);
+	}
+
 	// The server address is read until the loader answers, then not again.
 	{
 		Rig r(kServerId + " " + kOtherAddr + " " + kSecret + "\n", "addrfeed");
@@ -883,6 +975,9 @@ int main()
 		// Staging "admins" is accepted, goes out as is, and shows in the effective rules.
 		Op a; a.name = "rule.set"; a.args = { "BetterCheats.movement", "admins" };
 		CHECK(r.client->Stage(a));
+		v = r.View();
+		const AdminWire::Snapshot eff = AdminView::ApplyStaged(v.snapshot, v.staged);
+		CHECK(AdminView::RuleValue(eff, "BetterCheats.movement") == "admins" && eff.adminsOnlySupported);
 		r.Clear();
 		CHECK(r.client->Apply());
 		const Message* o = r.Last(Tag::Ops);

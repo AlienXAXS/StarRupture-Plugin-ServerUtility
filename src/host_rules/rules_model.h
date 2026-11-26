@@ -115,6 +115,38 @@ namespace RulesModel
 	// its ID reads now and how long it has been held.
 	HeldStep NextHeldStep(bool alive, bool idRead, unsigned long long heldMs);
 
+	// A listed admin whose admin check is pending gets the admin's rule set at once
+	// (admins-only rows allowed), so they never see those features switch off and
+	// on again at join. The hold starts at the join and ends at the first of:
+	// the check passed (the normal set takes over, the same text), no pass within
+	// kProofHoldMs of the client's feature list arriving (the client needs the list
+	// before it can answer, so the time is counted from it), kProofHoldCapMs from the
+	// join when no list ever arrives, the player is no longer a listed admin, the
+	// check was refused, the client has no ServerUtility client part, or the player
+	// left. Then the player is on the server rules like anyone else, so the
+	// admins-only rows are denied. A rules reload does not end the hold: the hold is
+	// checked again and the admin's set is sent again with the new rules. Ending it
+	// there would bring back the off and on switch for a real admin.
+	constexpr unsigned long long kProofHoldMs   = 8000;
+	constexpr unsigned long long kProofHoldCapMs = 30000;
+	constexpr unsigned long long kNoFeatures     = ~0ull;   // "since the feature list": it has not arrived
+
+	// What the host knows about one held connection. listedAdmin: the list entry has Admin.
+	// secretOnFile: the ID has paired before, so the client can answer a challenge by itself
+	// (a first pairing waits for a person to type a code: nothing is pending, no hold).
+	// clientHasTool: the client reported the ServerUtility client part (known once its feature
+	// list has arrived; not asked before).
+	struct HoldInputs { bool listedAdmin = false, secretOnFile = false, proven = false, clientHasTool = false; };
+	// True while the hold applies. sinceJoinMs: time since the join; sinceFeaturesMs: time since
+	// the feature list arrived, or kNoFeatures.
+	bool ProofHoldOn(const HoldInputs& in, unsigned long long sinceJoinMs, unsigned long long sinceFeaturesMs);
+	// The flags a held connection gets: the admin's own, nothing else (a proven
+	// admin with ExemptRules or Sections= gets those when the check passes).
+	PlayerFlags HoldFlags();
+	// "Admins only (default)" is true of a built-in default row only while the host's
+	// own rules leave it to admins: not under default=deny and not under a Plugin.*=deny.
+	bool DefaultRowAdminsOnly(const Model& m, const std::string& plugin);
+
 	// Per-connection records, keyed by the connection and never by the player's
 	// ID: two connections can read the same ID (a player and one who copied it),
 	// and when one of them leaves the other keeps its record.
@@ -141,5 +173,80 @@ namespace RulesModel
 			for (size_t i = 0; i < rows.size(); ++i)
 				if (rows[i].key == key) { rows.erase(rows.begin() + static_cast<std::ptrdiff_t>(i)); return; }
 		}
+	};
+
+	enum class HoldStep
+	{
+		NotHeld,   // no hold for this connection (never began, or already over)
+		Held,      // the hold applies: send the held set
+		Ended      // the hold ended just now and its record is gone: send the normal set
+	};
+
+	// The join holds, one row per held connection. The host's join, feature list, rules refresh,
+	// refusal and leave paths all go through this, so the tests run what ships.
+	template <class Key>
+	class JoinHolds
+	{
+	public:
+		// The player joined (PostLogin) and is held.
+		void Begin(const Key& key, unsigned long long nowMs)
+		{
+			Row* r = Find(key);
+			if (!r) { m_rows.push_back({ key, nowMs, 0, false }); return; }
+			*r = { key, nowMs, 0, false };
+		}
+		bool Has(const Key& key) const { return Find(key) != nullptr; }
+		size_t Size() const { return m_rows.size(); }
+		// The connection's feature list arrived. Only the first one counts.
+		void FeaturesArrived(const Key& key, unsigned long long nowMs)
+		{
+			Row* r = Find(key);
+			if (r && !r->featuresSeen) { r->featuresSeen = true; r->featuresMs = nowMs; }
+		}
+		// Decide for one connection now. A hold that is over is dropped here.
+		HoldStep Step(const Key& key, unsigned long long nowMs, const HoldInputs& in)
+		{
+			Row* r = Find(key);
+			if (!r) return HoldStep::NotHeld;
+			if (ProofHoldOn(in, nowMs - r->joinedMs, r->featuresSeen ? nowMs - r->featuresMs : kNoFeatures))
+				return HoldStep::Held;
+			Drop(key);
+			return HoldStep::Ended;
+		}
+		// End the hold for any other reason (a refused check, the player left). True when there was one.
+		bool End(const Key& key)
+		{
+			if (!Find(key)) return false;
+			Drop(key);
+			return true;
+		}
+		// The connections whose time is up, for the host to end (their inputs may say more).
+		std::vector<Key> Expired(unsigned long long nowMs) const
+		{
+			std::vector<Key> out;
+			for (const Row& r : m_rows)
+				if (nowMs - r.joinedMs >= kProofHoldCapMs || (r.featuresSeen && nowMs - r.featuresMs >= kProofHoldMs))
+					out.push_back(r.key);
+			return out;
+		}
+
+	private:
+		struct Row { Key key; unsigned long long joinedMs; unsigned long long featuresMs; bool featuresSeen; };
+		Row* Find(const Key& key)
+		{
+			for (Row& r : m_rows) if (r.key == key) return &r;
+			return nullptr;
+		}
+		const Row* Find(const Key& key) const
+		{
+			for (const Row& r : m_rows) if (r.key == key) return &r;
+			return nullptr;
+		}
+		void Drop(const Key& key)
+		{
+			for (size_t i = 0; i < m_rows.size(); ++i)
+				if (m_rows[i].key == key) { m_rows.erase(m_rows.begin() + static_cast<std::ptrdiff_t>(i)); return; }
+		}
+		std::vector<Row> m_rows;
 	};
 }

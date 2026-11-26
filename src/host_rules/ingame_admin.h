@@ -2,6 +2,7 @@
 
 #include "ingame_admin_model.h"
 
+#include <cstdint>
 #include <string>
 
 // The server half of the in-game admin tool, on the game: it takes the tool's
@@ -24,9 +25,16 @@ namespace InGameAdmin
 	// an ID alone is not proof.
 	bool IsProven(void* playerController, const std::string& playerId);
 
+	// True when this ID paired before, so a client with the admin tool can prove by itself.
+	bool HasSecret(const std::string& playerId);
+
 	// The player just completed the admin claim on this controller: that connection
 	// alone may pair without a code.
 	void OnClaimed(void* playerController, const std::string& playerId);
+
+	// Game thread, every tick: announce a catalog change that was held back to keep the pushes
+	// to the admins at one per second.
+	void Tick(uint64_t nowMs);
 
 	// A player leaves: forget their connection.
 	void PlayerLeft(void* playerController);

@@ -31,6 +31,10 @@ namespace HostRules
 	// list changed. Runs on the game thread (posted when called from another).
 	void RefreshPlayers();
 
+	// Game thread. The player's admin check was refused: end the join hold now and apply the
+	// server rules. Nothing happens for a player with no hold.
+	void EndAdminHold(void* playerController);
+
 	// Game thread only. Fills out with the connected players' controllers (at most
 	// max) and returns how many. Fresh each call: use them in this tick and do not keep them.
 	int ConnectedControllers(SDK::APlayerController** out, int max);
