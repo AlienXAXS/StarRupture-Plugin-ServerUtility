@@ -176,7 +176,7 @@ namespace
 			if (inGame)
 			{
 				auto it = FindEntry(list, id);
-				if (it != list.end() && it->admin) { error = "an Admin cannot be kicked from in game; use RCON"; return false; }
+				if (it != list.end() && it->admin) { error = "an Admin cannot be kicked; remove the Admin flag first (RCON: admin remove)"; return false; }
 			}
 			if (!be.connected(id)) { error = "player not found"; return false; }
 			out.kind = Planned::Kind::Kick;
