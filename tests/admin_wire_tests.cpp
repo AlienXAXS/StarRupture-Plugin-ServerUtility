@@ -285,7 +285,11 @@ int main()
 		where(s, defAt, srvAt, modAt, servers, value, avail);
 		CHECK(servers == 0);
 
-		s.sections = kSectionAll; s.stackSize = -1;   // the server has no value: no record
+		s.sections = kSectionAll; s.stackSize = 0; s.stackAvailable = false;   // an off size still goes out: the tab shows
+		where(s, defAt, srvAt, modAt, servers, value, avail);
+		CHECK(servers == 1 && value == 0 && !avail);
+
+		s.stackSize = -1;   // the server has no value: no record
 		where(s, defAt, srvAt, modAt, servers, value, avail);
 		CHECK(servers == 0);
 		CHECK(Snapshot().stackSize == -1 && !Snapshot().stackAvailable);

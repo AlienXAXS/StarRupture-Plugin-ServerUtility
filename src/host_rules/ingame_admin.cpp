@@ -9,6 +9,7 @@
 #include "player_list.h"
 #include "../admin_wire/admin_wire.h"
 #include "../plugin_helpers.h"
+#include "../server_settings/stack_size.h"
 
 #include "SDK/Engine_classes.hpp"
 #include "object_ref.h"
@@ -139,6 +140,8 @@ namespace InGameAdmin
 			const RulesModel::Model model = AdminOps::HostBackend().getModel();
 			snap.defaultPolicy = model.defaultDeny ? "deny" : "allow";
 			snap.message = model.message;
+			snap.stackSize = StackSize::Get();
+			snap.stackAvailable = StackSize::Available();
 			for (const RulesModel::Rule& r : model.rules)
 				snap.rules.push_back({ r.plugin + "." + r.id, r.deny ? "deny" : "allow" });
 			for (const RulesModel::DefaultRow& d : RulesModel::DefaultRows())
