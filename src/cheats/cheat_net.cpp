@@ -70,6 +70,12 @@ namespace CheatNet
 		LOG_INFO("[Cheat] BetterCheats requests need ModLoader 1.28.0 on the server - they are off");
 	}
 
+	void Forget(const std::string& playerId)
+	{
+		if (g_server)
+			g_server->Forget(playerId);
+	}
+
 	void Shutdown()
 	{
 #if PLUGIN_OPTIONAL_INTERFACE >= 83

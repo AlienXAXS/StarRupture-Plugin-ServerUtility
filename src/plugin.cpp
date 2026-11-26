@@ -23,6 +23,7 @@
 #include "host_rules/host_rules.h"
 #ifdef MODLOADER_SERVER_BUILD
 #include "cheats/cheat_net.h"
+#include "cheats/cheat_ledger_game.h"
 #endif
 
 // -----------------------------------------------------------------------
@@ -86,6 +87,7 @@ static void OnEngineShutdown()
 	AdminPanel::Shutdown(g_self);
 #ifdef MODLOADER_SERVER_BUILD
 	CheatNet::Shutdown();
+	CheatLedgerGame::Shutdown();
 #endif
 	InGameAdmin::Shutdown();
 	AdminClaim::Shutdown();
@@ -183,6 +185,7 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 	AdminClaim::Init();
 	InGameAdmin::Init();
 #ifdef MODLOADER_SERVER_BUILD
+	CheatLedgerGame::Init();
 	CheatNet::Init();
 #endif
 
@@ -231,6 +234,9 @@ __declspec(dllexport) void PluginShutdown()
 
 	PluginCommands::UnregisterAll();
 
+#ifdef MODLOADER_SERVER_BUILD
+	CheatLedgerGame::Shutdown();
+#endif
 	g_self = nullptr;
 }
 } // extern "C"

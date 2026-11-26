@@ -9,6 +9,9 @@
 #include "player_list.h"
 #include "../admin_wire/admin_wire.h"
 #include "../plugin_helpers.h"
+#ifdef MODLOADER_SERVER_BUILD
+#include "../cheats/cheat_ledger_game.h"
+#endif
 
 #include "SDK/Engine_classes.hpp"
 #include "object_ref.h"
@@ -297,6 +300,9 @@ namespace InGameAdmin
 
 		void OnWorldEnd(SDK::UWorld*, const char*)
 		{
+#ifdef MODLOADER_SERVER_BUILD
+			CheatLedgerGame::OnWorldEnd();
+#endif
 			// Travel: proven state and connection numbers start over.
 			if (const auto model = ModelPtr())
 				model->OnWorldEnd();

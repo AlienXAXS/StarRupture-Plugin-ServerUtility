@@ -8,6 +8,10 @@
 #include "../plugin_helpers.h"
 #include "../rcon/listed_players.h"
 #include "../server_utility_fields.h"
+#ifdef MODLOADER_SERVER_BUILD
+#include "../cheats/cheat_ledger_game.h"
+#include "../cheats/cheat_net.h"
+#endif
 
 #include "SDK/Engine_classes.hpp"
 #include "object_ref.h"
@@ -111,7 +115,7 @@ namespace
 	//
 	// Game thread only. Send (or clear) one connection's own rules. force sends
 	// even when the same text went out before: a loader report is a fresh start.
-	void ApplyRules(void* playerController, const std::string& id, bool force)
+	void ApplyRulesNow(void* playerController, const std::string& id, bool force)
 	{
 		auto* hooks = GetHooks();
 		IPluginHostRules* api = hooks ? hooks->HostRules : nullptr;
@@ -197,6 +201,15 @@ namespace
 			LOG_WARN("[HostRules] Could not send rules for player %s: %s", id.c_str(), err);
 	}
 
+	// ApplyRulesNow, then the cheat ledger checks what this player's rules now allow.
+	void ApplyRules(void* playerController, const std::string& id, bool force)
+	{
+		ApplyRulesNow(playerController, id, force);
+#ifdef MODLOADER_SERVER_BUILD
+		CheatLedgerGame::ReconcilePlayer(id);
+#endif
+	}
+
 	// Game thread. A hold that ran out is ended here: the connection goes back to the
 	// server rules unless the check passed in the meantime.
 	void EndExpiredHolds(ULONGLONG now)
@@ -230,6 +243,9 @@ namespace
 		KnownFeatures::Tick(tickNow);
 		InGameAdmin::Tick(tickNow);
 		EndExpiredHolds(tickNow);
+#ifdef MODLOADER_SERVER_BUILD
+		CheatLedgerGame::Tick();
+#endif
 		if (g_waiting.empty())
 			return;
 
@@ -329,6 +345,9 @@ namespace
 	{
 		if (!OnGameThread() || !playerController)
 			return;
+#ifdef MODLOADER_SERVER_BUILD
+		CheatLedgerGame::OnPlayerJoined(playerController);
+#endif
 		auto* hooks = GetHooks();
 		IPluginHostRules* api = hooks ? hooks->HostRules : nullptr;
 		if (!api || !InGameAdmin::Enabled())
@@ -397,6 +416,14 @@ namespace
 	void OnPlayerLeft(void* exitingController)
 	{
 		// Called from the game's Logout, on the game thread, before the controller is torn down.
+#ifdef MODLOADER_SERVER_BUILD
+		{
+			const std::string leavingId = IdOf(exitingController);
+			CheatLedgerGame::OnPlayerLeft(exitingController);
+			if (!leavingId.empty())
+				CheatNet::Forget(leavingId);
+		}
+#endif
 		auto* pc = static_cast<SDK::APlayerController*>(exitingController);
 		g_waiting.erase(std::remove_if(g_waiting.begin(), g_waiting.end(), [&](const Waiting& w) { return w.pc.Get() == pc; }), g_waiting.end());
 
