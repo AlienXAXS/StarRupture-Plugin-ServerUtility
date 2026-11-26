@@ -70,7 +70,10 @@ namespace Ep_AuthLogin
 		const std::string apiKey = AdminJson::ExtractString(req->body, req->bodyLen, "api_key");
 		const std::string expected = ServerUtilityConfig::Config::GetAdminApiKey();
 
-		if (apiKey.empty() || !KeyMatches(apiKey, expected))
+		// The key is read on every login, so one shortened after startup is refused
+		// here as Init refuses it at startup.
+		if (apiKey.empty() || expected.size() < ServerUtilityConfig::Config::kMinAdminApiKeyLength
+		    || !KeyMatches(apiKey, expected))
 		{
 			LOG_WARN("[AdminPanel] Failed login (%d of %d before lockout)", attempts, kMaxFailures);
 			AdminJson::SetError(resp, 401, "invalid api key", body);
