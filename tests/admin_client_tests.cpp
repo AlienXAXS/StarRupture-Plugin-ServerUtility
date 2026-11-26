@@ -724,7 +724,7 @@ int main()
 		s.rules.push_back({ "a", "allow" });
 		s.rules.push_back({ "b", "deny" });
 		std::vector<std::string> pages = EncodeSnapshot(s);
-		for (size_t i = 0; i < pages.size(); ++i) if (i != pages.size() - 2) m.FeedRaw(pages[i]);
+		for (const std::string& page : pages) if (page.compare(0, 9, "snap-rule") != 0) m.FeedRaw(page);
 		CHECK(!m.View().haveSnapshot && m.View().lastResult == AdminClient::kRefreshing);
 		CHECK(m.Count(Tag::Snap) == 1);
 		FeedSnapshot(m, 4);                                 // the refresh arrives
@@ -864,6 +864,37 @@ int main()
 		}
 		v = r.View();
 		CHECK(v.status == Status::Ready && v.snapshot.revision == 6 && v.snapshot.defaults.empty() && !v.lastResultIsError);
+	}
+
+	// "Admins only": a server that knows it sends snap-admins, and the client shows those denies as admins
+	// rows and knows it may offer the value. An older server sends none: plain denies, no admins value.
+	// A snapshot from an older server after a newer one clears the flag.
+	{
+		Rig r;
+		MakeReady(r);
+		Snapshot s;
+		s.revision = 5;
+		s.rules = { { "BetterCheats.god", "admins" }, { "BetterCheats.movement", "deny" }, { "P.f1", "allow" } };
+		for (const std::string& e : EncodeSnapshot(s)) r.FeedRaw(e);
+		AdminClient::View v = r.View();
+		CHECK(v.haveSnapshot && v.snapshot.adminsOnlySupported && v.snapshot.rules.size() == 3);
+		CHECK(v.snapshot.rules[0].value == "admins" && v.snapshot.rules[1].value == "deny" && v.snapshot.rules[2].value == "allow");
+
+		// Staging "admins" is accepted, goes out as is, and shows in the effective rules.
+		Op a; a.name = "rule.set"; a.args = { "BetterCheats.movement", "admins" };
+		CHECK(r.client->Stage(a));
+		r.Clear();
+		CHECK(r.client->Apply());
+		const Message* o = r.Last(Tag::Ops);
+		CHECK(o && o->ops.size() == 1 && o->ops[0].args[1] == "admins");
+
+		// An older server: no snap-admins record at all.
+		Snapshot old;
+		old.revision = 6;
+		old.rules = { { "BetterCheats.god", "deny" } };
+		for (const std::string& e : EncodeSnapshot(old)) if (e.compare(0, 11, "snap-admins") != 0) r.FeedRaw(e);
+		v = r.View();
+		CHECK(v.snapshot.revision == 6 && !v.snapshot.adminsOnlySupported && v.snapshot.rules[0].value == "deny");
 	}
 
 	std::printf("%d checks, %d failed\n", g_checks, g_failed);

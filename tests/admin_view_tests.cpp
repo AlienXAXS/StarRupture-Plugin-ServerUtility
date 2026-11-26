@@ -206,6 +206,21 @@ int main()
 		CHECK(!IsDefaultDenied(Base(), "Alpha.fly"));                        // an older server: no defaults
 	}
 
+	// "Admins only" is a rule value: staged, read back, a no-op only when it matches, and "unset" removes it.
+	{
+		Snapshot s = Base();
+		s.adminsOnlySupported = true;
+		s.rules.push_back({ "Alpha.fly", "admins" });
+		CHECK(RuleValue(s, "Alpha.fly") == "admins" && !IsDefaultDenied(s, "Alpha.fly"));   // a rule names it
+		Snapshot e = ApplyStaged(s, { MakeOp("rule.set", { "Beta.fly", "admins" }) });
+		CHECK(RuleValue(e, "Beta.fly") == "admins" && RuleValue(e, "Alpha.fly") == "admins" && e.adminsOnlySupported);
+		Snapshot e2 = ApplyStaged(s, { MakeOp("rule.set", { "Alpha.fly", "deny" }) });
+		CHECK(RuleValue(e2, "Alpha.fly") == "deny");
+		Snapshot e3 = ApplyStaged(s, { MakeOp("rule.set", { "Alpha.fly", "unset" }) });
+		CHECK(RuleValue(e3, "Alpha.fly").empty());
+		CHECK(IsNoop(s, MakeOp("rule.set", { "Alpha.fly", "admins" })) && !IsNoop(s, MakeOp("rule.set", { "Alpha.fly", "deny" })));
+	}
+
 	// Count labels: singular only for one.
 	CHECK(CountLabel(0, "mod") == "0 mods" && CountLabel(1, "mod") == "1 mod" && CountLabel(2, "mod") == "2 mods");
 

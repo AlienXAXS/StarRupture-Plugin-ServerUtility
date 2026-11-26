@@ -783,7 +783,7 @@ static void ProofGateTests()
 	// What ApplyRules does for one connection: the flags its entry gets, for that proof state.
 	const auto flagsFor = [&](InGameAdminModel::Server& s, uint64_t conn, const std::string& id)
 	{
-		return RulesModel::FlagsFor(flagged.ExemptsRules(), flagged.sections, s.IsProvenAs(conn, id));
+		return RulesModel::FlagsFor(flagged.admin, flagged.exemptRules, flagged.sections, s.IsProvenAs(conn, id));
 	};
 
 	// A spoofed ID with no proof gets the default rules; the same ID with proof gets the flags.
@@ -875,16 +875,19 @@ static void ProofGateTests()
 		CHECK(!AdminOps::UniqueConnected({}, "z", pos, err));
 	}
 
-	// ExemptVersion works on the ID alone; Admin keeps implying it. The listen host and solo have
-	// no list entry or no connection to prove, so the gate changes nothing for them.
+	// ExemptVersion works on the ID alone; Admin exempts from neither the version check nor the rules.
+	// The listen host and solo have no list entry or no connection to prove, so the gate changes nothing for them.
 	{
 		PlayerList::Entry v; v.id = "v1"; v.exemptVersion = true;
-		CHECK(v.ExemptsVersion() && !v.NeedsProof() && !v.ExemptsRules());
+		CHECK(v.exemptVersion && !v.NeedsProof() && !v.exemptRules);
 		PlayerList::Entry a; a.id = "a1"; a.admin = true;
-		CHECK(a.ExemptsVersion() && a.ExemptsRules() && a.NeedsProof());
-		CHECK(!RulesModel::NeedsOwnRules(RulesModel::FlagsFor(false, {}, true)));
-		CHECK(!RulesModel::NeedsOwnRules(RulesModel::FlagsFor(true, { "x.y" }, false)));
-		CHECK(RulesModel::NeedsOwnRules(RulesModel::FlagsFor(false, { "x.y" }, true)));
+		CHECK(!a.exemptVersion && !a.exemptRules && a.NeedsProof());   // an admin is not exempt by default
+		CHECK(!RulesModel::NeedsOwnRules(RulesModel::FlagsFor(false, false, {}, true)));
+		CHECK(!RulesModel::NeedsOwnRules(RulesModel::FlagsFor(false, true, { "x.y" }, false)));
+		CHECK(!RulesModel::NeedsOwnRules(RulesModel::FlagsFor(true, true, { "x.y" }, false)));   // an admin claim without proof is nobody
+		CHECK(RulesModel::NeedsOwnRules(RulesModel::FlagsFor(false, false, { "x.y" }, true)));
+		CHECK(RulesModel::NeedsOwnRules(RulesModel::FlagsFor(true, false, {}, true)));
+		CHECK(RulesModel::NeedsOwnRules(RulesModel::FlagsFor(false, true, {}, true)));
 	}
 }
 
@@ -1235,6 +1238,10 @@ int main()
 			CHECK(f.model.rules.size() == 1 && f.model.rules[0].deny);
 			CHECK(Apply(f.be, rcon, { op("rule.set", { "Codex.map", "unset" }) }).ok && f.model.rules.empty());
 			CHECK(!Apply(f.be, rcon, { op("rule.set", { "Codex.map", "maybe" }) }).ok);
+			// admins only: set, replaced by allow, and unset
+			CHECK(Apply(f.be, rcon, { op("rule.set", { "Codex.map", "admins" }) }).ok && f.model.rules.size() == 1 && f.model.rules[0].adminsOnly && f.model.rules[0].deny);
+			CHECK(Apply(f.be, rcon, { op("rule.set", { "Codex.map", "allow" }) }).ok && !f.model.rules[0].adminsOnly && !f.model.rules[0].deny);
+			CHECK(Apply(f.be, rcon, { op("rule.set", { "Codex.map", "admins" }) }).ok && Apply(f.be, rcon, { op("rule.set", { "Codex.map", "unset" }) }).ok && f.model.rules.empty());
 			CHECK(!Apply(f.be, rcon, { op("rule.set", { "nodot", "deny" }) }).ok);
 			// A mod name with a single inner space is accepted and round-trips.
 			CHECK(Apply(f.be, rcon, { op("rule.set", { "Best Builder.fast", "deny" }) }).ok);
@@ -1253,6 +1260,20 @@ int main()
 			CHECK(!Apply(f.be, rcon, { op("min.mod", { "Codex", "x.y" }) }).ok);
 			CHECK(!Apply(f.be, rcon, { op("no.such.op") }).ok);
 			CHECK(!Apply(f.be, rcon, {}).ok);
+		}
+
+		// No silent downgrade: an rc.2 client sends only the ops it staged (rule.set for the edited key),
+		// so editing one unrelated rule leaves every admins-only row as it was. Only an op naming the same key
+		// (the rc.2 window shows "admins only" as Deny, so choosing Deny there) changes that row.
+		{
+			Fake f;
+			std::string err;
+			CHECK(SetRuleAdminsOnly(f.model, "BetterCheats.god", err) && SetRuleAdminsOnly(f.model, "BetterCheats.*", err));
+			CHECK(Apply(f.be, rcon, { op("rule.set", { "Other.thing", "deny" }) }).ok);
+			CHECK(Apply(f.be, rcon, { op("policy.message", { "Hello" }) }).ok && Apply(f.be, rcon, { op("policy.default", { "deny" }) }).ok);
+			CHECK(f.model.rules.size() == 3 && f.model.rules[0].adminsOnly && f.model.rules[1].adminsOnly && !f.model.rules[2].adminsOnly);
+			CHECK(RuleLines(f.model)[0] == "BetterCheats.god=admins" && RuleLines(f.model)[1] == "BetterCheats.*=admins");
+			CHECK(Apply(f.be, rcon, { op("rule.set", { "BetterCheats.god", "deny" }) }).ok && !f.model.rules[0].adminsOnly && f.model.rules[1].adminsOnly);
 		}
 
 		// Each player op, valid and invalid.
@@ -1708,7 +1729,7 @@ int main()
 		PlayerFlags plain;
 
 		// The table: every row is a deny, and a mod name matches without case, a section id exactly.
-		CHECK(DefaultRows().size() == 26 && IsDefaultRow("bettercheats", "stack-size") && !IsDefaultRow("BetterCheats", "Stack-Size") && IsDefaultRow("best builder", "no-build-cost")
+		CHECK(DefaultRows().size() == 31 && IsDefaultRow("bettercheats", "stack-size") && !IsDefaultRow("BetterCheats", "Stack-Size") && IsDefaultRow("best builder", "no-build-cost")
 		      && IsDefaultRow("CameraControls", "vitals") && IsDefaultRow("WaveOptimiser", "heat-tools") && IsDefaultRow("BetterCheats", "inventory-slot-size") && !IsDefaultRow("BetterCheats", "wind-mute"));
 
 		// A non-admin is denied; a remote set carries it, a set for no remote connection does not.
@@ -1724,22 +1745,74 @@ int main()
 		CHECK(!has(RulesText(allow1, true), "BetterCheats.stack-size=deny") && has(RulesText(allow1, true), "BetterCheats.stack-size=allow"));
 		CHECK(RulesText(deny1, true).find("tack-") != std::string::npos && !has(RulesText(deny1, true), "BetterCheats.stack-size=deny")
 		      && has(RulesText(deny1, true), "BetterCheats.movement=deny"));
-		CHECK(ActiveDefaultRows(allow1).size() == 25 && ActiveDefaultRows(deny1).size() == 25 && ActiveDefaultRows(none).size() == 26);
+		CHECK(ActiveDefaultRows(allow1).size() == 30 && ActiveDefaultRows(deny1).size() == 30 && ActiveDefaultRows(none).size() == 31);
 
 		// A different-case id is another section to the loader, so it does not replace the default.
 		const Model oddCase = ParseText({ "[Rules]", "BetterCheats.Stack-Size=allow" }, dw);
-		CHECK(ActiveDefaultRows(oddCase).size() == 26);
+		CHECK(ActiveDefaultRows(oddCase).size() == 31);
 
 		// Plugin.* = allow and [Policy] Default = allow do not open it.
 		CHECK(has(RulesText(star, true), "BetterCheats.*=allow") && has(RulesText(star, true), "BetterCheats.stack-size=deny"));
 		CHECK(has(RulesText(none, true), "BetterCheats.stack-size=deny"));
 
-		// An admin (or any ExemptRules entry) gets nothing denied, even with a Sections= key.
-		PlayerFlags admin; admin.exemptRules = true;
-		CHECK(PlayerRulesText(none, admin, true) == "default=allow\n");
-		admin.sections = { "BetterCheats.stack-size" };
-		CHECK(PlayerRulesText(none, admin, true) == "default=allow\n");
-		CHECK(PlayerRulesText(none, admin, true).find("inventory-slot-size") == std::string::npos);
+		// An ExemptRules entry gets nothing denied, even with a Sections= key. Admin alone does not exempt (below).
+		PlayerFlags exemptAll; exemptAll.exemptRules = true;
+		CHECK(PlayerRulesText(none, exemptAll, true) == "default=allow\n");
+		exemptAll.sections = { "BetterCheats.stack-size" };
+		CHECK(PlayerRulesText(none, exemptAll, true) == "default=allow\n");
+		CHECK(PlayerRulesText(none, exemptAll, true).find("inventory-slot-size") == std::string::npos);
+
+		// Admin: the built-in default rows are "admins only", so a proven admin gets none of them
+		// and the host's own lines decide. Admin exempts from no host rule.
+		PlayerFlags admin; admin.admin = true;
+		CHECK(NeedsOwnRules(admin));
+		CHECK(PlayerRulesText(none, admin, true) == "default=allow\n");   // an explicit own set, never skipped: an admin with no host denies gets default=allow
+		const Model hostAllow = ParseText({ "[Rules]", "BetterCheats.*=allow" }, dw);
+		const Model hostDeny = ParseText({ "[Rules]", "BetterCheats.*=deny" }, dw);
+		const Model hostExactDeny = ParseText({ "[Rules]", "BetterCheats.stack-size=deny" }, dw);
+		const Model adminsRow = ParseText({ "[Rules]", "BetterCheats.stack-size=admins" }, dw);
+		const Model adminsStar = ParseText({ "[Rules]", "BetterCheats.*=admins" }, dw);
+		const auto count = [](const std::string& text, const std::string& line)
+		{
+			size_t n = 0;
+			for (size_t at = text.find(line); at != std::string::npos; at = text.find(line, at + 1)) ++n;
+			return n;
+		};
+
+		// Precedence proof 1: a host line such as the test server's BetterCheats.*=allow.
+		// Non-admin (unchanged from rc.2): the exact default row beats Plugin.*=allow, so stack-size is denied.
+		CHECK(has(PlayerRulesText(hostAllow, plain, true), "BetterCheats.*=allow") && has(PlayerRulesText(hostAllow, plain, true), "BetterCheats.stack-size=deny"));
+		CHECK(PlayerRulesText(hostAllow, plain, true) == RulesText(hostAllow, true));
+		// Admin: no default row, so the host's allow stands.
+		CHECK(PlayerRulesText(hostAllow, admin, true) == "default=allow\nBetterCheats.*=allow\n");
+		// Precedence proof 2: a host plain deny. Non-admin: denied (unchanged). Admin: the plain deny applies, admin does not override it.
+		CHECK(has(PlayerRulesText(hostDeny, plain, true), "BetterCheats.*=deny") && has(PlayerRulesText(hostDeny, plain, true), "BetterCheats.stack-size=deny"));
+		CHECK(PlayerRulesText(hostDeny, admin, true) == "default=allow\nBetterCheats.*=deny\n");
+		CHECK(PlayerRulesText(hostExactDeny, admin, true) == "default=allow\nBetterCheats.stack-size=deny\n");
+		// An exact allow from the host works for both.
+		CHECK(PlayerRulesText(allow1, admin, true) == "default=allow\nBetterCheats.stack-size=allow\n");
+		CHECK(has(PlayerRulesText(allow1, plain, true), "BetterCheats.stack-size=allow") && !has(PlayerRulesText(allow1, plain, true), "BetterCheats.stack-size=deny"));
+
+		// An explicit admins-only row: deny for everyone else (once, no duplicate), allow for a proven admin.
+		CHECK(count(PlayerRulesText(adminsRow, plain, true), "BetterCheats.stack-size=") == 1 && has(PlayerRulesText(adminsRow, plain, true), "BetterCheats.stack-size=deny"));
+		CHECK(PlayerRulesText(adminsRow, plain, false) == "default=allow\nBetterCheats.stack-size=deny\n");
+		CHECK(PlayerRulesText(adminsRow, admin, true) == "default=allow\nBetterCheats.stack-size=allow\n");
+		CHECK(PlayerRulesText(adminsStar, admin, true) == "default=allow\nBetterCheats.*=allow\n");
+		CHECK(has(PlayerRulesText(adminsStar, plain, true), "BetterCheats.*=deny"));
+		// A proof-less admin claim is a plain player: FlagsFor drops the flag.
+		CHECK(PlayerRulesText(adminsRow, FlagsFor(true, false, {}, false), true) == RulesText(adminsRow, true));
+		CHECK(PlayerRulesText(adminsRow, FlagsFor(true, false, {}, true), true) == "default=allow\nBetterCheats.stack-size=allow\n");
+		// A proven admin with ExemptRules still gets everything open.
+		PlayerFlags both2; both2.admin = true; both2.exemptRules = true;
+		CHECK(PlayerRulesText(hostDeny, both2, true) == "default=allow\n");
+
+		// BetterDrone rows: the five cheat-like drone features are admins only; wave-shelter is a fix, not a cheat, and has no row.
+		for (const char* id : { "mining-laser", "map-reveal", "drone-limits", "always-allow", "drone-interact" })
+			CHECK(IsDefaultRow("BetterDrone", id) && IsDefaultRow("betterdrone", id));
+		CHECK(!IsDefaultRow("BetterDrone", "wave-shelter") && !IsDefaultRow("BetterDrone", "sprint-key"));
+		CHECK(has(PlayerRulesText(none, plain, true), "BetterDrone.mining-laser=deny"));            // a non-admin is denied
+		CHECK(PlayerRulesText(none, admin, true).find("BetterDrone") == std::string::npos);        // a proven admin gets no deny: allowed
+		CHECK(PlayerRulesText(none, FlagsFor(true, false, {}, false), true).find("BetterDrone.mining-laser=deny") != std::string::npos);   // an admin claim without proof is denied
 
 		// A player's Sections= grant: Plugin.* leaves the default denied, the exact key opens it.
 		PlayerFlags wide; wide.sections = { "BetterCheats.*" };
@@ -1754,6 +1827,49 @@ int main()
 		PlayerFlags both; both.sections = { "BetterCheats.*", "BetterCheats.stack-size" };
 		const std::string bothText = PlayerRulesText(star, both, true);
 		CHECK(has(bothText, "BetterCheats.stack-size=allow") && !has(bothText, "BetterCheats.stack-size=deny"));
+	}
+
+	// The "admins" rule value: file round trip, merge on a duplicate, the plain-deny view for the loader,
+	// and an old file (no admins value) loads unchanged.
+	{
+		std::vector<std::string> aw;
+		Model am = ParseText({ "[Rules]", "BetterCheats.stack-size=Admins", "Other.x=deny", "P.f=allow" }, aw);
+		CHECK(aw.empty() && am.rules.size() == 3 && am.rules[0].adminsOnly && am.rules[0].deny && !am.rules[1].adminsOnly && !am.rules[2].deny);
+		CHECK(RuleLines(am)[0] == "BetterCheats.stack-size=admins" && RuleLines(am)[1] == "Other.x=deny" && RuleLines(am)[2] == "P.f=allow");
+		CHECK(RulesText(am, false) == "default=allow\nBetterCheats.stack-size=deny\nOther.x=deny\nP.f=allow\n");
+		// The file text re-reads to the same model.
+		std::vector<std::string> file = { "[Rules]" };
+		for (auto& l : RuleLines(am)) file.push_back(l);
+		aw.clear();
+		Model back = ParseText(file, aw);
+		CHECK(aw.empty() && RuleLines(back) == RuleLines(am));
+		// A duplicate: deny beats admins, admins beats allow, in either order.
+		aw.clear();
+		CHECK(ParseText({ "[Rules]", "A.b=admins", "A.b=deny" }, aw).rules[0].adminsOnly == false);
+		CHECK(ParseText({ "[Rules]", "A.b=deny", "A.b=admins" }, aw).rules[0].adminsOnly == false);
+		CHECK(ParseText({ "[Rules]", "A.b=allow", "A.b=admins" }, aw).rules[0].adminsOnly && ParseText({ "[Rules]", "A.b=admins", "A.b=allow" }, aw).rules[0].adminsOnly);
+		CHECK(ParseText({ "[Rules]", "A.b=allow", "A.b=admins" }, aw).rules[0].deny);
+		// An unknown value is still refused, with the new wording.
+		aw.clear();
+		Model bad = ParseText({ "[Rules]", "A.b=sometimes" }, aw);
+		CHECK(bad.rules.empty() && aw.size() == 1);
+		// Old file: only allow and deny. It loads the same as before.
+		aw.clear();
+		Model old = ParseText({ "[Rules]", "A.b=deny", "C.d=allow" }, aw);
+		CHECK(aw.empty() && old.rules.size() == 2 && !old.rules[0].adminsOnly && old.rules[0].deny && !old.rules[1].adminsOnly);
+		// Setters: admins, then allow, then deny, then back.
+		std::string err;
+		CHECK(SetRuleAdminsOnly(old, "A.b", err) && old.rules[0].adminsOnly && old.rules[0].deny);
+		CHECK(SetRule(old, "A.b", false, err) && !old.rules[0].adminsOnly && !old.rules[0].deny);
+		CHECK(SetRuleAdminsOnly(old, "A.b", err) && SetRule(old, "A.b", true, err) && !old.rules[0].adminsOnly && old.rules[0].deny);
+		CHECK(SetRuleAdminsOnly(old, "New.k", err) && old.rules.size() == 3 && old.rules[2].adminsOnly);
+		CHECK(!SetRuleAdminsOnly(old, "nodot", err) && !err.empty() && old.rules.size() == 3);
+		// The ServerUtility mod's own features are never ruled: no line for them reaches a player, with or without admin.
+		aw.clear();
+		Model own = ParseText({ "[Rules]", "ServerUtility.admin-window=deny", "serverutility.*=admins", "P.f=deny" }, aw);
+		PlayerFlags adm2; adm2.admin = true;
+		CHECK(RulesText(own, true).find("erverUtility") == std::string::npos && RulesText(own, true).find("P.f=deny\n") != std::string::npos);
+		CHECK(PlayerRulesText(own, adm2, true).find("erverUtility") == std::string::npos);
 	}
 
 	// Records are kept per connection: two connections that read the same ID, one

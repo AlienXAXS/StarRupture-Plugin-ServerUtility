@@ -45,6 +45,8 @@ int main()
 	  Message o = RoundTrip(m); CHECK(o.mins.size() == 2 && o.mins[0].plugin.empty() && o.mins[1].version == "wire"); }
 	{ Message m; m.tag = Tag::SnapDefault; m.keys = { "BetterCheats.god", "Best Builder.no-build-cost" };
 	  Message o = RoundTrip(m); CHECK(o.keys.size() == 2 && o.keys[0] == "BetterCheats.god" && o.keys[1] == "Best Builder.no-build-cost"); }
+	{ Message m; m.tag = Tag::SnapAdmins; m.keys = { "BetterCheats.god", "BetterCheats.*" };
+	  Message o = RoundTrip(m); CHECK(o.keys.size() == 2 && o.keys[0] == "BetterCheats.god" && o.keys[1] == "BetterCheats.*"); }
 	{ Message m; m.tag = Tag::SnapMod; m.mod.plugin = "BetterCheats"; m.mod.version = "1.4.0"; m.mod.wire = "3";
 	  m.mod.features = { { "movement", "Movement" }, { "god", "" } }; m.cont = true;
 	  Message o = RoundTrip(m);
@@ -242,6 +244,45 @@ int main()
 		CHECK(Decode(std::string("snap-future") + kUS + "1" + kUS + "P.f1", o) == Decoded::Garbage);
 		CHECK(Decode(std::string("snap-default") + kUS + "1", o) == Decoded::Garbage);
 		CHECK(Decode(std::string("snap-default") + kUS + "1" + kUS + "", o) == Decoded::Garbage);
+	}
+
+	// snap-admins: an admins-only rule goes out as a plain deny in snap-rule (what a client that does
+	// not know the value shows) and its key goes in snap-admins. The record is always sent, even with
+	// no keys, and sits after snap-default and before snap-mod. A decoder without the tag drops it.
+	{
+		Snapshot s; s.revision = 1; s.sections = "all";
+		s.rules = { { "BetterCheats.god", "admins" }, { "BetterCheats.movement", "deny" }, { "P.f", "allow" } };
+		s.defaults = { "P.f1" };
+		ModInfo mod; mod.plugin = "P"; mod.version = "1"; mod.wire = "1"; s.mods.push_back(mod);
+		for (int withAdmins = 0; withAdmins < 2; ++withAdmins)
+		{
+			if (!withAdmins) s.rules[0].value = "deny";
+			size_t defAt = 0, admAt = 0, modAt = 0, admKeys = 0, admRecords = 0, i = 0;
+			bool godDeny = false, wrongValue = false;
+			for (const std::string& e : EncodeSnapshot(s))
+			{
+				Message o; CHECK(Decode(e, o) == Decoded::Ok);
+				if (o.tag == Tag::SnapDefault) defAt = i;
+				if (o.tag == Tag::SnapAdmins) { admAt = i; ++admRecords; admKeys += o.keys.size(); if (!o.keys.empty()) CHECK(o.keys[0] == "BetterCheats.god"); }
+				if (o.tag == Tag::SnapMod) modAt = i;
+				if (o.tag == Tag::SnapRule)
+					for (const Rule& r : o.rules)
+					{
+						if (r.key == "BetterCheats.god") godDeny = r.value == "deny";
+						if (r.value == "admins") wrongValue = true;
+					}
+				++i;
+			}
+			CHECK(godDeny && !wrongValue);
+			CHECK(admRecords == 1 && defAt < admAt && admAt < modAt);
+			CHECK(admKeys == (withAdmins ? 1u : 0u));
+			s.rules[0].value = "admins";
+		}
+		Message o;
+		CHECK(Decode(std::string("snap-admins") + kUS + "1", o) == Decoded::Ok && o.keys.empty());   // empty is valid
+		CHECK(Decode(std::string("snap-admins") + kUS + "1" + kUS + "", o) == Decoded::Garbage);
+		// A decoder from before rc.3 knows no snap-admins: the unknown tag decodes as Garbage and the client drops it.
+		CHECK(Decode(std::string("snap-future") + kUS + "1" + kUS + "P.f1", o) == Decoded::Garbage);
 	}
 
 	std::printf("%d checks, %d failed\n", g_checks, g_failed);
