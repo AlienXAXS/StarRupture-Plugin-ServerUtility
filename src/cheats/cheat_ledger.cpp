@@ -1,0 +1,227 @@
+#include "cheat_ledger.h"
+
+#include <cstdio>
+
+namespace CheatLedger
+{
+	std::string ToText(const Value& v)
+	{
+		char buf[64];
+		switch (v.index())
+		{
+		case 1: return std::to_string(std::get<int32_t>(v));
+		case 2: std::snprintf(buf, sizeof(buf), "%g", static_cast<double>(std::get<float>(v))); return buf;
+		case 3: return std::get<bool>(v) ? "true" : "false";
+		case 4:
+		{
+			std::string s = "[";
+			for (float f : std::get<std::vector<float>>(v))
+			{
+				std::snprintf(buf, sizeof(buf), "%g", static_cast<double>(f));
+				s += (s.size() > 1 ? "," : "") + std::string(buf);
+			}
+			return s + "]";
+		}
+		default: return "none";
+		}
+	}
+
+	std::string Ledger::KeyOf(Kind kind, const std::string& playerId, const std::string& feature, const std::string& slot)
+	{
+		// An Override is server-wide: one entry per feature and slot, whoever set it.
+		return (kind == Kind::Toggle ? "p|" + playerId : std::string("s|")) + "|" + feature + "|" + slot;
+	}
+
+	void Ledger::Log(const std::string& line) const
+	{
+		if (m_env.log)
+			m_env.log(line);
+	}
+
+	std::string Ledger::Describe(const Entry& e) const
+	{
+		return "'" + e.playerName + "' (" + e.playerId + ") " + e.feature + "/" + e.slot;
+	}
+
+	const Entry* Ledger::Find(Kind kind, const std::string& playerId, const std::string& feature, const std::string& slot) const
+	{
+		const auto it = m_entries.find(KeyOf(kind, playerId, feature, slot));
+		return it == m_entries.end() ? nullptr : &it->second;
+	}
+
+	Ledger::Map::iterator Ledger::Drop(Map::iterator it, const char* why)
+	{
+		Log("drop " + Describe(it->second) + ": " + why + ", nothing written");
+		return m_entries.erase(it);
+	}
+
+	Ledger::Map::iterator Ledger::Restore(Map::iterator it, const char* why)
+	{
+		const Entry& e = it->second;
+		if (e.target.Valid() && !m_env.alive(e.target))
+			return Drop(it, "its target is gone");
+
+		const Value live = m_env.read(e);
+		if (live == e.applied)
+		{
+			if (m_env.write(e, e.prior))
+				Log("restore " + Describe(e) + ": " + ToText(e.applied) + " -> " + ToText(e.prior) + " (" + why + ")");
+			else
+				Log("restore " + Describe(e) + ": could not write " + ToText(e.prior) + ", left as is (" + why + ")");
+		}
+		else
+		{
+			Log("restore " + Describe(e) + ": changed by the game or someone else (now " + ToText(live) + ", SU wrote " +
+				ToText(e.applied) + "), left as is (" + why + ")");
+		}
+		return m_entries.erase(it);
+	}
+
+	bool Ledger::Apply(const Request& req)
+	{
+		const std::string key = KeyOf(req.kind, req.playerId, req.feature, req.slot);
+		auto it = m_entries.find(key);
+
+		// A new target (a respawned pawn) is a new capture: the old one belonged to an object that is gone.
+		if (it != m_entries.end() && !(it->second.target == req.target))
+		{
+			Drop(it, "the target changed");
+			it = m_entries.end();
+		}
+
+		Entry e;
+		if (it == m_entries.end())
+		{
+			e.playerId = req.playerId; e.playerName = req.playerName; e.conn = req.conn;
+			e.feature = req.feature; e.slot = req.slot; e.kind = req.kind; e.pin = req.pin;
+			e.target = req.target; e.reqId = req.reqId;
+			e.prior = m_env.read(e);
+			if (std::holds_alternative<std::monostate>(e.prior))
+			{
+				Log("refuse " + Describe(e) + ": the current value cannot be read");
+				return false;
+			}
+		}
+		else
+		{
+			e = it->second;
+		}
+
+		if (!m_env.write(e, req.value))
+		{
+			Log("refuse " + Describe(e) + ": the value could not be written");
+			return false;
+		}
+
+		const bool isNew = it == m_entries.end();
+		const bool changed = isNew || !(e.applied == req.value) || e.playerId != req.playerId;
+		// The last admin to set an Override takes it over; the first prior stays.
+		e.playerId = req.playerId; e.playerName = req.playerName; e.conn = req.conn;
+		e.pin = req.pin; e.reqId = req.reqId;
+		e.applied = req.value;
+		e.appliedAtMs = m_env.nowMs ? m_env.nowMs() : 0;
+		if (isNew)
+			e.seq = ++m_seq;
+
+		if (changed)
+			Log(std::string(isNew ? "apply " : "reapply ") + Describe(e) + ": " + ToText(e.prior) + " -> " + ToText(e.applied) +
+				" req " + std::to_string(e.reqId));
+
+		m_entries[key] = e;
+		return true;
+	}
+
+	bool Ledger::Release(Kind kind, const std::string& playerId, const std::string& feature, const std::string& slot)
+	{
+		const auto it = m_entries.find(KeyOf(kind, playerId, feature, slot));
+		if (it == m_entries.end())
+			return false;
+		Restore(it, "released");
+		return true;
+	}
+
+	void Ledger::Grant(const std::string& playerId, const std::string& playerName, const std::string& feature,
+	                   const std::string& slot, const std::string& what, uint32_t reqId)
+	{
+		Log("grant '" + playerName + "' (" + playerId + ") " + feature + "/" + slot + ": " + what + " req " + std::to_string(reqId));
+	}
+
+	void Ledger::RestorePlayer(const std::string& playerId)
+	{
+		for (auto it = m_entries.begin(); it != m_entries.end();)
+			it = (it->second.kind == Kind::Toggle && it->second.playerId == playerId) ? Restore(it, "player left") : std::next(it);
+	}
+
+	void Ledger::SweepRejoined(const std::string& playerId)
+	{
+		for (auto it = m_entries.begin(); it != m_entries.end();)
+		{
+			const Entry& e = it->second;
+			it = (e.kind == Kind::Toggle && e.playerId == playerId && !m_env.alive(e.conn))
+				? Restore(it, "player rejoined, the earlier leave was missed") : std::next(it);
+		}
+	}
+
+	void Ledger::Reconcile()
+	{
+		for (auto it = m_entries.begin(); it != m_entries.end();)
+			it = m_env.allowed(it->second) == Allowance::Denied ? Restore(it, "feature denied") : std::next(it);
+	}
+
+	void Ledger::ReconcilePlayer(const std::string& playerId)
+	{
+		for (auto it = m_entries.begin(); it != m_entries.end();)
+			it = (it->second.playerId == playerId && m_env.allowed(it->second) == Allowance::Denied)
+				? Restore(it, "feature denied") : std::next(it);
+	}
+
+	void Ledger::OnWorldEnd()
+	{
+		for (auto it = m_entries.begin(); it != m_entries.end();)
+		{
+			const Entry& e = it->second;
+			if (e.kind == Kind::Toggle)
+				it = Drop(it, "the world ended");
+			else if (e.target.Valid() && !m_env.alive(e.target))
+				it = Drop(it, "the world ended and its target is gone");
+			else
+				++it;
+		}
+	}
+
+	void Ledger::RestoreAll()
+	{
+		if (!m_env.isGameThread())
+		{
+			if (!m_entries.empty())
+				Log("stop: not on the game thread, " + std::to_string(m_entries.size()) + " entries left as is");
+			return;
+		}
+		for (auto it = m_entries.begin(); it != m_entries.end();)
+			it = Restore(it, "server stop");
+	}
+
+	void Ledger::Tick()
+	{
+		if (m_reconcileDue.exchange(false))
+			Reconcile();
+
+		for (auto it = m_entries.begin(); it != m_entries.end();)
+		{
+			const Entry& e = it->second;
+			if (!e.pin)
+			{
+				++it;
+				continue;
+			}
+			if (e.target.Valid() && !m_env.alive(e.target))
+			{
+				it = Drop(it, "its target is gone");
+				continue;
+			}
+			if (!(m_env.read(e) == e.applied))
+				m_env.write(e, e.applied);
+			++it;
+		}
+	}
+}
