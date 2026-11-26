@@ -14,6 +14,7 @@ namespace KnownFeatures
 {
 	// Where a row came from. "published" is for a later signed catalog.
 	extern const char* const kSourceReported;
+	extern const char* const kSourceDeclared;   // pushed by the admin client from the loader's declared list
 
 	struct Entry
 	{

@@ -16,6 +16,7 @@
 namespace KnownFeatures
 {
 	const char* const kSourceReported = "reported";
+	const char* const kSourceDeclared = "declared";
 
 	namespace
 	{
@@ -139,6 +140,7 @@ namespace KnownFeatures
 			Report r;
 			r.plugin = f[0]; r.version = f[1]; r.id = f[2]; r.off = f[3] == "off"; r.title = f[4];
 			r.recordOff = false;   // the push carries no game build
+			r.source = kSourceDeclared;
 			Fit(r);
 			out.push_back(std::move(r));
 		}
@@ -199,6 +201,11 @@ namespace KnownFeatures
 
 		Entry& cur = it->second;
 		bool changed = false;
+		if (cur.source == kSourceReported && e.source != kSourceReported)
+		{
+			cur.source = e.source;   // a loader declared what a player had only reported
+			changed = true;
+		}
 		const int cmp = CompareVersions(e.version, cur.version);
 		if (cmp > 0)
 		{
