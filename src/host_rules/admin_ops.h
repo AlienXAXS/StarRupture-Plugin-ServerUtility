@@ -16,7 +16,7 @@
 // An op is {caller, name, args}. A batch of ops is applied as one Commit (one
 // save, one push to the players). Ops:
 //
-//   rule.set <key> allow|deny|unset      policy.default allow|deny
+//   rule.set <key> allow|admins|deny|unset     policy.default allow|deny
 //   policy.message <text|off>            min.loader <version>|off
 //   min.mod <plugin> <version>|wire|off  player.set <id> <flags>
 //   player.remove <id>                   player.kick <id> <reason>

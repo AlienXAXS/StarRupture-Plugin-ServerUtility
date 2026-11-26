@@ -140,7 +140,7 @@ namespace InGameAdmin
 			snap.defaultPolicy = model.defaultDeny ? "deny" : "allow";
 			snap.message = model.message;
 			for (const RulesModel::Rule& r : model.rules)
-				snap.rules.push_back({ r.plugin + "." + r.id, r.deny ? "deny" : "allow" });
+				snap.rules.push_back({ r.plugin + "." + r.id, r.adminsOnly ? "admins" : r.deny ? "deny" : "allow" });
 			for (const RulesModel::DefaultRow& d : RulesModel::DefaultRows())
 				snap.defaults.push_back(std::string(d.plugin) + "." + d.id);
 			if (!model.minLoaderVersion.empty())

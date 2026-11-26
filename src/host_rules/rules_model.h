@@ -9,7 +9,9 @@
 // Pure code (no file, engine or loader access) so it can be tested alone.
 namespace RulesModel
 {
-	struct Rule   { std::string plugin; std::string id; bool deny = false; };   // id "*" = the whole mod
+	// id "*" = the whole mod. adminsOnly (file value "admins") is a deny that a proven admin does not
+	// get, so deny is true whenever adminsOnly is: anything that reads only deny sees the plain deny.
+	struct Rule   { std::string plugin; std::string id; bool deny = false; bool adminsOnly = false; };
 	struct ModMin { std::string plugin; std::string version; };
 
 	struct Model
@@ -35,9 +37,9 @@ namespace RulesModel
 
 	// The built-in default rows: sections a server denies without being told to.
 	// Each is an exact Plugin.section deny row in the text sent to players, so it
-	// beats Plugin.* and [Policy] Default; only an exact [Rules] line (allow or
-	// deny), or a player's own exact Sections= key, takes its place. Admins and
-	// ExemptRules players get none. Mod names match without case, section ids exactly (as the loader does).
+	// beats Plugin.* and [Policy] Default for everyone but a proven admin (who gets none, so the
+	// host's other rules decide); only an exact [Rules] line (allow, deny or admins), or a
+	// player's own exact Sections= key, takes its place. ExemptRules players get none. Mod names match without case, section ids exactly (as the loader does).
 	// One list, in rules_model.cpp: add a row there.
 	struct DefaultRow { const char* plugin; const char* id; };
 	const std::vector<DefaultRow>& DefaultRows();
@@ -53,12 +55,13 @@ namespace RulesModel
 	// What one player's entry changes in the rules that player is sent.
 	struct PlayerFlags
 	{
-		bool exemptRules = false;               // Admin counts as this
+		bool exemptRules = false;               // the ExemptRules flag (Admin does not imply it)
+		bool admin       = false;               // a proven admin: "admins only" rows are allows for them
 		std::vector<std::string> sections;      // Plugin.feature or Plugin.* keys allowed for this player
 	};
 	// The flags a connection gets from its list entry. An ID alone is not proof, so a connection
 	// that has not proved the pairing secret as that ID gets none: the default rules apply.
-	PlayerFlags FlagsFor(bool exemptRules, const std::vector<std::string>& sections, bool proven);
+	PlayerFlags FlagsFor(bool admin, bool exemptRules, const std::vector<std::string>& sections, bool proven);
 	// True when the player needs a rules set of their own (a flag changes the result).
 	bool NeedsOwnRules(const PlayerFlags& f);
 	// The rules text for one player: the global rules with the flags applied.
@@ -88,6 +91,8 @@ namespace RulesModel
 
 	// Changes. Each returns false with an error and leaves the model as it was.
 	bool SetRule(Model& m, const std::string& key, bool deny, std::string& error);
+	// The same with the third value: "admins only" (deny for everyone but a proven admin).
+	bool SetRuleAdminsOnly(Model& m, const std::string& key, std::string& error);
 	bool UnsetRule(Model& m, const std::string& key, std::string& error);
 	bool SetDefault(Model& m, bool deny);
 	bool SetMessage(Model& m, const std::string& text, std::string& error);

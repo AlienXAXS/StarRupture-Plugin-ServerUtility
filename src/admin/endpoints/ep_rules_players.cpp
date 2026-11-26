@@ -17,8 +17,8 @@ namespace
 		json << "{\"id\":\"" << AdminJson::Escape(e.id) << "\","
 		     << "\"label\":\"" << AdminJson::Escape(e.label) << "\","
 		     << "\"admin\":" << (e.admin ? "true" : "false") << ","
-		     << "\"exempt_version\":" << (e.ExemptsVersion() ? "true" : "false") << ","
-		     << "\"exempt_rules\":" << (e.ExemptsRules() ? "true" : "false") << ","
+		     << "\"exempt_version\":" << (e.exemptVersion ? "true" : "false") << ","
+		     << "\"exempt_rules\":" << (e.exemptRules ? "true" : "false") << ","
 		     << "\"sections\":[";
 		for (size_t i = 0; i < e.sections.size(); ++i)
 			json << (i ? "," : "") << "\"" << AdminJson::Escape(e.sections[i]) << "\"";

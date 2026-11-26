@@ -95,7 +95,7 @@ namespace AdminView
 	static void SetRule(Snapshot& s, const std::string& key, const std::string& value)
 	{
 		auto it = std::find_if(s.rules.begin(), s.rules.end(), [&](const Rule& r) { return r.key == key; });
-		if (value == "allow" || value == "deny")
+		if (value == "allow" || value == "deny" || value == "admins")
 		{
 			if (it != s.rules.end()) it->value = value;
 			else s.rules.push_back({ key, value });

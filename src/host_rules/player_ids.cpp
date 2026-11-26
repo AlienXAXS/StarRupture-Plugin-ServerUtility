@@ -129,7 +129,7 @@ namespace PlayerIds
 			return false;
 
 		PlayerList::Entry entry;
-		return PlayerList::Find(id, entry) && entry.ExemptsVersion();
+		return PlayerList::Find(id, entry) && entry.exemptVersion;
 #else
 		(void)pc;
 		return false;

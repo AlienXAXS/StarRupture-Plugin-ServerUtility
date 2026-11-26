@@ -13,7 +13,7 @@ namespace Removal
 
 	// Hook the loader's below-minimum callback: a player below a version minimum
 	// the host set is sent to the main menu with the loader's plain reason,
-	// unless the player's list entry exempts them (ExemptVersion, Admin). With a
+	// unless the player's list entry exempts them (ExemptVersion). With a
 	// loader that does not have host rules, logs one line and leaves it off.
 	void Init();
 	// Unhook it. From the engine shutdown.

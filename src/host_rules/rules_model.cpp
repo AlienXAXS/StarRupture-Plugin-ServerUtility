@@ -8,7 +8,7 @@ namespace RulesModel
 {
 	namespace
 	{
-		// Every row is a deny. Mod names are the PluginInfo names, section ids the
+		// Every row is an admins-only deny (denied for everyone but a proven admin). Mod names are the PluginInfo names, section ids the
 		// ones each mod declares. Information-only features have no row.
 		constexpr DefaultRow kDefaultRows[] = {
 			{ "BetterCheats", "stack-size" },
@@ -37,6 +37,11 @@ namespace RulesModel
 			{ "Best Builder", "unlock-all-buildings" },
 			{ "CameraControls", "vitals" },
 			{ "WaveOptimiser", "heat-tools" },
+			{ "BetterDrone", "mining-laser" },
+			{ "BetterDrone", "map-reveal" },
+			{ "BetterDrone", "drone-limits" },
+			{ "BetterDrone", "always-allow" },
+			{ "BetterDrone", "drone-interact" },
 		};
 
 		// The loader takes at most 2048 records, the header counts as one, and every default row is one.
@@ -83,6 +88,19 @@ namespace RulesModel
 			if (v == "deny")  { deny = true;  return true; }
 			return false;
 		}
+
+		// A [Rules] value: allow, deny or admins.
+		bool ParseRuleValue(const std::string& value, bool& deny, bool& adminsOnly)
+		{
+			adminsOnly = Lower(value) == "admins";
+			if (adminsOnly) { deny = true; return true; }
+			return ParseDeny(value, deny);
+		}
+
+		const char* RuleValueText(const Rule& r) { return r.adminsOnly ? "admins" : r.deny ? "deny" : "allow"; }
+
+		// The ServerUtility mod's own client and admin features are never ruled: no row names the mod.
+		bool IsOwnMod(const std::string& plugin) { return SamePlugin(plugin, "ServerUtility"); }
 
 		bool Split(const std::string& line, std::string& key, std::string& value)
 		{
@@ -242,15 +260,18 @@ namespace RulesModel
 			else if (section == Rules)
 			{
 				Rule r;
-				bool deny = false;
+				bool deny = false, adminsOnly = false;
 				if (!ParseKey(key, r.plugin, r.id, error)) { reject(error); continue; }
-				if (!ParseDeny(value, deny)) { reject("the value is allow or deny"); continue; }
+				if (!ParseRuleValue(value, deny, adminsOnly)) { reject("the value is allow, deny or admins"); continue; }
 				r.deny = deny;
+				r.adminsOnly = adminsOnly;
 				auto it = FindRule(out, r.plugin, r.id);
 				if (it != out.rules.end())
 				{
-					warnings.push_back("[Rules] '" + key + "' is listed twice: deny wins");
-					it->deny = it->deny || deny;
+					warnings.push_back("[Rules] '" + key + "' is listed twice: the stricter value wins");
+					// deny beats admins, admins beats allow.
+					if (deny && !adminsOnly) { it->deny = true; it->adminsOnly = false; }
+					else if (adminsOnly && !it->deny) { it->deny = true; it->adminsOnly = true; }
 				}
 				else out.rules.push_back(r);
 			}
@@ -277,7 +298,7 @@ namespace RulesModel
 	std::vector<std::string> RuleLines(const Model& m)
 	{
 		std::vector<std::string> out;
-		for (const Rule& r : m.rules) out.push_back(r.plugin + "." + r.id + "=" + (r.deny ? "deny" : "allow"));
+		for (const Rule& r : m.rules) out.push_back(r.plugin + "." + r.id + "=" + RuleValueText(r));
 		out.insert(out.end(), m.rulesKept.begin(), m.rulesKept.end());
 		return out;
 	}
@@ -294,18 +315,22 @@ namespace RulesModel
 	{
 		std::string t = std::string("default=") + (m.defaultDeny ? "deny" : "allow") + "\n";
 		if (!m.message.empty()) t += "message=" + m.message + "\n";
-		for (const Rule& r : m.rules) t += r.plugin + "." + r.id + "=" + (r.deny ? "deny" : "allow") + "\n";
+		// The loader gets plain allow or deny: "admins only" is a deny here, and a proven admin's
+		// own text (PlayerRulesText) turns it into an allow.
+		for (const Rule& r : m.rules)
+			if (!IsOwnMod(r.plugin)) t += r.plugin + "." + r.id + "=" + (r.deny ? "deny" : "allow") + "\n";
 		if (remote)
 			for (const DefaultRow& d : ActiveDefaultRows(m))
 				t += std::string(d.plugin) + "." + d.id + "=deny\n";
 		return t;
 	}
 
-	PlayerFlags FlagsFor(bool exemptRules, const std::vector<std::string>& sections, bool proven)
+	PlayerFlags FlagsFor(bool admin, bool exemptRules, const std::vector<std::string>& sections, bool proven)
 	{
 		PlayerFlags f;
 		if (proven)
 		{
+			f.admin = admin;
 			f.exemptRules = exemptRules;
 			f.sections = sections;
 		}
@@ -314,7 +339,7 @@ namespace RulesModel
 
 	bool NeedsOwnRules(const PlayerFlags& f)
 	{
-		return f.exemptRules || !f.sections.empty();
+		return f.admin || f.exemptRules || !f.sections.empty();
 	}
 
 	std::string PlayerRulesText(const Model& m, const PlayerFlags& f, bool remote)
@@ -331,6 +356,11 @@ namespace RulesModel
 		}
 
 		std::vector<Rule> rules = m.rules;
+		// A proven admin: "admins only" rows are allows. The built-in default rows are left out
+		// (RulesText below adds none for an admin), so the host's own rules decide for them.
+		if (f.admin)
+			for (Rule& r : rules)
+				if (r.adminsOnly) { r.deny = false; r.adminsOnly = false; }
 		std::vector<Rule> own;   // the player's keys, checked and split
 		for (const std::string& key : f.sections)
 		{
@@ -362,7 +392,7 @@ namespace RulesModel
 
 		Model own2 = m;
 		own2.rules = rules;
-		return RulesText(own2, remote);
+		return RulesText(own2, remote && !f.admin);
 	}
 
 	std::string VersionMinimumsText(const Model& m)
@@ -373,16 +403,30 @@ namespace RulesModel
 		return t;
 	}
 
+	namespace
+	{
+		bool SetRuleValue(Model& m, const std::string& key, bool deny, bool adminsOnly, std::string& error)
+		{
+			Rule r;
+			if (!ParseKey(key, r.plugin, r.id, error)) return false;
+			r.deny = deny;
+			r.adminsOnly = adminsOnly;
+			auto it = FindRule(m, r.plugin, r.id);
+			if (it != m.rules.end()) { it->deny = deny; it->adminsOnly = adminsOnly; return true; }
+			if (m.rules.size() >= kMaxRules) { error = "too many rules (most " + std::to_string(kMaxRules) + ")"; return false; }
+			m.rules.push_back(r);
+			return true;
+		}
+	}
+
 	bool SetRule(Model& m, const std::string& key, bool deny, std::string& error)
 	{
-		Rule r;
-		if (!ParseKey(key, r.plugin, r.id, error)) return false;
-		r.deny = deny;
-		auto it = FindRule(m, r.plugin, r.id);
-		if (it != m.rules.end()) { it->deny = deny; return true; }
-		if (m.rules.size() >= kMaxRules) { error = "too many rules (most " + std::to_string(kMaxRules) + ")"; return false; }
-		m.rules.push_back(r);
-		return true;
+		return SetRuleValue(m, key, deny, false, error);
+	}
+
+	bool SetRuleAdminsOnly(Model& m, const std::string& key, std::string& error)
+	{
+		return SetRuleValue(m, key, true, true, error);
 	}
 
 	bool UnsetRule(Model& m, const std::string& key, std::string& error)

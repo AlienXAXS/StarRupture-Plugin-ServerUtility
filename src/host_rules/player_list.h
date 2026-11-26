@@ -10,8 +10,9 @@
 //
 // The ID is the string `player ids` prints. Flags, space separated and not
 // case sensitive: Admin, ExemptVersion, ExemptRules, Sections=<key>;<key>.
-// Admin implies ExemptVersion and ExemptRules. Other sections of the file
-// are left as they are. Thread safe.
+// Admin grants the in-game admin window and the admin commands and nothing else:
+// it exempts from no rule and no version check (ExemptVersion and ExemptRules do).
+// Other sections of the file are left as they are. Thread safe.
 namespace PlayerList
 {
 	struct Entry
@@ -23,8 +24,6 @@ namespace PlayerList
 		bool                     exemptRules   = false;
 		std::vector<std::string> sections;
 
-		bool ExemptsVersion() const { return admin || exemptVersion; }
-		bool ExemptsRules()   const { return admin || exemptRules; }
 		// Flags that give something or loosen a rule: the player must prove the pairing secret first, an ID alone is not proof.
 		bool NeedsProof()     const { return admin || exemptRules || !sections.empty(); }
 	};

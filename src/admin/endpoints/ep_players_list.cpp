@@ -41,8 +41,8 @@ namespace Ep_PlayersList
 				<< "\"id\":\"" << AdminJson::Escape(players[i].id) << "\","
 				<< "\"label\":\"" << AdminJson::Escape(entry.label) << "\","
 				<< "\"admin\":" << (entry.admin ? "true" : "false") << ","
-				<< "\"exempt_version\":" << (entry.ExemptsVersion() ? "true" : "false") << ","
-				<< "\"exempt_rules\":" << (entry.ExemptsRules() ? "true" : "false") << ","
+				<< "\"exempt_version\":" << (entry.exemptVersion ? "true" : "false") << ","
+				<< "\"exempt_rules\":" << (entry.exemptRules ? "true" : "false") << ","
 				<< "\"sections\":[";
 			for (size_t s = 0; s < entry.sections.size(); ++s)
 				json << (s ? "," : "") << "\"" << AdminJson::Escape(entry.sections[s]) << "\"";

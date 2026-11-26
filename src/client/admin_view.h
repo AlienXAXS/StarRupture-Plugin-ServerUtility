@@ -33,7 +33,7 @@ namespace AdminView
 	// change the snapshot (player.kick, catalog.push) and unknown ops are skipped.
 	AdminWire::Snapshot ApplyStaged(const AdminWire::Snapshot& base, const std::vector<AdminWire::Op>& ops);
 
-	// Value of a rule: "allow", "deny" or "" for none. Key "Plugin.feature" or "Plugin.*".
+	// Value of a rule: "allow", "admins", "deny" or "" for none. Key "Plugin.feature" or "Plugin.*".
 	std::string RuleValue(const AdminWire::Snapshot& s, const std::string& key);
 	// True when the server denies key by a built-in default row and no rule names it.
 	// The mod name matches without regard to case, the feature id exactly, as the loader does.

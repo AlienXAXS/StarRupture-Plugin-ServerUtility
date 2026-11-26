@@ -122,7 +122,7 @@ namespace
 		RulesModel::PlayerFlags flags;
 		PlayerList::Entry entry;
 		if (PlayerList::Find(id, entry) && entry.NeedsProof())
-			flags = RulesModel::FlagsFor(entry.ExemptsRules(), entry.sections, InGameAdmin::IsProven(playerController, id));
+			flags = RulesModel::FlagsFor(entry.admin, entry.exemptRules, entry.sections, InGameAdmin::IsProven(playerController, id));
 
 		const bool needsOwn = RulesModel::NeedsOwnRules(flags);
 		std::string text, last;

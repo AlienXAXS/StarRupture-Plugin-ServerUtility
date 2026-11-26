@@ -133,28 +133,33 @@ namespace
 		g_ui.tooManyChanges = !f.client->Replace(op);
 	}
 
-	// A key with no rule reads "Default", or "Deny (default)" when a built-in default row denies it.
-	const char* RuleLabel(const std::string& value, bool defaultDenied = false)
+	// A key with no rule reads "Default", or "Admins only (default)" when a built-in default row
+	// covers it ("Deny (default)" when the server predates "admins only").
+	const char* RuleLabel(const std::string& value, bool defaultDenied = false, bool adminsSupported = true)
 	{
 		if (value == "allow") return "Allow";
+		if (value == "admins") return "Admins only";
 		if (value == "deny") return "Deny";
-		return defaultDenied ? "Deny (default)" : "Default";
+		if (!defaultDenied) return "Default";
+		return adminsSupported ? "Admins only (default)" : "Deny (default)";
 	}
 
-	// Default / Allow / Deny for one rule key.
+	// Default / Allow / Admins only / Deny for one rule key ("Admins only" when the server knows it).
 	void DrawRuleCombo(Frame& f, const std::string& key)
 	{
 		IModLoaderImGui* ui = f.ui;
 		const std::string cur = AdminView::RuleValue(f.eff, key);
 		const bool defaultDenied = AdminView::IsDefaultDenied(f.eff, key);
 		ui->SetNextItemWidth(-FLT_MIN);
-		if (ui->BeginCombo("##rule", RuleLabel(cur, defaultDenied)))
+		const bool adminsSupported = f.eff.adminsOnlySupported;
+		if (ui->BeginCombo("##rule", RuleLabel(cur, defaultDenied, adminsSupported)))
 		{
-			static const char* const values[] = { "unset", "allow", "deny" };
+			static const char* const values[] = { "unset", "allow", "admins", "deny" };
 			for (const char* v : values)
 			{
 				const std::string val = v;
-				const std::string shown = RuleLabel(val == "unset" ? std::string() : val, defaultDenied);
+				if (val == "admins" && !adminsSupported && cur != "admins") continue;
+				const std::string shown = RuleLabel(val == "unset" ? std::string() : val, defaultDenied, adminsSupported);
 				if (ui->Selectable(shown.c_str(), (val == "unset" ? std::string() : val) == cur))
 					Edit(f, MakeOp("rule.set", { key, val }));
 			}

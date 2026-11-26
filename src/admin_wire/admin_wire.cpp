@@ -31,7 +31,7 @@ namespace
 		{ Tag::SnapMin, "snap-min" }, { Tag::SnapMod, "snap-mod" }, { Tag::SnapPlayer, "snap-player" },
 		{ Tag::SnapEnd, "snap-end" }, { Tag::Ops, "ops" }, { Tag::Result, "result" }, { Tag::Changed, "changed" },
 		{ Tag::Challenge, "challenge" }, { Tag::Prove, "prove" }, { Tag::Pair, "pair" },
-		{ Tag::SnapDefault, "snap-default" },
+		{ Tag::SnapDefault, "snap-default" }, { Tag::SnapAdmins, "snap-admins" },
 	};
 
 	const char* NameOf(Tag t)
@@ -171,7 +171,7 @@ bool Encode(const Message& m, std::string& out)
 	case Tag::SnapMin:
 		for (const MinEntry& e : m.mins) { h.push_back(CleanText(e.plugin, kMaxName)); h.push_back(CleanText(e.version, kMaxName)); }
 		break;
-	case Tag::SnapDefault:
+	case Tag::SnapDefault: case Tag::SnapAdmins:
 		for (const std::string& k : m.keys) h.push_back(CleanText(k, kMaxName));
 		break;
 	case Tag::SnapMod:
@@ -231,7 +231,9 @@ std::vector<std::string> EncodeSnapshot(const Snapshot& s)
 	if (Encode(p, enc)) out.push_back(enc);
 
 	std::vector<Fields> items;
-	for (const Rule& r : s.rules) items.push_back({ CleanText(r.key, kMaxName), CleanText(r.value, kMaxName) });
+	// An admins-only rule goes out as a deny, which is what a client that does not know the value
+	// shows; the key also goes in the snap-admins record below.
+	for (const Rule& r : s.rules) items.push_back({ CleanText(r.key, kMaxName), r.value == "admins" ? "deny" : CleanText(r.value, kMaxName) });
 	Pack(out, Head(Tag::SnapRule), -1, items, false);
 
 	items.clear();
@@ -242,6 +244,12 @@ std::vector<std::string> EncodeSnapshot(const Snapshot& s)
 	items.clear();
 	for (const std::string& k : s.defaults) items.push_back({ CleanText(k, kMaxName) });
 	Pack(out, Head(Tag::SnapDefault), -1, items, false);
+
+	// Always sent, even with no keys: its arrival tells the client this server knows "admins only".
+	// Older clients drop it as an unknown tag.
+	items.clear();
+	for (const Rule& r : s.rules) if (r.value == "admins") items.push_back({ CleanText(r.key, kMaxName) });
+	Pack(out, Head(Tag::SnapAdmins), -1, items, true);
 
 	for (const ModInfo& m : s.mods)
 	{
@@ -322,6 +330,14 @@ Decoded Decode(const std::string& data, Message& out)
 		break;
 	case Tag::SnapDefault:
 		ok = n >= 3;
+		for (size_t i = 2; ok && i < n; ++i)
+		{
+			if (f[i].empty()) ok = false;
+			else m.keys.push_back(f[i]);
+		}
+		break;
+	case Tag::SnapAdmins:
+		ok = n >= 2;
 		for (size_t i = 2; ok && i < n; ++i)
 		{
 			if (f[i].empty()) ok = false;

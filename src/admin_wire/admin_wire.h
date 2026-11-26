@@ -38,7 +38,8 @@ namespace AdminWire
 		SnapBegin, SnapPolicy, SnapRule, SnapMin, SnapMod, SnapPlayer, SnapEnd,
 		Ops, Result, Changed,
 		Challenge, Prove, Pair,
-		SnapDefault   // after Pair: the enum is append-only
+		SnapDefault,  // after Pair: the enum is append-only
+		SnapAdmins    // after SnapDefault
 	};
 
 	// Welcome roles, result statuses, section names.
@@ -53,7 +54,7 @@ namespace AdminWire
 	constexpr const char* kSectionAll = "all";        // also mods, players, versions
 	constexpr const char* kSectionMods = "mods";      // Snap: only the mods list. Changed: the catalog changed, the revision did not
 
-	struct Rule      { std::string key, value; };            // value: allow | deny
+	struct Rule      { std::string key, value; };            // value: allow | deny; "admins" in memory only (on the wire: deny, plus the key in snap-admins)
 	struct MinEntry  { std::string plugin, version; };       // plugin empty = the loader; version may be "wire"
 	struct Feature   { std::string id, label; };
 	struct ModInfo   { std::string plugin, version, wire; std::vector<Feature> features; };
@@ -79,6 +80,7 @@ namespace AdminWire
 		uint32_t revision = 0;
 		std::string sections = kSectionAll;
 		std::string defaultPolicy = "allow";   // allow | deny
+		bool adminsOnlySupported = false;      // set by a client that received snap-admins: the server knows "admins only"
 		std::string message;
 		std::vector<Rule> rules;
 		std::vector<MinEntry> mins;
@@ -90,7 +92,7 @@ namespace AdminWire
 	// One decoded message. Which members are set depends on tag:
 	//   Welcome: role, revision      Snap: sections          Changed: revision, sections
 	//   SnapBegin: revision, sections   SnapPolicy: defaultPolicy, text
-	//   SnapRule: rules   SnapMin: mins   SnapDefault: keys   SnapMod: mod, cont   SnapPlayer: player, cont
+	//   SnapRule: rules   SnapMin: mins   SnapDefault: keys   SnapAdmins: keys   SnapMod: mod, cont   SnapPlayer: player, cont
 	//   SnapEnd: revision, counts      Ops: requestId, baseRevision, ops
 	//   Result: requestId, status, text, revision
 	//   Challenge: serverId, nonce (hex)   Prove: proof (64 hex, or empty)   Pair: code (empty or 8 chars), secret (64 hex)

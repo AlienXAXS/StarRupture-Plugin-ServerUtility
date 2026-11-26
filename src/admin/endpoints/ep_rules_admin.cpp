@@ -29,7 +29,7 @@ namespace
 		     << "\"rules\":[";
 		for (size_t i = 0; i < m.rules.size(); ++i)
 			json << (i ? "," : "") << "{\"key\":\"" << Escape(m.rules[i].plugin + "." + m.rules[i].id)
-			     << "\",\"value\":\"" << (m.rules[i].deny ? "deny" : "allow") << "\"}";
+			     << "\",\"value\":\"" << (m.rules[i].adminsOnly ? "admins" : m.rules[i].deny ? "deny" : "allow") << "\"}";
 		json << "],\"min_loader\":\"" << Escape(m.minLoaderVersion) << "\",\"mod_mins\":[";
 		for (size_t i = 0; i < m.modMins.size(); ++i)
 			json << (i ? "," : "") << "{\"plugin\":\"" << Escape(m.modMins[i].plugin)

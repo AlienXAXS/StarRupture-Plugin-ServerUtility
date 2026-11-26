@@ -13,7 +13,7 @@ namespace Ep_RulesAdmin
 	void Catalog(const PluginHttpRequest* req, PluginHttpResponse* resp);
 	// api/rules/get: the state.
 	void Get(const PluginHttpRequest* req, PluginHttpResponse* resp);
-	// api/rules/set: {key, value: allow|deny|unset}.
+	// api/rules/set: {key, value: allow|admins|deny|unset}.
 	void Set(const PluginHttpRequest* req, PluginHttpResponse* resp);
 	// api/rules/policy: {default: allow|deny} and/or {message: text|off}, in one change.
 	void Policy(const PluginHttpRequest* req, PluginHttpResponse* resp);

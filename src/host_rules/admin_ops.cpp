@@ -80,7 +80,11 @@ namespace
 			{
 				if (!RulesModel::SetRule(model, op.args[0], value == "deny", error)) return false;
 			}
-			else { error = "value must be allow, deny or unset"; return false; }
+			else if (value == "admins")
+			{
+				if (!RulesModel::SetRuleAdminsOnly(model, op.args[0], error)) return false;
+			}
+			else { error = "value must be allow, admins, deny or unset"; return false; }
 			out.audit = op.args[0] + "=" + value;
 			out.sections = kSectionRules;
 			return true;

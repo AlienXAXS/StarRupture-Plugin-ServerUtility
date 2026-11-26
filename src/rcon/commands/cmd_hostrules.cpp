@@ -30,7 +30,7 @@ namespace Cmd_HostRules
 		const char* const kUsage =
 			"Usage:\n"
 			"  hostrules [list]                        the rules and whether the mod loader receives them\n"
-			"  hostrules allow|deny <Plugin.feature>   one feature (Plugin.* = the whole mod)\n"
+			"  hostrules allow|admins|deny <Plugin.feature>  one feature (Plugin.* = the whole mod); admins = only a proven admin\n"
 			"  hostrules unset <Plugin.feature>        take a rule away\n"
 			"  hostrules default allow|deny            what a feature with no rule gets\n"
 			"  hostrules message [text|off]            the line players see when a feature is off\n"
@@ -130,11 +130,11 @@ namespace Cmd_HostRules
 			AddLine(tail, std::string("  version minimums: ") + HostRules::MinimumsStatus());
 			const size_t limit = kMaxReply - tail.size() - 40;   // 40: the "... and M more" line
 
-			// Default rows are built in; an exact rule above replaces one. Admins are exempt.
+			// Default rows are built in (admins only); an exact rule above replaces one.
 			const std::vector<RulesModel::DefaultRow> defaults = RulesModel::ActiveDefaultRows(m);
 			std::vector<std::string> rules;
-			for (const auto& r : m.rules) rules.push_back("  " + r.plugin + "." + r.id + " = " + (r.deny ? "deny" : "allow"));
-			for (const auto& d : defaults) rules.push_back(std::string("  ") + d.plugin + "." + d.id + " = deny (default)");
+			for (const auto& r : m.rules) rules.push_back("  " + r.plugin + "." + r.id + " = " + (r.adminsOnly ? "admins" : r.deny ? "deny" : "allow"));
+			for (const auto& d : defaults) rules.push_back(std::string("  ") + d.plugin + "." + d.id + " = admins (default)");
 			if (rules.empty()) AddLine(out, "  rules: none");
 			else AddList(out, rules, limit);
 
@@ -230,7 +230,7 @@ namespace Cmd_HostRules
 				return who.empty() ? std::string(kUsage) : Who(who);
 			}
 
-			if (sub == "allow" || sub == "deny" || sub == "unset")
+			if (sub == "allow" || sub == "admins" || sub == "deny" || sub == "unset")
 			{
 				const std::string key = NextWord(rest);
 				if (key.empty() || !rest.empty()) return kUsage;
@@ -274,7 +274,7 @@ namespace Cmd_HostRules
 	void Register()
 	{
 		PluginCommands::Register("hostrules", nullptr,
-			"hostrules [list|known|allow|deny|unset|default|message|minversion|modmin|reload|who]",
+			"hostrules [list|known|allow|admins|deny|unset|default|message|minversion|modmin|reload|who]",
 			"Show and edit the host's rules for mod features and versions",
 			Handle);
 	}

@@ -310,7 +310,7 @@ namespace AdminClient
 				SendSnapReq(m.sections == kSectionMods ? kSectionMods : kSectionAll);   // the catalog alone, or everything
 			break;
 		case Tag::Result: HandleResult(m); break;
-		case Tag::SnapBegin: case Tag::SnapPolicy: case Tag::SnapRule: case Tag::SnapMin: case Tag::SnapDefault:
+		case Tag::SnapBegin: case Tag::SnapPolicy: case Tag::SnapRule: case Tag::SnapMin: case Tag::SnapDefault: case Tag::SnapAdmins:
 		case Tag::SnapMod: case Tag::SnapPlayer: case Tag::SnapEnd:
 			HandleSnapshotPart(m, size); break;
 		default: break;
@@ -439,6 +439,13 @@ namespace AdminClient
 			break;
 		case Tag::SnapDefault:
 			building_.defaults.insert(building_.defaults.end(), m.keys.begin(), m.keys.end());
+			break;
+		case Tag::SnapAdmins:
+			// The server knows "admins only". The rules came as denies; these keys are the admins-only ones.
+			building_.adminsOnlySupported = true;
+			for (const std::string& key : m.keys)
+				for (auto& r : building_.rules)
+					if (r.key == key && r.value == "deny") r.value = "admins";
 			break;
 		case Tag::SnapMod:
 			if (m.cont && !building_.mods.empty() && building_.mods.back().plugin == m.mod.plugin)
