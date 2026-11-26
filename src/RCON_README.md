@@ -231,6 +231,27 @@ Player 76561198000000002(Bob): no report (vanilla or older loader)
 
 The admin panel (off in this build) makes the same changes as `hostrules`, `player` and `admin`, through the same code, so a change made by RCON, the panel or an in-game admin is checked, saved and logged the same way. The routes under `/ServerUtility/api/rules/` are `catalog`, `get`, `set` (`key`, `value`), `policy` (`default`, `message`), `minversion` (`version`), `modmin` (`plugin`, `version`) and `players`. Every answer has `revision` and `state`. A change may send `base_revision`; if the rules changed since then, the answer is `409` with `Changed elsewhere, refreshed` and the current `state`. See the Admin API section of the README for the details.
 
+### `stacksize [<0-9999>|off]`
+
+Show or set the server-wide item stack size: the `StackSize` key in the `[Server]` section of `Plugins\config\HostRules.ini`. Admin-only, like the other settings commands: it needs an authenticated RCON session, and the in-game admin window and the admin panel route make the same change.
+
+| Form | What it does |
+|---|---|
+| `stacksize` | Show the current size, and how many items it is applied to |
+| `stacksize <0-9999>` | Raise every stackable item's stack to this size. An item whose own size is already larger keeps it |
+| `stacksize off` | Use the game's own sizes (same as `0`) |
+
+```
+> stacksize 500
+Saved.
+stack size: 500, applied to 212/230 items
+> stacksize off
+Saved.
+stack size: game default
+```
+
+The change is saved and used within a second. On a game build whose version object map has no entry for the stack size, `stacksize` replies `stack size: not available on this game build`.
+
 ### `save` / `savegame` / `forcesave`
 
 Force an immediate world save by calling `UCrSaveSubsystem::SaveNextSaveGame`. The save runs synchronously on the game thread; the RCON response is returned after it completes.
