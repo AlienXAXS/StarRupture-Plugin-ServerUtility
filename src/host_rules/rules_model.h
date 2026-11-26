@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <utility>
 #include <vector>
 
 // The host's rules: the [Policy], [Rules] and [MinVersions] sections of
@@ -108,4 +109,32 @@ namespace RulesModel
 	// The next step for one held controller, from whether it still exists, whether
 	// its ID reads now and how long it has been held.
 	HeldStep NextHeldStep(bool alive, bool idRead, unsigned long long heldMs);
+
+	// Per-connection records, keyed by the connection and never by the player's
+	// ID: two connections can read the same ID (a player and one who copied it),
+	// and when one of them leaves the other keeps its record.
+	template <class Key, class Value>
+	struct PerConnection
+	{
+		struct Row { Key key; Value value; };
+		std::vector<Row> rows;
+
+		Value* Find(const Key& key)
+		{
+			for (Row& r : rows)
+				if (r.key == key) return &r.value;
+			return nullptr;
+		}
+		Value& Ensure(const Key& key)
+		{
+			if (Value* v = Find(key)) return *v;
+			rows.push_back({ key, Value() });
+			return rows.back().value;
+		}
+		void Erase(const Key& key)
+		{
+			for (size_t i = 0; i < rows.size(); ++i)
+				if (rows[i].key == key) { rows.erase(rows.begin() + static_cast<std::ptrdiff_t>(i)); return; }
+		}
+	};
 }

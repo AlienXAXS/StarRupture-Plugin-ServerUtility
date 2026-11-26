@@ -35,9 +35,11 @@ namespace
 	std::string               g_pushStatus = "not sent yet";
 	std::string               g_minStatus = "not sent yet";
 
+	using ConnRef = ObjectRef<SDK::APlayerController>;
 	struct Known { std::string id; HostRules::Reported info; };
-	std::vector<Known>        g_known;            // players whose loader reported, by ID
-	std::map<std::string, std::string> g_ownRules; // player ID -> own rules text last sent (g_mutex)
+	// By connection, not by ID: two connections can share an ID, and one leaving must not drop the other.
+	RulesModel::PerConnection<ConnRef, Known>       g_known;     // connections whose loader reported (g_mutex)
+	RulesModel::PerConnection<ConnRef, std::string> g_ownRules;  // own rules text last sent to a connection (g_mutex)
 
 	std::string PushText(const std::string& text);
 
@@ -91,10 +93,10 @@ namespace
 			KnownFeatures::NoteReportText(text);
 
 		std::lock_guard<std::mutex> lk(g_mutex);
-		auto it = std::find_if(g_known.begin(), g_known.end(), [&](const Known& k) { return k.id == id; });
-		if (it == g_known.end()) { g_known.push_back({ id, {} }); it = g_known.end() - 1; }
-		++it->info.count;
-		it->info.lastMs = GetTickCount64();
+		Known& known = g_known.Ensure(ConnRef(static_cast<SDK::APlayerController*>(playerController)));
+		known.id = id;
+		++known.info.count;
+		known.info.lastMs = GetTickCount64();
 	}
 
 	bool OnGameThread()
@@ -129,8 +131,8 @@ namespace
 			std::lock_guard<std::mutex> lk(g_mutex);
 			if (needsOwn)
 				text = RulesModel::PlayerRulesText(g_model, flags, true);
-			auto it = g_ownRules.find(id);
-			if (it != g_ownRules.end()) { hadOwn = true; last = it->second; }
+			if (const std::string* prev = g_ownRules.Find(ConnRef(static_cast<SDK::APlayerController*>(playerController))))
+			{ hadOwn = true; last = *prev; }
 		}
 
 		if (!needsOwn)
@@ -140,7 +142,7 @@ namespace
 				api->ClearConnection(playerController);
 				{
 					std::lock_guard<std::mutex> lk(g_mutex);
-					g_ownRules.erase(id);
+					g_ownRules.Erase(ConnRef(static_cast<SDK::APlayerController*>(playerController)));
 				}
 				LOG_INFO("[HostRules] Player %s is back on the server rules", id.c_str());
 			}
@@ -156,7 +158,7 @@ namespace
 			std::lock_guard<std::mutex> lk(g_mutex);
 			// A refused text leaves the loader's earlier set for this player as it was, so
 			// the record stays, marked as unknown (it never equals a real text).
-			g_ownRules[id] = ok ? text : std::string();
+			g_ownRules.Ensure(ConnRef(static_cast<SDK::APlayerController*>(playerController))) = ok ? text : std::string();
 		}
 		if (ok)
 			LOG_INFO("[HostRules] Player %s has rules of their own", id.c_str());
@@ -248,7 +250,7 @@ namespace
 			bool reported;
 			{
 				std::lock_guard<std::mutex> lk(g_mutex);
-				reported = std::any_of(g_known.begin(), g_known.end(), [&](const Known& k) { return k.id == id; });
+				reported = g_known.Find(ConnRef(controllers[i])) != nullptr;
 			}
 			if (reported)
 				ApplyRules(controllers[i], id, false);
@@ -286,15 +288,18 @@ namespace
 
 		InGameAdmin::PlayerLeft(exitingController);
 
+		{
+			std::lock_guard<std::mutex> lk(g_mutex);
+			const ConnRef ref(pc);
+			g_known.Erase(ref);
+			g_ownRules.Erase(ref);
+		}
+
 		const std::string id = IdOf(exitingController);
 		if (id.empty())
 			return;
 
 		AdminClaim::PlayerLeft(id);
-
-		std::lock_guard<std::mutex> lk(g_mutex);
-		g_known.erase(std::remove_if(g_known.begin(), g_known.end(), [&](const Known& k) { return k.id == id; }), g_known.end());
-		g_ownRules.erase(id);
 	}
 
 	// Send the rules to the loader. Game thread only. Returns the status text.
@@ -549,8 +554,8 @@ namespace HostRules
 	bool WhoReported(const std::string& playerId, Reported& out)
 	{
 		std::lock_guard<std::mutex> lk(g_mutex);
-		for (const Known& k : g_known)
-			if (k.id == playerId) { out = k.info; return true; }
+		for (const auto& k : g_known.rows)
+			if (k.value.id == playerId) { out = k.value.info; return true; }
 		return false;
 	}
 }

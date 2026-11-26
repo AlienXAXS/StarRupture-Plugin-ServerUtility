@@ -1739,6 +1739,22 @@ int main()
 		CHECK(has(bothText, "BetterCheats.stack-size=allow") && !has(bothText, "BetterCheats.stack-size=deny"));
 	}
 
+	// Records are kept per connection: two connections that read the same ID, one
+	// leaving, and the other still gets its rules refreshed.
+	{
+		RulesModel::PerConnection<int, std::string> reported;
+		reported.Ensure(1) = "A";
+		reported.Ensure(2) = "A";   // a second connection with the same ID
+		CHECK(reported.rows.size() == 2);
+		reported.Erase(2);
+		CHECK(reported.Find(1) != nullptr && *reported.Find(1) == "A");
+		CHECK(reported.Find(2) == nullptr);
+		reported.Ensure(1) = "B";   // Ensure finds the existing row
+		CHECK(reported.rows.size() == 1 && *reported.Find(1) == "B");
+		reported.Erase(7);          // an unknown connection changes nothing
+		CHECK(reported.rows.size() == 1);
+	}
+
 	std::printf("%d checks, %d failed\n", g_checks, g_failed);
 	return g_failed ? 1 : 0;
 }
