@@ -8,6 +8,9 @@
 #include "SDK/AuItems_classes.hpp"
 #include "SDK/MassSpawner_classes.hpp"
 #include "SDK/MassEntity_classes.hpp"
+#include "SDK/MassActors_classes.hpp"
+#include "SDK/MassAIPrototypeEnemyRuntime_classes.hpp"
+#include "SDK/AIModule_classes.hpp"
 #include "plugin_map.h"
 
 #include <cstdint>
@@ -129,6 +132,22 @@ namespace ServerUtilityFields
 	inline constexpr const char* SharedFragmentsFindOrAdd  = "TSharedFragmentsContainer<FConstSharedStruct>::FindOrAdd";
 	inline constexpr const char* GetStructInstanceCrc32    = "UE::StructUtils::GetStructInstanceCrc32";
 
+	// What the su.cheat enemy op reads and writes: the enemy character's pool flag and its three attack
+	// ranges, the controller and the controller's brain component, and the health fragment's HP, a
+	// member of the Mass entity state the SDK dumps as padding (a map row, size 4). The three game
+	// functions find an enemy's health fragment: a weak key for the actor, the entity handle from it, and
+	// the fragment data of an entity.
+	inline auto EnemyIsInPool                = SERVER_UTILITY_FIELD(AMassEnemyCharacterBase, bIsInPool);
+	inline auto EnemyAllowedAttackDistance   = SERVER_UTILITY_FIELD(AMassEnemyCharacterBase, AllowedAttackDistance);
+	inline auto EnemyAllowedAttackConeHalfAngle = SERVER_UTILITY_FIELD(AMassEnemyCharacterBase, AllowedAttackConeHalfAngle);
+	inline auto EnemyAllowedBuildingAttackDistance = SERVER_UTILITY_FIELD(AMassEnemyCharacterBase, AllowedBuildingAttackDistance);
+	inline auto PawnController               = SERVER_UTILITY_FIELD(APawn, Controller);
+	inline auto AIControllerBrainComponent   = SERVER_UTILITY_FIELD(AAIController, BrainComponent);
+	inline auto EnemyHealthHP                = SERVER_UTILITY_NATIVE(float, FMassEnemyHealthFragment, HP, 0x0);
+	inline constexpr const char* WeakObjectPtrAssign       = "FWeakObjectPtr::operator=(FObjectPtr)";
+	inline constexpr const char* GetEntityHandleFromActor  = "UMassActorSubsystem::GetEntityHandleFromActor";
+	inline constexpr const char* InternalGetFragmentDataPtr = "FMassEntityManager::InternalGetFragmentDataPtr";
+
 	// The engine members that lead from the world to a connected player's
 	// controller and from a controller to its player state (the player lookup).
 	// The player list and the admin player actions read the same game state.
@@ -204,13 +223,21 @@ namespace ServerUtilityFields
 		ElectricityType, ElectricityParametersSize, ConstSharedFragmentsContainer, PluginMap::MassEntityManagerField,
 		DestroyEntityTemplate, GetOrCreateEntityTemplate, SharedFragmentsFindOrAdd, GetStructInstanceCrc32) };
 
+	// The su.cheat enemy op: the enemy character's pool flag and attack ranges, the controller walk to the
+	// brain component, the health fragment's HP, the three functions that find the fragment, and the
+	// Mass entity manager of the entity subsystem. While it is off `cap` reports the op off.
+	inline PluginMap::Feature CheatEnemy{ "cheat-enemy", "Enemy cheats", PluginMap::KeysOf(
+		EnemyIsInPool, EnemyAllowedAttackDistance, EnemyAllowedAttackConeHalfAngle, EnemyAllowedBuildingAttackDistance,
+		PawnController, AIControllerBrainComponent, EnemyHealthHP, PluginMap::MassEntityManagerField,
+		WeakObjectPtrAssign, GetEntityHandleFromActor, InternalGetFragmentDataPtr) };
+
 	// Asks the loader for every member above. False when a key that no feature
 	// lists did not resolve; the loader has then recorded the failure and
 	// refuses the plugin. A miss on a key a feature lists only turns that
 	// feature off.
 	inline bool Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
 	{
-		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand, CheatGive, CheatWave, CheatCorp, CheatPower);
+		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand, CheatGive, CheatWave, CheatCorp, CheatPower, CheatEnemy);
 
 		// A miss only turns off the features that list the key. Every row is
 		// asked even after a miss, so the loader's log lists them all.
@@ -220,11 +247,13 @@ namespace ServerUtilityFields
 			ActorAlwaysRelevant, ObjectClass, ObjectIndex,
 			ItemName, InventoryComponent, AuAddedItem_Amount, AuAddedItem_Size,
 			StartWaveSize, StartWaveType, IsWaveInProgressSize, IsWaveInProgressResult, IsWavePausedSize, IsWavePausedResult,
-			CorporationsOwner, CorporationsDataPoints);
+			CorporationsOwner, CorporationsDataPoints,
+			EnemyIsInPool, EnemyAllowedAttackDistance, EnemyAllowedAttackConeHalfAngle, EnemyAllowedBuildingAttackDistance,
+			PawnController, AIControllerBrainComponent, EnemyHealthHP);
 
 		// One line per feature the loader switched off, so the text names
 		// exactly what is off and follows the feature's key list.
-		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand, &CheatGive, &CheatWave, &CheatCorp, &CheatPower })
+		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand, &CheatGive, &CheatWave, &CheatCorp, &CheatPower, &CheatEnemy })
 		{
 			if (!f->On())
 				LOG_WARN("[%s] The loader has no row for one of its engine members on this game build - %s is off",

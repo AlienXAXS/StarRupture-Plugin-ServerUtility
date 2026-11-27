@@ -482,6 +482,9 @@
     <ClCompile Include="$(StarRuptureSDKSourceDir)Chimera_functions.cpp">
       <Visible>false</Visible>
     </ClCompile>
+    <ClCompile Include="$(StarRuptureSDKSourceDir)MassActors_functions.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'">
+      <Visible>false</Visible>
+    </ClCompile>
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="hooks\auto_profession\auto_profession.cpp" />
     <ClCompile Include="hooks\gatherable_relevancy\gatherable_relevancy.cpp" />
