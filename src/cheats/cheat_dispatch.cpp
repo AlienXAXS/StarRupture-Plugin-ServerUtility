@@ -42,14 +42,6 @@ namespace CheatDispatch
 		return copy.m_tokens >= copy.m_burst;
 	}
 
-	Result NotYet(const Context&, const CheatWire::Request&)
-	{
-		Result r;
-		r.status = CheatWire::Status::Refused;
-		r.reason = kTextNotYet;
-		return r;
-	}
-
 	const std::vector<OpEntry>& Ops()
 	{
 		// Feature ids are BetterCheats' own (the default rows in rules_model.cpp). cheat.build covers
@@ -76,7 +68,7 @@ namespace CheatDispatch
 
 	bool IsOn(const OpEntry& op)
 	{
-		return op.run != &NotYet && (!op.available || op.available());
+		return !op.available || op.available();
 	}
 
 	bool Server::LogOnce(const std::string& playerId, const char* what)

@@ -134,7 +134,7 @@ int main()
 				CHECK(op.run == &OpBuild::Handle && op.available == &OpBuild::Available && !op.state
 					&& op.stateEx == &OpBuild::StateFieldsFor && op.featureFor == &OpBuild::FeatureFor);
 			else
-				CHECK(op.run == &NotYet && !op.available);
+				CHECK(false);   // an op in the table with no check above
 		}
 	}
 

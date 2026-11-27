@@ -68,9 +68,6 @@ namespace CheatDispatch
 	// Picks the feature id the rules decide on for one request, for an op that spans several.
 	using FeatureHook = const char* (*)(const CheatWire::Request& req);
 
-	// What a slice with no executor yet puts in the table.
-	Result NotYet(const Context&, const CheatWire::Request&);
-
 	struct OpEntry
 	{
 		const char* name;
@@ -87,10 +84,10 @@ namespace CheatDispatch
 		FeatureHook featureFor = nullptr;
 	};
 
-	// Whether `cap` reports the op on: it has a handler and its `available` hook (if any) says yes.
+	// Whether `cap` reports the op on: its `available` hook (if any) says yes.
 	bool IsOn(const OpEntry& op);
 
-	// The one table. A later slice replaces `NotYet` in its entry.
+	// The one table.
 	const std::vector<OpEntry>& Ops();
 
 	struct Env

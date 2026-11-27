@@ -254,6 +254,15 @@ namespace ServerUtilityFields
 	inline auto SetModeSize                = SR_PARAMS_SIZE(CharacterMovementComponent, SetMovementMode);
 	inline auto SetModeMode                = SR_PARAM(CharacterMovementComponent, SetMovementMode, NewMovementMode);
 	inline auto SetModeCustom              = SR_PARAM(CharacterMovementComponent, SetMovementMode, NewCustomMode);
+
+	// What the su.cheat skill op reads and writes: the player controller's skill array, the skill
+	// struct's size (the array is stepped by the size the game reflects, not a compiled one) and its
+	// Skill, Level and Experience members. All reflected, so no map row of its own is needed.
+	inline auto ControllerPlayerSkills    = SERVER_UTILITY_FIELD(ACrPlayerControllerBase, PlayerSkills);
+	inline auto SkillDataSize             = SR_SIZE(FCrSkillData);
+	inline auto SkillDataSkill            = SERVER_UTILITY_FIELD(FCrSkillData, Skill);
+	inline auto SkillDataLevel            = SERVER_UTILITY_FIELD(FCrSkillData, Level);
+	inline auto SkillDataExperience       = SERVER_UTILITY_FIELD(FCrSkillData, Experience);
 	inline constexpr const char* WeakObjectPtrAssign       = "FWeakObjectPtr::operator=(FObjectPtr)";
 	inline constexpr const char* GetEntityHandleFromActor  = "UMassActorSubsystem::GetEntityHandleFromActor";
 	inline constexpr const char* InternalGetFragmentDataPtr = "FMassEntityManager::InternalGetFragmentDataPtr";
@@ -365,6 +374,11 @@ namespace ServerUtilityFields
 	// off `cap` reports the op off.
 	inline PluginMap::Feature CheatStat{ "cheat-stat", "Player stats", PluginMap::KeysOf(SU_STAT_KEYS_ALL) };
 
+	// The su.cheat skill op: the controller's skill array and the skill struct's members. While it is
+	// off `cap` reports the op off.
+	inline PluginMap::Feature CheatSkill{ "cheat-skill", "Skill levels", PluginMap::KeysOf(
+		ControllerPlayerSkills, SkillDataSize, SkillDataSkill, SkillDataLevel, SkillDataExperience) };
+
 	// The su.cheat move op: the character's movement component, its flying members and the mode
 	// call. While it is off `cap` reports the op off.
 	inline PluginMap::Feature CheatMove{ "cheat-move", "Flying and speed", PluginMap::KeysOf(
@@ -396,7 +410,7 @@ namespace ServerUtilityFields
 	// feature off.
 	inline bool Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
 	{
-		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand, CheatGive, CheatWave, CheatCorp, CheatPower, CheatEnemy, CheatWeapon, CheatGrid, CheatMine, CheatStat, CheatMove, CheatBuildUnlock, CheatBuildCost, CheatBuildStability, CheatBuildWindows, CheatBuildBenches);
+		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand, CheatGive, CheatWave, CheatCorp, CheatPower, CheatEnemy, CheatWeapon, CheatGrid, CheatMine, CheatStat, CheatSkill, CheatMove, CheatBuildUnlock, CheatBuildCost, CheatBuildStability, CheatBuildWindows, CheatBuildBenches);
 
 		// A miss only turns off the features that list the key. Every row is
 		// asked even after a miss, so the loader's log lists them all.
@@ -416,6 +430,7 @@ namespace ServerUtilityFields
 			AddTagsSize, AddTagsActor, AddTagsTags, AddTagsReplicate, RemoveTagsSize, RemoveTagsActor, RemoveTagsTags,
 			RemoveTagsReplicate, GetAscSize, GetAscActor, GetAscResult, TagCountSize, TagCountTag, TagCountResult,
 			SU_STAT_KEYS_ALL,
+			ControllerPlayerSkills, SkillDataSize, SkillDataSkill, SkillDataLevel, SkillDataExperience,
 			CharacterMovement, MovementMode, MovementMaxFlySpeed, MovementBrakingFlying, MovementCheatFlying,
 			SetModeSize, SetModeMode, SetModeCustom,
 			MassConfigAssetConfig, MassConfigParent, MassConfigTraits, ElectricityParameters, ElectricityValue,
@@ -427,7 +442,7 @@ namespace ServerUtilityFields
 
 		// One line per feature the loader switched off, so the text names
 		// exactly what is off and follows the feature's key list.
-		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand, &CheatGive, &CheatWave, &CheatCorp, &CheatPower, &CheatEnemy, &CheatWeapon, &CheatGrid, &CheatMine, &CheatStat, &CheatMove, &CheatBuildUnlock, &CheatBuildCost, &CheatBuildStability, &CheatBuildWindows, &CheatBuildBenches })
+		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand, &CheatGive, &CheatWave, &CheatCorp, &CheatPower, &CheatEnemy, &CheatWeapon, &CheatGrid, &CheatMine, &CheatStat, &CheatSkill, &CheatMove, &CheatBuildUnlock, &CheatBuildCost, &CheatBuildStability, &CheatBuildWindows, &CheatBuildBenches })
 		{
 			if (!f->On())
 				LOG_WARN("[%s] The loader has no row for one of its engine members on this game build - %s is off",
