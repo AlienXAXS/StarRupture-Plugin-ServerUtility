@@ -14,6 +14,7 @@
 #include "cheats/op_grid.h"
 #include "cheats/op_mine.h"
 #include "cheats/op_stat.h"
+#include "cheats/op_move.h"
 #include "cheats/op_plant.h"
 #include "cheats/op_build.h"
 
@@ -96,7 +97,7 @@ int main()
 		CHECK(fresh.Idle(0));
 	}
 
-	// The op table: fourteen ops. Give, wave, stack, corp, power and enemy have a handler (with an `available` hook); the rest are stubs.
+	// The op table: fourteen ops. Give, wave, stack, move, corp, power and enemy have a handler (with an `available` hook); the rest are stubs.
 	{
 		CHECK(Ops().size() == 14);
 		for (const OpEntry& op : Ops())
@@ -122,6 +123,8 @@ int main()
 				CHECK(op.run == &OpPlant::Handle && op.available == &OpPlant::Available && op.state == &OpPlant::StateFields);
 			else if (std::strcmp(op.name, "cheat.mine") == 0)
 				CHECK(op.run == &OpMine::Handle && op.available == &OpMine::Available && op.state == &OpMine::StateFields);
+			else if (std::strcmp(op.name, "cheat.move") == 0)
+				CHECK(op.run == &OpMove::Handle && op.available == &OpMove::Available && op.state == &OpMove::StateFields);
 			else if (std::strcmp(op.name, "cheat.stat") == 0)
 				CHECK(op.run == &OpStat::Handle && op.available == &OpStat::Available && op.state == &OpStat::StateFields);
 			else if (std::strcmp(op.name, "cheat.build") == 0)
@@ -162,6 +165,7 @@ int main()
 			if (std::strcmp(op.name, "cheat.grid") == 0) text = OpGrid::kTextOff;
 			if (std::strcmp(op.name, "cheat.plant") == 0) text = OpPlant::kTextOff;
 			if (std::strcmp(op.name, "cheat.stat") == 0) text = OpStat::kTextOff;
+			if (std::strcmp(op.name, "cheat.move") == 0) text = OpMove::kTextOff;
 			if (std::strcmp(op.name, "cheat.mine") == 0) text = OpMine::kTextOff;
 			if (std::strcmp(op.name, "cheat.build") == 0) text = OpBuild::kTextOff;
 			CHECK(r.Send("p1", Req(id, op.name)) == Res(id, "refused", text));
@@ -468,6 +472,29 @@ int main()
 			CHECK(r.Send("p1", Req(122, "cheat.state")) == Res(122, "ok", "", U + "wave=paused" + U + "stack=500"));
 			OpStat::SetEnv(OpStat::Env());
 		}
+		// cheat.move adds fly=on|off and speed=<mult>|off for the caller and drops both when movement is denied.
+		{
+			bool flying = true;
+			float speed = 4.0f;
+			OpMove::Env me;
+			me.available    = [] { return true; };
+			me.inWorld      = [] { return true; };
+			me.hasCharacter = [](const Context&) { return true; };
+			me.flying       = [&](const std::string&) { return flying; };
+			me.speed        = [&](const std::string&) { return speed; };
+			me.setFly       = [](const Context&, uint32_t, bool) { return true; };
+			me.setSpeed     = [](const Context&, uint32_t, bool, float) { return true; };
+			OpMove::SetEnv(me);
+			Rig r;
+			CHECK(r.Send("p1", Req(125, "cheat.state")) == Res(125, "ok", "", U + "wave=paused" + U + "stack=500" + U + "fly=on" + U + "speed=4"));
+			flying = false; speed = 1.0f;
+			r.now += 10;
+			CHECK(r.Send("p1", Req(126, "cheat.state")) == Res(126, "ok", "", U + "wave=paused" + U + "stack=500" + U + "fly=off" + U + "speed=off"));
+			r.denyFeature = "movement";
+			r.now += 10;
+			CHECK(r.Send("p1", Req(127, "cheat.state")) == Res(127, "ok", "", U + "wave=paused" + U + "stack=500"));
+			OpMove::SetEnv(OpMove::Env());
+		}
 		// cheat.plant adds plant=<n>|off for the caller and drops it when the inventory feature is denied.
 		{
 			OpPlant::Env pe;
@@ -586,7 +613,7 @@ int main()
 	{
 		const std::string reply = CheatWire::EncodeReply(2147483647, CheatWire::Status::Ok, "", OpState::WorstCaseFields());
 		CHECK(!reply.empty() && reply.size() <= CheatWire::kMaxMessage);
-		CHECK(OpState::WorstCaseFields().size() == 14);
+		CHECK(OpState::WorstCaseFields().size() == 16);
 	}
 
 	std::printf("cheat_dispatch_tests: %d checks, %d failed\n", g_checks, g_failed);

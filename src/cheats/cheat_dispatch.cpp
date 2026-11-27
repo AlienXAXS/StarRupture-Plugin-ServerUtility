@@ -9,6 +9,7 @@
 #include "op_grid.h"
 #include "op_mine.h"
 #include "op_stat.h"
+#include "op_move.h"
 #include "op_plant.h"
 #include "op_build.h"
 #include "op_state.h"
@@ -58,7 +59,7 @@ namespace CheatDispatch
 			{ "cheat.wave",  1, "rupture-wave",   &OpWave::Handle, &OpWave::Available, &OpWave::StateFields },
 			{ "cheat.stack", 1, "stack-size",     &OpStack::Handle, &OpStack::Available, &OpStack::StateFields },
 			{ "cheat.stat",  1, "player-stats",   &OpStat::Handle, &OpStat::Available, &OpStat::StateFields },
-			{ "cheat.move",  1, "movement",       &NotYet },
+			{ "cheat.move",  1, "movement",       &OpMove::Handle, &OpMove::Available, &OpMove::StateFields },
 			{ "cheat.skill", 1, "skills",         &NotYet },
 			{ "cheat.corp",  1, "corporations",   &OpCorp::Handle, &OpCorp::Available, &OpCorp::StateFields },
 			{ "cheat.power", 1, "machine-power",  &OpPower::Handle, &OpPower::Available, &OpPower::StateFields },

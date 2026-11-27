@@ -12,6 +12,7 @@
 #include "cheats/op_grid.h"
 #include "cheats/op_mine.h"
 #include "cheats/op_stat.h"
+#include "cheats/op_move.h"
 #include "cheats/op_plant.h"
 #include "cheats/op_build.h"
 
@@ -1715,6 +1716,149 @@ static void StatTests()
 	CHECK(OpStat::StateFields("p1").empty());
 }
 
+// A fake movement game: fly and speed for the one player, the calls recorded.
+struct MoveFake
+{
+	bool available = true;
+	bool world = true;
+	bool character = true;
+	bool callsOk = true;
+	bool fly = false;
+	float speed = 1.0f;
+	int flyCalls = 0, speedCalls = 0;
+	uint32_t lastReq = 0;
+
+	OpMove::Env MakeEnv()
+	{
+		OpMove::Env e;
+		e.available    = [this] { return available; };
+		e.inWorld      = [this] { return world; };
+		e.hasCharacter = [this](const Context&) { return character; };
+		e.flying       = [this](const std::string&) { return fly; };
+		e.speed        = [this](const std::string&) { return speed; };
+		e.setFly       = [this](const Context&, uint32_t id, bool on)
+		{
+			++flyCalls; lastReq = id;
+			if (!callsOk) return false;
+			fly = on;
+			return true;
+		};
+		e.setSpeed     = [this](const Context&, uint32_t id, bool on, float mult)
+		{
+			++speedCalls; lastReq = id;
+			if (!callsOk) return false;
+			speed = on ? mult : 1.0f;
+			return true;
+		};
+		e.log          = [](const std::string&) {};
+		return e;
+	}
+};
+
+static CheatWire::Request MoveReq(const char* fly, const char* speed = nullptr)
+{
+	CheatWire::Request r;
+	r.id = 47;
+	r.op = "cheat.move";
+	if (fly) r.fields.emplace_back("fly", fly);
+	if (speed) r.fields.emplace_back("speed", speed);
+	return r;
+}
+
+static void MoveTests()
+{
+	const std::string id = "p1";
+	Context ctx;
+	ctx.playerId = &id;
+	MoveFake f;
+	OpMove::SetEnv(f.MakeEnv());
+	CHECK(OpMove::Available());
+	CHECK(std::string(OpMove::kFeature) == "movement" && std::string(OpMove::kSlotFly) == "fly" && std::string(OpMove::kSlotSpeed) == "speed");
+
+	// The contract's example: fly on with a speed. The text names the flying; both fields come back.
+	{
+		const Result r = OpMove::Handle(ctx, MoveReq("on", "4"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == "Flying on.");
+		CHECK(r.fields.size() == 2 && *Field(r, "fly") == "on" && *Field(r, "speed") == "4");
+		CHECK(f.flyCalls == 1 && f.speedCalls == 1 && f.lastReq == 47 && f.fly && f.speed == 4.0f);
+		CHECK(OpMove::StateFields("p1") == Fields({ { "fly", "on" }, { "speed", "4" } }));
+	}
+	// A speed change keeps flying; fly absent means no fly call.
+	{
+		const Result r = OpMove::Handle(ctx, MoveReq(nullptr, "10"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == "Speed 10x." && f.flyCalls == 1 && f.speedCalls == 2);
+		CHECK(f.fly && f.speed == 10.0f && *Field(r, "fly") == "on" && *Field(r, "speed") == "10");
+	}
+	// Fly off keeps the speed; speed 1 and "off" both turn the boost off.
+	{
+		const Result r = OpMove::Handle(ctx, MoveReq("off"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == "Flying off." && !f.fly && f.speed == 10.0f);
+		CHECK(OpMove::Handle(ctx, MoveReq(nullptr, "1")).reason == "Speed back to normal." && f.speed == 1.0f);
+		f.speed = 3.0f;
+		const Result o = OpMove::Handle(ctx, MoveReq(nullptr, "off"));
+		CHECK(o.reason == OpMove::kTextSpeedOff && f.speed == 1.0f && *Field(o, "speed") == "off");
+		CHECK(OpMove::StateFields("p1") == Fields({ { "fly", "off" }, { "speed", "off" } }));
+	}
+	// The limits: 1.5 and 25 pass, 0.5 and 25.5 are out of range, text is not a number.
+	{
+		CHECK(OpMove::Handle(ctx, MoveReq(nullptr, "1.5")).reason == "Speed 1.5x.");
+		CHECK(OpMove::Handle(ctx, MoveReq(nullptr, "25")).reason == "Speed 25x.");
+		const Result lo = OpMove::Handle(ctx, MoveReq(nullptr, "0.5"));
+		CHECK(lo.status == CheatWire::Status::Refused && lo.reason == "Speed must be 1 to 25.");
+		CHECK(OpMove::Handle(ctx, MoveReq(nullptr, "25.5")).reason == OpMove::kTextRange);
+		CHECK(OpMove::Handle(ctx, MoveReq(nullptr, "fast")).reason == CheatDispatch::kTextBadRequest);
+		CHECK(OpMove::Handle(ctx, MoveReq("maybe")).reason == CheatDispatch::kTextBadRequest);
+		CHECK(OpMove::Handle(ctx, MoveReq("on", "99")).status == CheatWire::Status::Refused);
+		f.speed = 1.0f;
+	}
+	// Nothing asked: pick one. A bad request does not call the game.
+	{
+		const int calls = f.flyCalls + f.speedCalls;
+		const Result r = OpMove::Handle(ctx, MoveReq(nullptr));
+		CHECK(r.status == CheatWire::Status::Refused && r.reason == "Pick at least one setting.");
+		OpMove::Handle(ctx, MoveReq("on", "99"));
+		CHECK(f.flyCalls + f.speedCalls == calls);
+	}
+	// No world: error, nothing called.
+	{
+		const int calls = f.flyCalls + f.speedCalls;
+		f.world = false;
+		const Result r = OpMove::Handle(ctx, MoveReq("on"));
+		CHECK(r.status == CheatWire::Status::Error && r.reason == "Not in a world right now." && f.flyCalls + f.speedCalls == calls);
+		f.world = true;
+	}
+	// No character: refused when turning something on; taking it off still works.
+	{
+		f.character = false;
+		const int calls = f.flyCalls;
+		const Result r = OpMove::Handle(ctx, MoveReq("on"));
+		CHECK(r.status == CheatWire::Status::Refused && r.reason == "No character found on you." && f.flyCalls == calls);
+		CHECK(OpMove::Handle(ctx, MoveReq("off", "off")).status == CheatWire::Status::Ok);
+		f.character = true;
+	}
+	// A failed call: error with the op's text, and a failed fly stops before speed.
+	{
+		f.callsOk = false;
+		const int speedCalls = f.speedCalls;
+		const Result r = OpMove::Handle(ctx, MoveReq("on", "2"));
+		CHECK(r.status == CheatWire::Status::Error && r.reason == "Couldn't change your movement on this server." && f.speedCalls == speedCalls);
+		f.callsOk = true;
+	}
+	// Off in cap: refused with the off text, even for a request with no field.
+	{
+		f.available = false;
+		CHECK(!OpMove::Available());
+		CHECK(OpMove::Handle(ctx, MoveReq("on")).reason == OpMove::kTextOff);
+		CHECK(OpMove::Handle(ctx, MoveReq(nullptr)).reason == OpMove::kTextOff);
+		f.available = true;
+	}
+
+	// No env at all: off, no state fields.
+	OpMove::SetEnv(OpMove::Env());
+	CHECK(!OpMove::Available());
+	CHECK(OpMove::StateFields("p1").empty());
+}
+
 int main()
 {
 	const Context ctx;
@@ -1724,6 +1868,7 @@ int main()
 	GridTests();
 	MineTests();
 	StatTests();
+	MoveTests();
 	PlantTests();
 	BuildTests();
 	WaveTests();

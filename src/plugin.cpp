@@ -35,6 +35,7 @@
 #include "cheats/op_grid_game.h"
 #include "cheats/op_mine_game.h"
 #include "cheats/op_stat_game.h"
+#include "cheats/op_move_game.h"
 #include "cheats/op_plant_game.h"
 #include "cheats/op_build_game.h"
 #endif
@@ -226,6 +227,7 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 	OpGridGame::Init();
 	OpMineGame::Init();
 	OpStatGame::Init();
+	OpMoveGame::Init();
 	OpPlantGame::Init();
 	OpBuildGame::Init();
 	CheatNet::Init();
