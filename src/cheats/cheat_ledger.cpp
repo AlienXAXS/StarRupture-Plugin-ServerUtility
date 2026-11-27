@@ -87,17 +87,45 @@ namespace CheatLedger
 		return true;
 	}
 
+	static bool SameSlot(const Entry& a, const Entry& b)
+	{
+		return a.target == b.target && a.feature == b.feature && a.slot == b.slot;
+	}
+
+	// One pending write per object and slot: a later one is the newer intent and replaces the earlier.
 	void Ledger::Defer(const Entry& e, const Value& restore, const Value& expect)
 	{
-		m_pending.push_back(Pending{ e, restore, expect });
+		for (auto& p : m_pending)
+		{
+			if (SameSlot(p.e, e))
+			{
+				p = Pending{ e, restore, expect, 0 };
+				return;
+			}
+		}
+		m_pending.push_back(Pending{ e, restore, expect, 0 });
 	}
 
 	bool Ledger::IsPending(const Entry& e) const
 	{
 		for (const auto& p : m_pending)
-			if (p.e.target == e.target && p.e.slot == e.slot)
+			if (SameSlot(p.e, e))
 				return true;
 		return false;
+	}
+
+	void Ledger::ForgetPending(const Entry& e)
+	{
+		for (auto it = m_pending.begin(); it != m_pending.end();)
+		{
+			if (SameSlot(it->e, e))
+			{
+				Log("drop pending write " + Describe(it->e) + ": its character is gone, nothing written");
+				it = m_pending.erase(it);
+			}
+			else
+				++it;
+		}
 	}
 
 	void Ledger::RetryPending()
@@ -105,7 +133,8 @@ namespace CheatLedger
 		for (auto it = m_pending.begin(); it != m_pending.end();)
 		{
 			Pending& p = *it;
-			if (!m_env.alive(p.e.target))
+			// A target that does not resolve is gone. An Override with no target never had one to lose.
+			if (p.e.target.Valid() && !m_env.alive(p.e.target))
 			{
 				it = m_pending.erase(it);
 				continue;
@@ -126,8 +155,32 @@ namespace CheatLedger
 			// A retry that fails part-way: undo it, or stop caring what the slot held and write the value anyway.
 			if (!(m_env.read(p.e) == live) && !m_env.write(p.e, live))
 				p.expect = Value();
+			if (++p.tries >= kPendingMaxTries)
+			{
+				Log("restore " + Describe(p.e) + ": could not write " + ToText(p.restore) + " after " + std::to_string(p.tries) +
+					" tries, left as is (now " + ToText(m_env.read(p.e)) + ")");
+				it = m_pending.erase(it);
+				continue;
+			}
 			++it;
 		}
+	}
+
+	// Put back an entry that is leaving its target. A write still waiting on the slot is finished
+	// first; when it cannot be, the put-back takes its place.
+	void Ledger::PutBackEntry(const Entry& e, const char* why)
+	{
+		if (IsPending(e))
+		{
+			RetryPending();
+			if (IsPending(e))
+			{
+				Log("restore " + Describe(e) + ": an earlier write to it is still being put right, " + ToText(e.prior) + " is written when it works (" + why + ")");
+				Defer(e, e.prior, Value());
+				return;
+			}
+		}
+		PutBack(e, why, false, true);
 	}
 
 	bool Ledger::WriteSafe(const Entry& e, const Value& v, bool* undoFailed)
@@ -164,15 +217,18 @@ namespace CheatLedger
 				return true;
 			}
 		}
-		if (WriteSafe(e, restore))
+		bool undoFailed = false;
+		if (WriteSafe(e, restore, &undoFailed))
 		{
 			Log("restore " + Describe(e) + ": " + ToText(live) + " -> " + ToText(restore) + " (" + why + ")");
 			return true;
 		}
 		if (!quiet)
 			Log("restore " + Describe(e) + ": could not write " + ToText(restore) + ", left as is (" + why + ")");
+		// The slot has one pending write: when the undo failed, it holds a half value and is replaced by
+		// the put-back, which then writes whatever the slot holds.
 		if (retry)
-			Defer(e, restore, live);
+			Defer(e, restore, undoFailed ? Value() : live);
 		return false;
 	}
 
@@ -181,10 +237,12 @@ namespace CheatLedger
 		const Entry& e = it->second;
 		if (e.parked)
 			return Drop(it, "the character was already put back");
+		if (e.noPawn)
+			return Drop(it, "the player has no pawn, the character is gone");
 		if (e.target.Valid() && !m_env.alive(e.target))
 			return Drop(it, "its target is gone");
 
-		PutBack(e, why, false, true);
+		PutBackEntry(e, why);
 		it = m_entries.erase(it);
 		CountFollowers();
 		return it;
@@ -200,10 +258,11 @@ namespace CheatLedger
 		if (it != m_entries.end() && (it->second.parked || !(it->second.target == req.target)))
 		{
 			const Entry& old = it->second;
-			// A live old target still holds our value: put it back before the entry moves on.
-			if (!old.parked && old.target.Valid() && m_env.alive(old.target))
+			// A live old target still holds our value: put it back before the entry moves on. Without a
+			// pawn the player has a corpse for a target until the entry moves: it gets no write.
+			if (!old.parked && !old.noPawn && old.target.Valid() && m_env.alive(old.target))
 			{
-				PutBack(old, "the target changed", false, true);
+				PutBackEntry(old, "the target changed");
 				m_entries.erase(it);
 			}
 			else
@@ -320,6 +379,18 @@ namespace CheatLedger
 
 	void Ledger::OnWorldEnd()
 	{
+		// A write waiting on an object of the world that ended has nothing left to write to. One with no
+		// target is a server-wide setting and goes on.
+		for (auto it = m_pending.begin(); it != m_pending.end();)
+		{
+			if (it->e.target.Valid())
+			{
+				Log("drop pending write " + Describe(it->e) + ": the world ended, nothing written");
+				it = m_pending.erase(it);
+			}
+			else
+				++it;
+		}
 		for (auto it = m_entries.begin(); it != m_entries.end();)
 		{
 			const Entry& e = it->second;
@@ -342,12 +413,22 @@ namespace CheatLedger
 		}
 		for (auto it = m_entries.begin(); it != m_entries.end();)
 			it = Restore(it, "server stop");
+		// Each write still waiting gets one more try, and what cannot be written is said.
+		const std::vector<Pending> waiting = m_pending;
+		RetryPending();
+		for (const auto& w : waiting)
+			if (IsPending(w.e))
+				Log("stop: could not write " + ToText(w.restore) + " to " + Describe(w.e) + ", left as is");
+		m_pending.clear();
 	}
 
 	void Ledger::Park(Entry& e)
 	{
 		e.settling = Weak();
 		if (e.parked)
+			return;
+		// An earlier write to the character is still being put right: wait for it, adding nothing.
+		if (IsPending(e))
 			return;
 		// The character is alive and parked: put it back before letting it go. A dead one has
 		// nothing to put back, and nothing is written to it. A failed write is retried next tick,
@@ -446,8 +527,11 @@ namespace CheatLedger
 				continue;
 			}
 			// No pawn: the old target is a corpse from here until the entry moves, and is left alone.
-			if (stance.where == Stance::Where::NoPawn)
+			if (stance.where == Stance::Where::NoPawn && !e.noPawn)
+			{
 				e.noPawn = true;
+				ForgetPending(e);
+			}
 			const Weak target = stance.where == Stance::Where::Character ? m_env.rebind(e, stance.character) : Weak();
 			// No pawn yet: the entry waits, still held. Same object, never parked: nothing to move.
 			if (!target.Valid() || (!e.parked && target == e.target))
@@ -498,7 +582,7 @@ namespace CheatLedger
 			// our own value as its prior). Done once the new one took the value, so a retry leaves the
 			// old one alone. A parked entry holds nothing; a dead one or a corpse (no pawn) has nothing to put back.
 			if (!e.parked && !e.noPawn && e.target.Valid() && m_env.alive(e.target))
-				PutBack(e, "the player moved to another character", false, true);
+				PutBackEntry(e, "the player moved to another character");
 			Log("follow " + Describe(e) + ": " + (e.parked ? "character again, " : "new pawn, ") + ToText(moved.prior) + " -> " + ToText(moved.applied));
 			moved.followStuck = false;
 			moved.parked = false;

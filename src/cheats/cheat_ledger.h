@@ -40,11 +40,16 @@
 // tick the player has no pawn (their character died) and the move to the next one, nothing is
 // written to the old target, neither the pin nor a put-back: it is a corpse.
 //
-// A put-back that fails is kept (a pending write) and tried on each Tick until it works or its
-// target stops resolving, whether the entry is still there or not. A write that fails part-way is
-// undone at once; when that fails too, it is a pending write as well. While a pending write waits on
-// an object and slot, nothing else is read from or written to them, so a half value is never taken
-// as a prior or as the game's change.
+// A put-back that fails is kept (a pending write) and tried on each Tick until it works, its
+// target stops resolving (an Override with no target never does) or it has failed kPendingMaxTries
+// times, whether the entry is still there or not. A write that fails part-way is undone at once;
+// when that fails too, it is a pending write as well. There is at most one pending write per object
+// and slot: a later one replaces the earlier, and while one waits, nothing else is read from or
+// written to that object and slot (a Park waits, a release or a move puts the prior in its place),
+// so a half value is never taken as a prior or as the game's change. A world end drops the pending
+// writes that have a target; a server stop tries each once more and logs what it could not write.
+// An entry whose player has no pawn (noPawn) writes nothing to its old target, through any path
+// (pin, put-back, park, release, leave, deny, stop), and its pending writes there are dropped.
 //
 // The ledger keeps no pointer to a game object. A Weak is the object's slot index, serial and
 // class, plus its address as a bare number that is only compared to the slot, never used as a
@@ -79,6 +84,9 @@ namespace CheatLedger
 
 	// How long a respawned pawn must stand before a follow entry moves onto it.
 	constexpr uint64_t kFollowSettleMs = 1000;
+
+	// A pending write is tried on this many ticks, then given up (logged once).
+	constexpr int kPendingMaxTries = 300;
 
 	enum class Kind { Toggle, Override };
 
@@ -240,9 +248,11 @@ namespace CheatLedger
 		bool WriteSafe(const Entry& e, const Value& v, bool* undoFailed = nullptr);
 		// A write to do again on later ticks, for the object and slot of `e`: `restore`, while the live
 		// value is `expect` (monostate: whatever it is, for the undo of a half write).
-		struct Pending { Entry e; Value restore, expect; };
+		struct Pending { Entry e; Value restore, expect; int tries = 0; };
 		void Defer(const Entry& e, const Value& restore, const Value& expect);
 		bool IsPending(const Entry& e) const;
+		void ForgetPending(const Entry& e);
+		void PutBackEntry(const Entry& e, const char* why);
 		void RetryPending();
 		// The prior of a composed list entry after the game changed `live`: the members the game
 		// changed take its value, the rest keep the prior. False when the entry is not a list.

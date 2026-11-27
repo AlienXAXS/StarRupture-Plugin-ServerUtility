@@ -61,7 +61,7 @@ struct Rig
 			if (failWrites || failTargets.count(e.target.index)) return false;
 			live[Key(e)] = v; ++writes; return true;
 		};
-		env.alive = [this](const Weak& w) { return !dead.count(w.index); };
+		env.alive = [this](const Weak& w) { return w.Valid() && !dead.count(w.index); };
 		env.stance = [this](const Entry& e)
 		{
 			++stanceCalls;
@@ -1226,6 +1226,152 @@ static void HalfWrite()
 	}
 }
 
+static void PendingWrites()
+{
+	const auto Setup = [](Rig& r)
+	{
+		r.Seed(10, "fly", false);
+		r.Seed(20, "fly", false);
+		r.pawn["A"] = 10;
+		Request q = r.Req(Kind::Toggle, "A", "fly", true, 10, true);
+		q.pin = true;
+		CHECK(r.ledger.Apply(q));
+	};
+	const auto Spectating = [&](Rig& r)
+	{
+		Setup(r);
+		r.spectator.insert("A");
+		r.ledger.Tick();
+		CHECK(r.ledger.Find(Kind::Toggle, "A", "feat", "fly")->noPawn);
+	};
+	{   // a release, a leave, a deny and a stop while the character is a corpse write nothing to it
+		Rig r; Spectating(r);
+		const int before = r.writes;
+		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "fly"));
+		CHECK(r.writes == before && r.Live(10, "fly") == Value(true) && r.ledger.Size() == 0);
+		Rig l; Spectating(l);
+		l.ledger.RestorePlayer("A");
+		CHECK(l.writes == before && l.Live(10, "fly") == Value(true) && l.ledger.Size() == 0);
+		Rig d; Spectating(d);
+		d.denied.insert("A");
+		d.ledger.Reconcile();
+		CHECK(d.writes == before && d.Live(10, "fly") == Value(true) && d.ledger.Size() == 0);
+		Rig p; Spectating(p);
+		p.denied.insert("A");
+		p.ledger.ReconcilePlayer("A");
+		CHECK(p.writes == before && p.ledger.Size() == 0);
+		Rig s; Spectating(s);
+		s.ledger.RestoreAll();
+		CHECK(s.writes == before && s.Live(10, "fly") == Value(true) && s.ledger.Size() == 0);
+	}
+	{   // an Apply in the settle window after the respawn leaves the corpse alone
+		Rig r; Spectating(r);
+		r.spectator.erase("A");
+		r.pawn["A"] = 20;
+		r.ledger.Tick();
+		const int before = r.writes;
+		Request q = r.Req(Kind::Toggle, "A", "fly", true, 20, true);
+		q.pin = true;
+		CHECK(r.ledger.Apply(q));
+		CHECK(r.writes == before + 1 && r.Live(10, "fly") == Value(true) && r.Live(20, "fly") == Value(true));
+	}
+	{   // a failed put-back of an Override with no target is kept, not dropped as dead
+		Rig r; r.Seed(-1, "stack", 100);
+		Request q = r.Req(Kind::Override, "A", "stack", 500);
+		q.target = Weak();
+		CHECK(r.ledger.Apply(q));
+		r.failTargets.insert(-1);
+		CHECK(r.ledger.Release(Kind::Override, "A", "feat", "stack"));
+		for (int i = 0; i < 3; ++i)
+			r.ledger.Tick();
+		CHECK(r.Live(-1, "stack") == Value(500));
+		r.failTargets.clear();
+		r.ledger.Tick();
+		CHECK(r.Live(-1, "stack") == Value(100));
+	}
+	{   // the put-back and its undo both fail: the true prior is still written once the slot works
+		Rig r; Setup(r);
+		r.halfWrites = 2;
+		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "fly"));
+		r.ledger.Tick();
+		CHECK(r.Live(10, "fly") == Value(false));
+		const int after = r.writes;
+		r.ledger.Tick();
+		CHECK(r.writes == after);
+	}
+	{   // a release while an earlier write to the slot is pending: the prior takes its place
+		Rig r; r.Seed(10, "stack", 100);
+		CHECK(r.ledger.Apply(r.Req(Kind::Override, "A", "stack", 500)));
+		r.halfWrites = 2;
+		CHECK(!r.ledger.Apply(r.Req(Kind::Override, "A", "stack", 700)));
+		r.failTargets.insert(10);
+		CHECK(r.ledger.Release(Kind::Override, "A", "feat", "stack"));
+		r.failTargets.clear();
+		r.ledger.Tick();
+		CHECK(r.Live(10, "stack") == Value(100));
+		r.ledger.Tick();
+		CHECK(r.Live(10, "stack") == Value(100));
+	}
+	{   // a park while an undo is pending waits for it, adds nothing, and the character ends up put back
+		Rig r; Setup(r);
+		r.vehicle.insert("A");
+		r.halfWrites = 2;
+		r.ledger.Tick();
+		CHECK(!r.ledger.Find(Kind::Toggle, "A", "feat", "fly")->parked);
+		r.failTargets.insert(10);
+		const int before = r.writes;
+		for (int i = 0; i < 3; ++i)
+			r.ledger.Tick();
+		CHECK(r.writes == before);
+		r.failTargets.clear();
+		for (int i = 0; i < 3; ++i)
+			r.ledger.Tick();
+		CHECK(r.Live(10, "fly") == Value(false) && r.ledger.Find(Kind::Toggle, "A", "feat", "fly")->parked);
+		const int after = r.writes;
+		r.ledger.Tick();
+		CHECK(r.writes == after);
+	}
+	{   // a write that never works is given up after a bounded number of tries, said once, and no longer blocks the slot
+		Rig r; Setup(r);
+		r.failTargets.insert(10);
+		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "fly"));
+		for (int i = 0; i < kPendingMaxTries + 5; ++i)
+			r.ledger.Tick();
+		int said = 0;
+		for (const auto& l : r.logs)
+			said += l.find("tries, left as is") != std::string::npos ? 1 : 0;
+		CHECK(said == 1);
+		r.failTargets.clear();
+		const int before = r.writes;
+		r.ledger.Tick();
+		CHECK(r.writes == before);
+		CHECK(r.ledger.Apply(r.Req(Kind::Toggle, "A", "fly", true, 10, false)));
+	}
+	{   // a world end drops the writes waiting on its objects without writing
+		Rig r; Setup(r);
+		r.failTargets.insert(10);
+		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "fly"));
+		r.ledger.OnWorldEnd();
+		r.failTargets.clear();
+		const int before = r.writes;
+		r.ledger.Tick();
+		CHECK(r.writes == before && r.Live(10, "fly") == Value(true));
+	}
+	{   // a stop tries each waiting write once more, and says what it could not write
+		Rig r; Setup(r);
+		r.failTargets.insert(10);
+		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "fly"));
+		r.failTargets.clear();
+		r.ledger.RestoreAll();
+		CHECK(r.Live(10, "fly") == Value(false));
+		Rig q; Setup(q);
+		q.failTargets.insert(10);
+		CHECK(q.ledger.Release(Kind::Toggle, "A", "feat", "fly"));
+		q.ledger.RestoreAll();
+		CHECK(Has(q.logs, "stop: could not write"));
+	}
+}
+
 int main()
 {
 	Toggles();
@@ -1245,6 +1391,7 @@ int main()
 	HalfWrite();
 	RebaseMembers();
 	DeadCharacter();
+	PendingWrites();
 	std::printf("=== cheat_ledger_tests  %d checks, %d failed\n", g_checks, g_failed);
 	return g_failed ? 1 : 0;
 }
