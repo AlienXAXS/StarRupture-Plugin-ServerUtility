@@ -71,25 +71,34 @@ namespace CheatLedger
 		m_followers.store(n);
 	}
 
-	Ledger::Map::iterator Ledger::Restore(Map::iterator it, const char* why)
+	bool Ledger::PutBack(const Entry& e, const char* why, bool quiet)
 	{
-		const Entry& e = it->second;
-		if (e.target.Valid() && !m_env.alive(e.target))
-			return Drop(it, "its target is gone");
-
 		const Value live = m_env.read(e);
 		if (live == e.applied)
 		{
 			if (m_env.write(e, e.prior))
+			{
 				Log("restore " + Describe(e) + ": " + ToText(e.applied) + " -> " + ToText(e.prior) + " (" + why + ")");
-			else
+				return true;
+			}
+			if (!quiet)
 				Log("restore " + Describe(e) + ": could not write " + ToText(e.prior) + ", left as is (" + why + ")");
+			return false;
 		}
-		else
-		{
-			Log("restore " + Describe(e) + ": changed by the game or someone else (now " + ToText(live) + ", SU wrote " +
-				ToText(e.applied) + "), left as is (" + why + ")");
-		}
+		Log("restore " + Describe(e) + ": changed by the game or someone else (now " + ToText(live) + ", SU wrote " +
+			ToText(e.applied) + "), left as is (" + why + ")");
+		return true;
+	}
+
+	Ledger::Map::iterator Ledger::Restore(Map::iterator it, const char* why)
+	{
+		const Entry& e = it->second;
+		if (e.parked)
+			return Drop(it, "the character was already put back");
+		if (e.target.Valid() && !m_env.alive(e.target))
+			return Drop(it, "its target is gone");
+
+		PutBack(e, why);
 		it = m_entries.erase(it);
 		CountFollowers();
 		return it;
@@ -101,9 +110,10 @@ namespace CheatLedger
 		auto it = m_entries.find(key);
 
 		// A new target (a respawned pawn) is a new capture: the old one belonged to an object that is gone.
-		if (it != m_entries.end() && !(it->second.target == req.target))
+		// So is a parked entry's: its character was put back, the prior it holds is stale.
+		if (it != m_entries.end() && (it->second.parked || !(it->second.target == req.target)))
 		{
-			Drop(it, "the target changed");
+			Drop(it, it->second.parked ? "the character was already put back" : "the target changed");
 			it = m_entries.end();
 		}
 
@@ -220,6 +230,34 @@ namespace CheatLedger
 			it = Restore(it, "server stop");
 	}
 
+	void Ledger::Park(Entry& e)
+	{
+		e.settling = Weak();
+		if (e.parked)
+			return;
+		// The character is alive and parked: put it back before letting it go. A dead one has
+		// nothing to put back, and nothing is written to it. A failed write is retried next tick,
+		// so the prior is never lost to a half-reverted character.
+		if (e.target.Valid() && m_env.alive(e.target))
+		{
+			if (!PutBack(e, "possessed a vehicle", e.followStuck))
+			{
+				if (!e.followStuck)
+				{
+					e.followStuck = true;
+					Log("follow " + Describe(e) + ": the character could not be put back yet, retrying");
+				}
+				return;
+			}
+		}
+		else
+		{
+			Log("follow " + Describe(e) + ": possessed a vehicle, the character is gone, nothing written");
+		}
+		e.parked = true;
+		e.followStuck = false;
+	}
+
 	void Ledger::FollowTick()
 	{
 		if (!m_env.rebind)
@@ -229,9 +267,15 @@ namespace CheatLedger
 			Entry& e = kv.second;
 			if (!e.follow || e.kind != Kind::Toggle)
 				continue;
-			const Weak now = m_env.rebind(e);
-			// No pawn yet: the entry waits, still held. Same object: nothing to move.
-			if (!now.Valid() || now == e.target)
+			const Rebound now = m_env.rebind(e);
+			// A vehicle gets no write; the character goes back to what it was.
+			if (now.where == Rebound::Where::Elsewhere)
+			{
+				Park(e);
+				continue;
+			}
+			// No pawn yet: the entry waits, still held. Same object, never parked: nothing to move.
+			if (now.where != Rebound::Where::Character || !now.target.Valid() || (!e.parked && now.target == e.target))
 			{
 				e.settling = Weak();
 				continue;
@@ -240,13 +284,14 @@ namespace CheatLedger
 			// A new pawn's attribute and movement data may not be initialised on the first tick it
 			// is seen, and zero is a real value for many stats, so there is no telling a blank pawn
 			// from a set-up one by its values. Rebind only once the same pawn has stood for a settle
-			// period; until then nothing is read from or written to it.
+			// period; until then nothing is read from or written to it. The same goes for a character
+			// the player returns to: the game resets it on return.
 			if (m_env.nowMs)
 			{
 				const uint64_t t = m_env.nowMs();
-				if (!(e.settling == now))
+				if (!(e.settling == now.target))
 				{
-					e.settling = now;
+					e.settling = now.target;
 					e.settleSinceMs = t;
 					continue;
 				}
@@ -255,7 +300,7 @@ namespace CheatLedger
 			}
 
 			Entry moved = e;
-			moved.target = now;
+			moved.target = now.target;
 			moved.prior = m_env.read(moved);
 			if (std::holds_alternative<std::monostate>(moved.prior) || !m_env.write(moved, e.applied))
 			{
@@ -266,8 +311,9 @@ namespace CheatLedger
 				}
 				continue;
 			}
-			Log("follow " + Describe(e) + ": new pawn, " + ToText(moved.prior) + " -> " + ToText(e.applied));
+			Log("follow " + Describe(e) + ": " + (e.parked ? "character again, " : "new pawn, ") + ToText(moved.prior) + " -> " + ToText(e.applied));
 			moved.followStuck = false;
+			moved.parked = false;
 			moved.settling = Weak();
 			moved.appliedAtMs = m_env.nowMs ? m_env.nowMs() : 0;
 			e = moved;
@@ -284,7 +330,8 @@ namespace CheatLedger
 		for (auto it = m_entries.begin(); it != m_entries.end();)
 		{
 			const Entry& e = it->second;
-			if (!e.pin)
+			// A parked entry holds nothing on any object.
+			if (!e.pin || e.parked)
 			{
 				++it;
 				continue;

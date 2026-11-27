@@ -15,7 +15,8 @@ namespace CheatLedgerGame
 	// target, resolved and validated just now (null for an Override without a target); it is used
 	// inside the call only. rebind is for a slot whose entries follow the player (Request::follow):
 	// given the player's controller, it returns the object the slot lives on for their current pawn
-	// (a weak reference), or an invalid one while they have no usable pawn. Game thread.
+	// (a weak reference), or an invalid one while they have no usable character. The glue tells a
+	// possessed vehicle from no pawn by itself. Game thread.
 	struct Accessor
 	{
 		CheatLedger::Value (*read)(SDK::UObject* obj, const CheatLedger::Entry& e) = nullptr;

@@ -11,6 +11,11 @@
 //            on: when that object dies or the player's pawn changes (a respawn), the entry stays
 //            and the next Tick writes its value to the new pawn's object, capturing that object's
 //            own prior value first. Until then the entry is held, so a read-back still says on.
+//            While the player possesses something that is not their character (a vehicle), the
+//            character, still alive, is put back to its prior at once and the entry is parked:
+//            nothing is written until a character has stood for a settle period, when the prior is
+//            captured afresh and the held value written. Leave, deny and stop on a parked entry
+//            write nothing: the character was already put back.
 //   Override a server-wide setting (stack size, a paused wave). Stays when the admin who set it
 //            leaves or at world end; reverts when the feature is denied for that admin (connected or
 //            not: the entry keeps the proof state the owner last had), when an admin or RCON
@@ -56,6 +61,19 @@ namespace CheatLedger
 
 	enum class Kind { Toggle, Override };
 
+	// Where a follow entry's player stands now, as the glue sees it.
+	struct Rebound
+	{
+		enum class Where
+		{
+			NoPawn,       // no pawn, or a character whose value is not reachable yet: the entry waits
+			Elsewhere,    // possessing something that is not their character (a vehicle)
+			Character     // their character: target is the object the value lives on
+		};
+		Where where = Where::NoPawn;
+		Weak  target;
+	};
+
 	struct Entry
 	{
 		uint64_t    seq = 0;                     // ledger order, for the log
@@ -66,6 +84,7 @@ namespace CheatLedger
 		bool        pin  = false;                // Tick writes `applied` back while it differs
 		bool        follow = false;              // Toggle only: the target is the player's pawn or a part of it; Tick moves it to the new one
 		bool        followStuck = false;         // the last attempt to move it failed (logged once)
+		bool        parked = false;              // follow: the player is in a vehicle; the character was put back and holds nothing of ours
 		Weak        settling;                    // follow: the new pawn being waited on, until the game has set it up
 		uint64_t    settleSinceMs = 0;           // when `settling` was first seen
 		Weak        target;                      // what the value lives on (an Override may have none)
@@ -98,9 +117,9 @@ namespace CheatLedger
 		// Write a value to the entry's slot; false when it could not be written.
 		std::function<bool(const Entry&, const Value&)>   write;
 		std::function<bool(const Weak&)>                  alive;
-		// For a follow entry: the object the player's value now belongs on (their current pawn's
-		// component or set); an invalid Weak while they have none. Game thread.
-		std::function<Weak(const Entry&)>                 rebind;
+		// For a follow entry: where the player stands and, on their character, the object the
+		// player's value now belongs on (the character's component or set). Game thread.
+		std::function<Rebound(const Entry&)>              rebind;
 		// Whether the feature is still allowed for the entry's owner. While the owner is connected
 		// the glue refreshes e.ownerProven; once they are gone it decides from the stored value.
 		std::function<Allowance(Entry&)>                  allowed;
@@ -174,8 +193,13 @@ namespace CheatLedger
 		Map::iterator Drop(Map::iterator it, const char* why);
 
 		// Move each follow entry whose player now has another pawn (or whose target died) onto the
-		// new object: capture its prior, write the held value.
+		// new object: capture its prior, write the held value. While the player is in a vehicle the
+		// character is put back and the entry is parked until a character settles again.
 		void FollowTick();
+		// Put back the live value if it is still the one SU wrote. False when the write failed.
+		bool PutBack(const Entry& e, const char* why, bool quiet = false);
+		// The player entered a vehicle: put the character back and hold the entry.
+		void Park(Entry& e);
 		void CountFollowers();
 
 		Env               m_env;

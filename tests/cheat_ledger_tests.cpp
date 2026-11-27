@@ -31,6 +31,8 @@ struct Rig
 	std::set<std::string> denied;           // player ids the feature is denied for (owner's stored proof is false)
 	std::set<std::string> connected;        // player ids connected now
 	std::map<std::string, int32_t> pawn;    // player id -> the index of the object their pawn has now (none: no pawn)
+	std::set<std::string> vehicle;          // player ids who possess something that is not their character
+	bool failWrites = false;                // every write fails
 	bool gameThread = true;
 	uint64_t now = 1000;
 	int writes = 0;
@@ -45,12 +47,23 @@ struct Rig
 	{
 		Env env;
 		env.read = [this](const Entry& e) { auto it = live.find(Key(e)); return it == live.end() ? Value() : it->second; };
-		env.write = [this](const Entry& e, const Value& v) { live[Key(e)] = v; ++writes; return true; };
+		env.write = [this](const Entry& e, const Value& v) { if (failWrites) return false; live[Key(e)] = v; ++writes; return true; };
 		env.alive = [this](const Weak& w) { return !dead.count(w.index); };
 		env.rebind = [this](const Entry& e)
 		{
+			Rebound r;
+			if (vehicle.count(e.playerId))
+			{
+				r.where = Rebound::Where::Elsewhere;
+				return r;
+			}
 			const auto it = pawn.find(e.playerId);
-			return it == pawn.end() ? Weak() : Weak{ it->second, 1, 2, 0x2000 };
+			if (it != pawn.end())
+			{
+				r.where = Rebound::Where::Character;
+				r.target = Weak{ it->second, 1, 2, 0x2000 };
+			}
+			return r;
 		};
 		env.allowed = [this](Entry& e)
 		{
@@ -336,6 +349,178 @@ static void Follow()
 	}
 }
 
+// A follow Toggle while the player possesses a vehicle: the character is put back and nothing is
+// written to the vehicle; back in the character, it settles, captures the originals and writes.
+static void FollowVehicle()
+{
+	const auto Setup = [](Rig& r)
+	{
+		r.Seed(10, "fly", false);
+		r.pawn["A"] = 10;
+		Request q = r.Req(Kind::Toggle, "A", "fly", true, 10, true);
+		q.pin = true;
+		CHECK(r.ledger.Apply(q));
+	};
+	{   // character -> vehicle: the character is reverted at once, the vehicle gets no write
+		Rig r; Setup(r);
+		r.vehicle.insert("A");
+		r.ledger.Tick();
+		CHECK(r.Live(10, "fly") == Value(false));
+		CHECK(r.writes == 2);                                    // the apply and the revert
+		CHECK(r.ledger.Has(Kind::Toggle, "A", "feat", "fly"));   // read-back stays on
+		CHECK(Has(r.logs, "(possessed a vehicle)"));
+		// no further write, not even from the pin, however long it lasts
+		for (int i = 0; i < 5; ++i)
+		{
+			r.now += kFollowSettleMs;
+			r.ledger.Tick();
+		}
+		CHECK(r.writes == 2);
+		CHECK(r.Live(10, "fly") == Value(false));
+		CHECK(r.live.size() == 1);                               // nothing was written to any other object
+		CHECK(!Has(r.logs, "retrying"));                         // an expected vehicle is not a stuck follow
+		const Entry* e = r.ledger.Find(Kind::Toggle, "A", "feat", "fly");
+		CHECK(e && e->parked && e->applied == Value(true));
+	}
+	{   // vehicle -> the same character: it settles, then captures the originals and writes
+		Rig r; Setup(r);
+		r.vehicle.insert("A");
+		r.ledger.Tick();
+		r.vehicle.erase("A");
+		const int before = r.writes;
+		r.ledger.Tick();                                         // sees the character: the settle starts
+		CHECK(r.writes == before);
+		r.now += kFollowSettleMs - 1;
+		r.ledger.Tick();
+		CHECK(r.writes == before);
+		CHECK(r.Live(10, "fly") == Value(false));
+		r.now += 1;
+		r.ledger.Tick();
+		CHECK(r.writes == before + 1);
+		CHECK(r.Live(10, "fly") == Value(true));
+		const Entry* e = r.ledger.Find(Kind::Toggle, "A", "feat", "fly");
+		CHECK(e && !e->parked && e->target.index == 10 && e->prior == Value(false) && e->applied == Value(true));
+		CHECK(Has(r.logs, "character again"));
+		// the capture was the true original: a revert puts it back
+		r.ledger.Release(Kind::Toggle, "A", "feat", "fly");
+		CHECK(r.Live(10, "fly") == Value(false));
+	}
+	{   // the prior is captured afresh, never the one saved before the vehicle
+		Rig r; r.Seed(10, "fly", Value(1));
+		r.pawn["A"] = 10;
+		CHECK(r.ledger.Apply(r.Req(Kind::Toggle, "A", "fly", Value(2), 10, true)));
+		r.vehicle.insert("A");
+		r.ledger.Tick();
+		CHECK(r.Live(10, "fly") == Value(1));
+		r.vehicle.erase("A");
+		r.Seed(10, "fly", Value(5));                             // the game changed it while the player was away
+		r.ledger.Tick();
+		r.now += kFollowSettleMs;
+		r.ledger.Tick();
+		const Entry* e = r.ledger.Find(Kind::Toggle, "A", "feat", "fly");
+		CHECK(e && e->prior == Value(5) && e->applied == Value(2));
+	}
+	{   // the settle restarts when the player goes back into a vehicle
+		Rig r; Setup(r);
+		r.vehicle.insert("A");
+		r.ledger.Tick();
+		r.vehicle.erase("A");
+		r.ledger.Tick();
+		r.now += kFollowSettleMs - 1;
+		r.vehicle.insert("A");
+		r.ledger.Tick();
+		r.vehicle.erase("A");
+		r.ledger.Tick();
+		r.now += 1;
+		r.ledger.Tick();
+		CHECK(r.Live(10, "fly") == Value(false));                // not settled yet
+		r.now += kFollowSettleMs;
+		r.ledger.Tick();
+		CHECK(r.Live(10, "fly") == Value(true));
+	}
+	{   // leave while in a vehicle: nothing is written, the entry is gone
+		Rig r; Setup(r);
+		r.vehicle.insert("A");
+		r.ledger.Tick();
+		const int before = r.writes;
+		r.ledger.RestorePlayer("A");
+		CHECK(r.ledger.Size() == 0);
+		CHECK(!r.ledger.Has(Kind::Toggle, "A", "feat", "fly"));
+		CHECK(r.writes == before);
+	}
+	{   // deny while in a vehicle
+		Rig r; Setup(r);
+		r.vehicle.insert("A");
+		r.ledger.Tick();
+		const int before = r.writes;
+		r.denied.insert("A");
+		r.ledger.ReconcilePlayer("A");
+		CHECK(r.ledger.Size() == 0);
+		CHECK(r.writes == before);
+	}
+	{   // server stop while in a vehicle
+		Rig r; Setup(r);
+		r.vehicle.insert("A");
+		r.ledger.Tick();
+		const int before = r.writes;
+		r.ledger.RestoreAll();
+		CHECK(r.ledger.Size() == 0);
+		CHECK(r.writes == before);
+		CHECK(r.Live(10, "fly") == Value(false));
+	}
+	{   // switched off while in a vehicle
+		Rig r; Setup(r);
+		r.vehicle.insert("A");
+		r.ledger.Tick();
+		const int before = r.writes;
+		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "fly"));
+		CHECK(r.ledger.Size() == 0);
+		CHECK(r.writes == before);
+	}
+	{   // the character died while its player was in a vehicle: nothing is written, a later character is followed
+		Rig r; Setup(r);
+		r.dead.insert(10);
+		r.vehicle.insert("A");
+		const int before = r.writes;
+		r.ledger.Tick();
+		CHECK(r.writes == before);
+		CHECK(r.ledger.Has(Kind::Toggle, "A", "feat", "fly"));
+		r.vehicle.erase("A");
+		r.pawn["A"] = 20;
+		r.Seed(20, "fly", Value(false));
+		r.Respawned();
+		CHECK(r.Live(20, "fly") == Value(true));
+	}
+	{   // a revert that cannot be written is retried, logged once, and the entry is not parked half-reverted
+		Rig r; Setup(r);
+		r.vehicle.insert("A");
+		r.failWrites = true;
+		r.ledger.Tick();
+		r.ledger.Tick();
+		int stuck = 0;
+		for (const auto& l : r.logs)
+			stuck += l.find("put back yet, retrying") != std::string::npos ? 1 : 0;
+		CHECK(stuck == 1);
+		const Entry* e = r.ledger.Find(Kind::Toggle, "A", "feat", "fly");
+		CHECK(e && !e->parked);
+		r.failWrites = false;
+		r.ledger.Tick();
+		e = r.ledger.Find(Kind::Toggle, "A", "feat", "fly");
+		CHECK(e && e->parked);
+		CHECK(r.Live(10, "fly") == Value(false));
+	}
+	{   // asking for the toggle again once back in the character captures afresh
+		Rig r; Setup(r);
+		r.vehicle.insert("A");
+		r.ledger.Tick();
+		r.vehicle.erase("A");
+		CHECK(r.ledger.Apply(r.Req(Kind::Toggle, "A", "fly", true, 10, true)));
+		const Entry* e = r.ledger.Find(Kind::Toggle, "A", "feat", "fly");
+		CHECK(e && !e->parked && e->prior == Value(false));
+		CHECK(r.Live(10, "fly") == Value(true));
+	}
+}
+
 static void Overrides()
 {
 	{   // survives the owner leaving and the world ending
@@ -508,6 +693,7 @@ int main()
 {
 	Toggles();
 	Follow();
+	FollowVehicle();
 	Overrides();
 	Grants();
 	OthersChange();

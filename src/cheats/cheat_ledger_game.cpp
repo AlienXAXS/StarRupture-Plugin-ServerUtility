@@ -9,6 +9,7 @@
 #include "object_serial.h"
 #include "plugin_helpers.h"
 
+#include "SDK/Chimera_classes.hpp"
 #include "SDK/Engine_classes.hpp"
 
 #include <Windows.h>
@@ -30,6 +31,24 @@ namespace CheatLedgerGame
 		{
 			auto* hooks = GetHooks();
 			return hooks && hooks->Engine && hooks->Engine->IsGameThread();
+		}
+
+		// Whether the controller possesses a pawn that is not a player character (a vehicle). No C++
+		// objects needing unwinding in this frame: SEH is legal.
+		bool PossessesNonCharacter_SEH(void* controller)
+		{
+			__try
+			{
+				auto* pc = static_cast<SDK::APlayerController*>(controller);
+				if (!pc)
+					return false;
+				SDK::APawn* pawn = pc->K2_GetPawn();
+				return pawn && !pawn->IsA(SDK::ACrCharacterPlayerBase::StaticClass());
+			}
+			__except (EXCEPTION_EXECUTE_HANDLER)
+			{
+				return false;
+			}
 		}
 
 		const Accessor* AccessorFor(const Entry& e)
@@ -77,13 +96,21 @@ namespace CheatLedgerGame
 				return a->write(obj, e, v);
 			};
 			env.alive = [](const Weak& w) { return Resolve(w) != nullptr; };
-			env.rebind = [](const Entry& e) -> Weak
+			env.rebind = [](const Entry& e) -> Rebound
 			{
+				Rebound r;
 				const Accessor* a = AccessorFor(e);
-				if (!a || !a->rebind)
-					return Weak();
+				if (!a || !a->rebind || !OnGameThread())
+					return r;
 				SDK::UObject* pc = Resolve(e.conn);
-				return pc ? a->rebind(pc, e) : Weak();
+				if (!pc)
+					return r;
+				r.target = a->rebind(pc, e);
+				if (r.target.Valid())
+					r.where = Rebound::Where::Character;
+				else if (PossessesNonCharacter_SEH(pc))
+					r.where = Rebound::Where::Elsewhere;
+				return r;
 			};
 			env.allowed = [](Entry& e) -> Allowance
 			{
