@@ -58,6 +58,54 @@ static void Resolve()
 	PluginMap::ResolveFields(&scanner, nullptr, PolicyMap::Map, PolicyMap::KeyIndex, PolicyMap::KeySerial);
 }
 
+// A policy map as the game lays it out: three slots of `stride` bytes (a key's two ints,
+// the value, then HashNextId and HashIndex at the given offsets), the middle one free.
+// The slots and offsets are written out here, not taken from PolicyMap::Layout(), so the
+// walk checks the layout against the engine's. The map sits in a block at Map.offset.
+static void WalkCheck(const char* what, uint32_t stride, uint32_t valueAt, uint32_t nextAt, uint32_t hashAt)
+{
+	std::vector<uint8_t> slots(3 * stride, 0);
+	auto put = [&](uint32_t slot, uint32_t at, int32_t v) { std::memcpy(&slots[slot * stride + at], &v, sizeof(v)); };
+	const uint32_t indexAt = static_cast<uint32_t>(PolicyMap::KeyIndex.offset);
+	const uint32_t serialAt = static_cast<uint32_t>(PolicyMap::KeySerial.offset);
+	put(0, indexAt, 7);  put(0, serialAt, 70); put(0, valueAt, 1); put(0, nextAt, -1); put(0, hashAt, 0);
+	put(2, indexAt, 9);  put(2, serialAt, 90); put(2, valueAt, 2); put(2, nextAt, -1); put(2, hashAt, 1);
+	put(1, 0, -1); put(1, 4, -1); // the free slot's links
+
+	PluginMap::ScriptSetMemory map{};
+	map.data = slots.data();
+	map.num = 3;
+	map.max = 4;
+	map.inlineBits[0] = 0x5;
+	map.numBits = 3;
+	map.maxBits = 128;
+	map.firstFreeIndex = 1;
+	map.numFreeIndices = 1;
+	map.hashSize = 2;
+
+	std::vector<uint8_t> block(0x100, 0);
+	std::memcpy(&block[PolicyMap::Map.offset], &map, sizeof(map));
+
+	const PluginMap::ScriptMapView view(PolicyMap::Map.In(static_cast<const void*>(block.data())), PolicyMap::Layout());
+	CHECK(static_cast<bool>(view));
+	CHECK(view.Num() == 2);
+
+	int seen = 0;
+	view.ForEach([&](uint8_t* key, uint8_t* value)
+	{
+		int32_t index = 0, serial = 0;
+		PolicyMap::Value v = 0;
+		std::memcpy(&index, key + PolicyMap::KeyIndex.offset, sizeof(index));
+		std::memcpy(&serial, key + PolicyMap::KeySerial.offset, sizeof(serial));
+		std::memcpy(&v, value, sizeof(v));
+		if (index == 7) { CHECK(serial == 70 && v == 1); }
+		else if (index == 9) { CHECK(serial == 90 && v == 2); }
+		else { CHECK(false); }
+		++seen;
+	});
+	CHECK(seen == 2);
+}
+
 int main()
 {
 	// The compiled values are what the plugin asks the loader with.
@@ -83,6 +131,8 @@ int main()
 		CHECK(layout.hashNextIdOffset == 12 && layout.hashIndexOffset == 16);
 		CHECK(layout.elementSize == 20 && layout.stride == 20);
 	}
+	// The engine's layout of that map: 20-byte slots, value +8, HashNextId +12, HashIndex +16.
+	WalkCheck("fallback", 20, 8, 12, 16);
 
 	// A row wins over the fallback: the offsets and the layout follow the row.
 	g_answer = Answer::Row;
@@ -95,6 +145,8 @@ int main()
 		CHECK(layout.hashNextIdOffset == 16 && layout.hashIndexOffset == 20);
 		CHECK(layout.elementSize == 24 && layout.stride == 24);
 	}
+	// A 12-byte key then: value +12, HashNextId +16, HashIndex +20, 24-byte slots.
+	WalkCheck("row", 24, 12, 16, 20);
 
 	// A key the loader cannot resolve: no layout, so nothing is walked.
 	g_answer = Answer::Fail;

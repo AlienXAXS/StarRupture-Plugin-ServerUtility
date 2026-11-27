@@ -401,6 +401,7 @@
     <ClInclude Include="game_signatures.h" />
     <ClInclude Include="scan_helpers.h" />
     <ClInclude Include="object_serial.h" />
+    <ClInclude Include="policy_map.h" />
     <ClInclude Include="server_utility_fields.h" />
     <ClInclude Include="plugin_interface.h" />
     <ClInclude Include="rcon\commands\cmd_save.h" />

@@ -116,6 +116,9 @@ static std::vector<T*> FindInstancesOf(SDK::UClass* cls)
 	return out;
 }
 
+// The map's value is read as PolicyMap::Value; the game's enum has to be that size.
+static_assert(sizeof(SDK::EClassRepNodeMapping) == sizeof(PolicyMap::Value), "EClassRepNodeMapping is stored as a uint32");
+
 // Rewrites the graph's cached routing policy for `cls`.
 //
 // UCrReplicationGraph::ClassRepNodePolicies is a TClassMap: a TFunction
@@ -132,16 +135,22 @@ static int PatchClassPolicy(SDK::UCrReplicationGraph* graph, SDK::UClass* cls, u
 		LOG_ERROR("[GatherableFix] ClassRepNodePolicies did not resolve - cannot patch the live graph");
 		return -1;
 	}
-	// The map has to lie inside the block the loader's row sizes.
-	if (PolicyMap::Map.offset < 0 || !PolicyMap::Layout().valid
-	    || static_cast<size_t>(PolicyMap::Map.offset) + sizeof(PluginMap::ScriptSetMemory) > sizeof(ClassRepNodePolicyBlock))
+	const PluginMap::ScriptSetLayout layout = PolicyMap::Layout();
+	if (PolicyMap::Map.offset < 0 || !layout.valid)
 	{
 		LOG_ERROR("[GatherableFix] The loader has no usable row for the policy map or its key - policy not patched");
 		return -1;
 	}
+	// The map has to lie inside the block the loader's row sizes.
+	if (static_cast<size_t>(PolicyMap::Map.offset) + sizeof(PluginMap::ScriptSetMemory) > sizeof(ClassRepNodePolicyBlock))
+	{
+		LOG_ERROR("[GatherableFix] The policy map (offset 0x%X) does not lie inside ClassRepNodePolicies - policy not patched",
+		          static_cast<unsigned>(PolicyMap::Map.offset));
+		return -1;
+	}
 	const auto base = policies + PolicyMap::Map.offset;
 
-	const PluginMap::ScriptMapView map(base, PolicyMap::Layout());
+	const PluginMap::ScriptMapView map(base, layout);
 	if (!map)
 	{
 		LOG_ERROR("[GatherableFix] ClassRepNodePolicies map at graph+0x%zX does not look like a TMap (%s) - "

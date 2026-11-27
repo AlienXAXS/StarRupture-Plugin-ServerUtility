@@ -29,7 +29,9 @@
 // AGameStateBase::PlayerArray, AActor::Owner and APlayerController::PlayerState,
 // as are the player name and ping, AActor::bAlwaysRelevant and the UObject class
 // and index. No game or engine member is read at an offset compiled into the
-// plugin: what is not in this table is the SDK's own inline code.
+// plugin: what is not in this table is the SDK's own inline code. The replication
+// graph's policy map and its key ints are in policy_map.h (PolicyMap), which
+// follows the same rule and lists its keys in the gatherable feature below.
 
 // Minimal FString mirror so we can manipulate engine strings from outside.
 // Layout matches UE4/UE5 TArray<TCHAR> used as FString storage.
