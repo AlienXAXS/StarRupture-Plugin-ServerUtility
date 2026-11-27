@@ -104,6 +104,55 @@ static void WalkCheck(const char* what, uint32_t stride, uint32_t valueAt, uint3
 		++seen;
 	});
 	CHECK(seen == 2);
+
+	// Retarget_SEH on the same map: the entry whose index and serial both match is rewritten and
+	// the old value reported; the other entry is untouched.
+	uint8_t* mapAt = block.data() + PolicyMap::Map.offset;
+	const PluginMap::ScriptSetLayout layout = PolicyMap::Layout();
+	auto valueOf = [&](uint32_t slot) { PolicyMap::Value v = 0; std::memcpy(&v, &slots[slot * stride + valueAt], sizeof(v)); return v; };
+	{
+		PolicyMap::RetargetResult r;
+		PolicyMap::Retarget_SEH(mapAt, layout, 7, 70, 5, &r);
+		CHECK(r.status == PolicyMap::RetargetResult::Status::Done);
+		CHECK(r.changed == 1 && r.oldValue == 1 && r.mismatched == 0);
+		CHECK(valueOf(0) == 5 && valueOf(2) == 2);
+	}
+	// The index is there with another serial (the object died, the slot was reused): nothing is
+	// written, the entry is counted and its serial reported.
+	{
+		PolicyMap::RetargetResult r;
+		PolicyMap::Retarget_SEH(mapAt, layout, 9, 91, 6, &r);
+		CHECK(r.status == PolicyMap::RetargetResult::Status::Done);
+		CHECK(r.changed == 0 && r.mismatched == 1 && r.mismatchSerial == 90);
+		CHECK(valueOf(2) == 2);
+	}
+	// No entry for the index at all.
+	{
+		PolicyMap::RetargetResult r;
+		PolicyMap::Retarget_SEH(mapAt, layout, 8, 80, 6, &r);
+		CHECK(r.status == PolicyMap::RetargetResult::Status::Done && r.changed == 0 && r.mismatched == 0);
+	}
+	// A block whose header counts are inconsistent (more elements than the container holds, as a
+	// wrong offset could land on): the view refuses it with a reason, nothing is walked or written.
+	{
+		std::vector<uint8_t> bad = block;
+		PluginMap::ScriptSetMemory header{};
+		std::memcpy(&header, &bad[PolicyMap::Map.offset], sizeof(header));
+		header.num = header.max + 1;
+		std::memcpy(&bad[PolicyMap::Map.offset], &header, sizeof(header));
+		PolicyMap::RetargetResult r;
+		PolicyMap::Retarget_SEH(bad.data() + PolicyMap::Map.offset, layout, 7, 70, 5, &r);
+		CHECK(r.status == PolicyMap::RetargetResult::Status::NotAMap);
+		CHECK(r.reason != nullptr && std::strlen(r.reason) > 0 && r.changed == 0);
+		CHECK(valueOf(0) == 5);
+	}
+	// A pointer that is not memory (a wrong offset on a build whose block holds something else):
+	// the fault is caught, the result says Fault.
+	{
+		PolicyMap::RetargetResult r;
+		PolicyMap::Retarget_SEH(reinterpret_cast<uint8_t*>(0x10), layout, 7, 70, 5, &r);
+		CHECK(r.status == PolicyMap::RetargetResult::Status::Fault && r.changed == 0);
+	}
 }
 
 int main()
@@ -148,11 +197,24 @@ int main()
 	// A 12-byte key then: value +12, HashNextId +16, HashIndex +20, 24-byte slots.
 	WalkCheck("row", 24, 12, 16, 20);
 
+	// FitsInBlock: the whole map must lie inside the member's block, as the loader sizes it for
+	// this build. g_answer is Row here, so the map is at 0x38.
+	{
+		const size_t end = static_cast<size_t>(PolicyMap::Map.offset) + sizeof(PluginMap::ScriptSetMemory);
+		CHECK(PolicyMap::FitsInBlock(end));
+		CHECK(PolicyMap::FitsInBlock(end + 8));
+		CHECK(!PolicyMap::FitsInBlock(end - 1));
+		CHECK(!PolicyMap::FitsInBlock(0));
+	}
+
 	// A key the loader cannot resolve: no layout, so nothing is walked.
 	g_answer = Answer::Fail;
 	Resolve();
 	CHECK(PolicyMap::KeyIndex.offset < 0 && PolicyMap::KeySerial.offset < 0);
 	CHECK(!PolicyMap::Layout().valid);
+	// A map offset that did not resolve fits no block.
+	PolicyMap::Map.offset = -1;
+	CHECK(!PolicyMap::FitsInBlock(0x1000));
 
 	std::printf("policy_map_tests: %d checks, %d failed\n", g_checks, g_failed);
 	return g_failed ? 1 : 0;

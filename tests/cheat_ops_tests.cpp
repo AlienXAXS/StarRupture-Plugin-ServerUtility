@@ -1049,6 +1049,21 @@ static void GridTests()
 		CHECK(OpGrid::Handle(ctx, GridReq("10", "10")).status == CheatWire::Status::Ok && f.calls == 1);
 		f.used = 0;
 	}
+	// One item in slot 99 (reach 100) on a mostly empty grid: an 8x8 resize is refused, 10x10 fits.
+	{
+		f.calls = 0;
+		f.used = 100;
+		const Result r = OpGrid::Handle(ctx, GridReq("8", "8"));
+		CHECK(r.status == CheatWire::Status::Refused && r.reason == "Your items need 100 slots. Pick a bigger grid." && f.calls == 0);
+		CHECK(OpGrid::Handle(ctx, GridReq("10", "10")).status == CheatWire::Status::Ok && f.calls == 1);
+		f.used = 0;
+	}
+	// Fits: reach against cols x rows, an exact fit goes, one past does not, an empty bag always fits.
+	CHECK(OpGrid::Fits(0, 8, 8) && OpGrid::Fits(64, 8, 8) && !OpGrid::Fits(65, 8, 8) && !OpGrid::Fits(100, 8, 8));
+	// StepSize: one row taller, or one column wider once rows is at the cap.
+	CHECK(OpGrid::StepSize(20, 12) == (OpGrid::Size{ 20, 13 }));
+	CHECK(OpGrid::StepSize(20, OpGrid::kMax) == (OpGrid::Size{ 21, OpGrid::kMax }));
+	CHECK(OpGrid::StepSize(OpGrid::kMax, OpGrid::kMax - 1) == (OpGrid::Size{ OpGrid::kMax, OpGrid::kMax }));
 	// Slots can't be read: text 21, nothing called.
 	{
 		f.calls = 0;
