@@ -227,6 +227,9 @@
     <ClInclude Include="admin\endpoints\ep_inventory_give.h">
       <Filter>admin\endpoints</Filter>
     </ClInclude>
+    <ClInclude Include="admin\endpoints\item_lookup.h">
+      <Filter>admin\endpoints</Filter>
+    </ClInclude>
     <ClInclude Include="admin\endpoints\wave_common.h">
       <Filter>admin\endpoints</Filter>
     </ClInclude>

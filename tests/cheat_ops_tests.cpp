@@ -1,6 +1,6 @@
 // Unit tests of the su.cheat ops apart from the game: cheat.give, with a fake Env.
 // No project file: from a Visual Studio developer prompt, in the repo root:
-//   cl /nologo /EHsc /std:c++17 /Isrc tests\cheat_ops_tests.cpp src\cheats\op_give.cpp src\cheats\cheat_dispatch.cpp src\cheats\cheat_wire.cpp /Fe:cheat_ops_tests.exe
+//   cl /nologo /EHsc /std:c++17 /Isrc tests\cheat_ops_tests.cpp src\cheats\op_give.cpp src\cheats\cheat_dispatch.cpp src\cheats\cheat_wire.cpp src\admin_wire\admin_wire.cpp /Fe:cheat_ops_tests.exe
 //   cheat_ops_tests.exe
 #include "cheats/op_give.h"
 

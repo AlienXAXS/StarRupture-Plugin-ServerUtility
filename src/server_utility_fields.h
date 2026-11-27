@@ -86,11 +86,11 @@ namespace ServerUtilityFields
 	inline auto ItemDataBaseArray = SERVER_UTILITY_FIELD(UAuItemDataBaseSubsystem, ItemDataBaseArray);
 
 	// What the su.cheat give op reads: the item's display name, the player's inventory component,
-	// and the entries AddNewItem reports back. The entry size is stepped by (PluginMap::ElementAt).
+	// and the entries AddNewItem reports back (a TArray of them is handed to the game, so the size is checked).
 	inline auto ItemName            = SERVER_UTILITY_FIELD(UAuItemDataBase, ItemName);
 	inline auto InventoryComponent  = SERVER_UTILITY_FIELD(ACrCharacterPlayerBase, InventoryComponent);
 	inline auto AuAddedItem_Amount  = SERVER_UTILITY_FIELD(FAuAddedItem, Amount);
-	inline auto AuAddedItem_Size    = SR_SIZE(FAuAddedItem);
+	inline auto AuAddedItem_Size    = SR_SIZE_CHECK(FAuAddedItem);
 
 	// The engine members that lead from the world to a connected player's
 	// controller and from a controller to its player state (the player lookup).

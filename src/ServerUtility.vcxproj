@@ -425,6 +425,7 @@
     <ClInclude Include="admin\endpoints\ep_wave_pause.h" />
     <ClInclude Include="admin\endpoints\ep_wave_resume.h" />
     <ClInclude Include="admin\endpoints\ep_inventory_give.h" />
+    <ClInclude Include="admin\endpoints\item_lookup.h" />
     <ClInclude Include="admin\endpoints\wave_common.h" />
     <ClInclude Include="host_rules\removal.h" />
     <ClInclude Include="host_rules\claim_model.h" />
@@ -439,6 +440,8 @@
     <ClInclude Include="cheats\cheat_net.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClInclude Include="cheats\cheat_ledger.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClInclude Include="cheats\cheat_ledger_game.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
+    <ClInclude Include="cheats\op_give.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
+    <ClInclude Include="cheats\op_give_game.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClInclude Include="host_rules\player_list.h" />
     <ClInclude Include="host_rules\ini_file.h" />
     <ClInclude Include="host_rules\host_rules.h" />
@@ -507,6 +510,8 @@
     <ClCompile Include="cheats\cheat_net.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClCompile Include="cheats\cheat_ledger.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClCompile Include="cheats\cheat_ledger_game.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
+    <ClCompile Include="cheats\op_give.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
+    <ClCompile Include="cheats\op_give_game.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClCompile Include="host_rules\player_list.cpp" />
     <ClCompile Include="host_rules\ini_file.cpp" />
     <ClCompile Include="host_rules\host_rules.cpp" />

@@ -24,6 +24,7 @@
 #ifdef MODLOADER_SERVER_BUILD
 #include "cheats/cheat_net.h"
 #include "cheats/cheat_ledger_game.h"
+#include "cheats/op_give_game.h"
 #endif
 
 // -----------------------------------------------------------------------
@@ -127,6 +128,9 @@ __declspec(dllexport) void OnPluginLoadHooks(IPluginSelf* self, IPluginHookScann
 	// Every game member the plugin reads, from the loader's map for the running
 	// build. A miss is recorded with the loader, which refuses the plugin.
 	ServerUtilityFields::Resolve(self, scanner);
+#ifdef MODLOADER_SERVER_BUILD
+	OpGiveGame::Resolve(self, scanner);
+#endif
 
 	// Optional: without it the DSSettings command-line bypass is skipped, but the
 	// RCON server and the rest of the plugin still work.
@@ -186,6 +190,7 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 	InGameAdmin::Init();
 #ifdef MODLOADER_SERVER_BUILD
 	CheatLedgerGame::Init();
+	OpGiveGame::Init();
 	CheatNet::Init();
 #endif
 
