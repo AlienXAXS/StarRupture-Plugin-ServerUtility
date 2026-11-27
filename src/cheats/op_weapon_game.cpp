@@ -48,14 +48,13 @@ namespace OpWeaponGame
 			                                      : ServerUtilityFields::WeaponFireRateMod.In(set);
 		}
 
-		// The caller's weapon attribute set: the player character's, which the game applies to
-		// whatever weapon is equipped. Used inside the call that fetched it, never kept. Null when the
-		// caller has no player character. No C++ objects with destructors in this frame: SEH is legal.
-		SDK::UCrWeaponAttributeSet* FindSet_SEH(void* controller)
+		// A given player character's weapon attribute set: the one the game applies to whatever weapon
+		// is equipped. Used inside the call that fetched it, never kept. No C++ objects with
+		// destructors in this frame: SEH is legal.
+		SDK::UCrWeaponAttributeSet* SetOf_SEH(SDK::UObject* character)
 		{
 			__try
 			{
-				SDK::ACrCharacterPlayerBase* character = GameAccess::CharacterOf(controller);
 				if (!character)
 					return nullptr;
 				SDK::UCrWeaponAttributeSet** setAt = ServerUtilityFields::CharacterWeaponAttributes.In(character);
@@ -67,18 +66,10 @@ namespace OpWeaponGame
 			}
 		}
 
-		// A given player character's weapon attribute set, for the ledger to move a held toggle onto.
-		SDK::UCrWeaponAttributeSet* SetOf_SEH(SDK::UObject* character)
+		// The caller's weapon attribute set; null when the caller has no player character.
+		SDK::UCrWeaponAttributeSet* FindSet(void* controller)
 		{
-			__try
-			{
-				SDK::UCrWeaponAttributeSet** setAt = ServerUtilityFields::CharacterWeaponAttributes.In(character);
-				return setAt ? *setAt : nullptr;
-			}
-			__except (EXCEPTION_EXECUTE_HANDLER)
-			{
-				return nullptr;
-			}
+			return SetOf_SEH(GameAccess::CharacterOf(controller));
 		}
 
 		// The attribute's current and base value. False on a fault or an unresolved member.
@@ -179,7 +170,7 @@ namespace OpWeaponGame
 
 		bool HasWeapon(const CheatDispatch::Context& ctx)
 		{
-			return OnGameThread() && FindSet_SEH(ctx.controller) != nullptr;
+			return OnGameThread() && FindSet(ctx.controller) != nullptr;
 		}
 
 		float Current(const std::string& playerId, OpWeapon::Slot slot)
@@ -210,7 +201,7 @@ namespace OpWeaponGame
 				return true;
 			}
 
-			SDK::UCrWeaponAttributeSet* set = FindSet_SEH(ctx.controller);
+			SDK::UCrWeaponAttributeSet* set = FindSet(ctx.controller);
 			if (!set)
 				return false;
 			const CheatLedger::Weak target = CheatLedgerGame::MakeWeak(static_cast<SDK::UObject*>(set));
