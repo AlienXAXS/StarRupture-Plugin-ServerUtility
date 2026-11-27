@@ -6,6 +6,8 @@
 #include "SDK/Chimera_classes.hpp"
 #include "SDK/Chimera_parameters.hpp"
 #include "SDK/AuItems_classes.hpp"
+#include "SDK/MassSpawner_classes.hpp"
+#include "SDK/MassEntity_classes.hpp"
 #include "plugin_map.h"
 
 #include <cstdint>
@@ -106,6 +108,27 @@ namespace ServerUtilityFields
 	inline auto CorporationsOwner = SERVER_UTILITY_FIELD(ACrGameStateBase, CorporationsOwner);
 	inline auto CorporationsDataPoints = SERVER_UTILITY_FIELD(ACrCorporationsOwner, DataPoints);
 
+	// What the su.cheat power op reads and writes. The trait walk (config asset -> Config -> Traits and
+	// Parent -> CrElectricityTrait::Parameters) and the parameters' value and type are reflected. The
+	// manager's const shared fragment container is not: an engine member the map holds per build, a
+	// block of 0xB0 bytes the shared-fragment calls take by address.
+	struct ConstSharedBlock
+	{
+		uint8_t Bytes[0xB0];
+	};
+	inline auto MassConfigAssetConfig   = SERVER_UTILITY_FIELD(UMassEntityConfigAsset, Config);
+	inline auto MassConfigParent        = SERVER_UTILITY_FIELD(FMassEntityConfig, Parent);
+	inline auto MassConfigTraits        = SERVER_UTILITY_FIELD(FMassEntityConfig, Traits);
+	inline auto ElectricityParameters   = SERVER_UTILITY_FIELD(UCrElectricityTrait, Parameters);
+	inline auto ElectricityValue        = SERVER_UTILITY_FIELD(FCrElectricityParameters, ElectricityValue);
+	inline auto ElectricityType         = SERVER_UTILITY_FIELD(FCrElectricityParameters, Type);
+	inline auto ElectricityParametersSize = SR_SIZE_CHECK(FCrElectricityParameters);
+	inline auto ConstSharedFragmentsContainer = SERVER_UTILITY_NATIVE(ConstSharedBlock, FMassEntityManager, ConstSharedFragmentsContainer, 0x120);
+	inline constexpr const char* DestroyEntityTemplate     = "FMassEntityConfig::DestroyEntityTemplate";
+	inline constexpr const char* GetOrCreateEntityTemplate = "FMassEntityConfig::GetOrCreateEntityTemplate";
+	inline constexpr const char* SharedFragmentsFindOrAdd  = "TSharedFragmentsContainer<FConstSharedStruct>::FindOrAdd";
+	inline constexpr const char* GetStructInstanceCrc32    = "UE::StructUtils::GetStructInstanceCrc32";
+
 	// The engine members that lead from the world to a connected player's
 	// controller and from a controller to its player state (the player lookup).
 	// The player list and the admin player actions read the same game state.
@@ -174,13 +197,20 @@ namespace ServerUtilityFields
 	inline PluginMap::Feature CheatCorp{ "cheat-corp", "Corporation data points", PluginMap::KeysOf(
 		CorporationsOwner, CorporationsDataPoints) };
 
+	// The su.cheat power op: the config asset trait walk, the shared fragment block and the four game
+	// functions that rebuild a template and find the block. While it is off `cap` reports the op off.
+	inline PluginMap::Feature CheatPower{ "cheat-power", "Building power values", PluginMap::KeysOf(
+		MassConfigAssetConfig, MassConfigParent, MassConfigTraits, ElectricityParameters, ElectricityValue,
+		ElectricityType, ElectricityParametersSize, ConstSharedFragmentsContainer, PluginMap::MassEntityManagerField,
+		DestroyEntityTemplate, GetOrCreateEntityTemplate, SharedFragmentsFindOrAdd, GetStructInstanceCrc32) };
+
 	// Asks the loader for every member above. False when a key that no feature
 	// lists did not resolve; the loader has then recorded the failure and
 	// refuses the plugin. A miss on a key a feature lists only turns that
 	// feature off.
 	inline bool Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
 	{
-		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand, CheatGive, CheatWave, CheatCorp);
+		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand, CheatGive, CheatWave, CheatCorp, CheatPower);
 
 		// A miss only turns off the features that list the key. Every row is
 		// asked even after a miss, so the loader's log lists them all.
@@ -194,7 +224,7 @@ namespace ServerUtilityFields
 
 		// One line per feature the loader switched off, so the text names
 		// exactly what is off and follows the feature's key list.
-		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand, &CheatGive, &CheatWave, &CheatCorp })
+		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand, &CheatGive, &CheatWave, &CheatCorp, &CheatPower })
 		{
 			if (!f->On())
 				LOG_WARN("[%s] The loader has no row for one of its engine members on this game build - %s is off",

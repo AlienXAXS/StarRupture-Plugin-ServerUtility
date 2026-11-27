@@ -292,6 +292,15 @@ static void ThreadGuard()
 	CHECK(Has(r.logs, "not on the game thread"));
 }
 
+static void SlotPrefixCut()
+{
+	CHECK(SlotPrefix("power:Furnace_01") == "power:");
+	CHECK(SlotPrefix("power:a:b") == "power:");
+	CHECK(SlotPrefix("stack") == "stack");
+	CHECK(SlotPrefix("power:") == "power:");
+	CHECK(SlotPrefix("").empty());
+}
+
 int main()
 {
 	Toggles();
@@ -301,6 +310,7 @@ int main()
 	CaptureOnce();
 	LogOnCommit();
 	ThreadGuard();
+	SlotPrefixCut();
 	std::printf("=== cheat_ledger_tests  %d checks, %d failed\n", g_checks, g_failed);
 	return g_failed ? 1 : 0;
 }

@@ -34,7 +34,9 @@ namespace CheatLedgerGame
 
 		const Accessor* AccessorFor(const Entry& e)
 		{
-			const auto it = g_accessors.find(e.feature + "/" + e.slot);
+			auto it = g_accessors.find(e.feature + "/" + e.slot);
+			if (it == g_accessors.end())
+				it = g_accessors.find(e.feature + "/" + SlotPrefix(e.slot));   // a per-object slot ("power:<asset>")
 			return it == g_accessors.end() ? nullptr : &it->second;
 		}
 

@@ -95,6 +95,7 @@ static void OnEngineShutdown()
 	CheatNet::Shutdown();
 	CheatLedgerGame::Shutdown();
 	OpStackGame::Shutdown();
+	OpPowerGame::Shutdown();
 #endif
 	InGameAdmin::Shutdown();
 	AdminClaim::Shutdown();
@@ -142,6 +143,7 @@ __declspec(dllexport) void OnPluginLoadHooks(IPluginSelf* self, IPluginHookScann
 #ifdef MODLOADER_SERVER_BUILD
 	OpGiveGame::Resolve(self, scanner);
 	OpStackGame::Resolve(self, scanner);
+	OpPowerGame::Resolve(self, scanner);
 #endif
 
 	// Optional: without it the DSSettings command-line bypass is skipped, but the
@@ -259,6 +261,7 @@ __declspec(dllexport) void PluginShutdown()
 #ifdef MODLOADER_SERVER_BUILD
 	CheatLedgerGame::Shutdown();
 	OpStackGame::Shutdown();
+	OpPowerGame::Shutdown();
 #endif
 	g_self = nullptr;
 }

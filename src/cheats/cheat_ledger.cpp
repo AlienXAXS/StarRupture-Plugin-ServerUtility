@@ -4,6 +4,12 @@
 
 namespace CheatLedger
 {
+	std::string SlotPrefix(const std::string& slot)
+	{
+		const size_t colon = slot.find(':');
+		return colon == std::string::npos ? slot : slot.substr(0, colon + 1);
+	}
+
 	std::string ToText(const Value& v)
 	{
 		char buf[64];

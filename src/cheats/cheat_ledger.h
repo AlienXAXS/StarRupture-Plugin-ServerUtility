@@ -43,6 +43,10 @@ namespace CheatLedger
 	using Value = std::variant<std::monostate, int32_t, float, bool, std::vector<float>>;
 	std::string ToText(const Value& v);
 
+	// An entry whose slot has a per-object tail ("power:<asset>") is routed by the slot up to and
+	// including the first ':' ("power:"). A slot without a ':' has no prefix; returns it whole.
+	std::string SlotPrefix(const std::string& slot);
+
 	enum class Kind { Toggle, Override };
 
 	struct Entry
