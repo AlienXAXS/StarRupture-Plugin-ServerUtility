@@ -1,9 +1,10 @@
-// Unit tests of the su.cheat ops apart from the game: cheat.give and cheat.wave, with fake Envs.
+// Unit tests of the su.cheat ops apart from the game: cheat.give, cheat.wave and cheat.stack, with fake Envs.
 // No project file: from a Visual Studio developer prompt, in the repo root:
-//   cl /nologo /EHsc /std:c++17 /Isrc tests\cheat_ops_tests.cpp src\cheats\op_give.cpp src\cheats\op_wave.cpp src\cheats\cheat_dispatch.cpp src\cheats\cheat_wire.cpp src\admin_wire\admin_wire.cpp /Fe:cheat_ops_tests.exe
+//   cl /nologo /EHsc /std:c++17 /Isrc tests\cheat_ops_tests.cpp src\cheats\op_give.cpp src\cheats\op_wave.cpp src\cheats\op_stack.cpp src\cheats\cheat_dispatch.cpp src\cheats\cheat_wire.cpp src\admin_wire\admin_wire.cpp /Fe:cheat_ops_tests.exe
 //   cheat_ops_tests.exe
 #include "cheats/op_give.h"
 #include "cheats/op_wave.h"
+#include "cheats/op_stack.h"
 
 #include <cstdio>
 #include <optional>
@@ -204,10 +205,152 @@ static void WaveTests()
 	}
 }
 
+struct StackFake
+{
+	bool available = true;
+	bool callsOk = true;
+	int target = 0;
+	int sets = 0, clears = 0;
+	uint32_t lastReq = 0;
+
+	OpStack::Env MakeEnv()
+	{
+		OpStack::Env e;
+		e.available = [this] { return available; };
+		e.current = [this] { return target; };
+		e.set = [this](const Context&, uint32_t id, int size) { ++sets; lastReq = id; if (callsOk) target = size; return callsOk; };
+		e.clear = [this](const Context&, uint32_t id) { ++clears; lastReq = id; if (callsOk) target = 0; return callsOk; };
+		e.log = [](const std::string&) {};
+		return e;
+	}
+};
+
+static CheatWire::Request StackReq(const char* size)
+{
+	CheatWire::Request r;
+	r.id = 11;
+	r.op = "cheat.stack";
+	if (size) r.fields.emplace_back("size", size);
+	return r;
+}
+
+static OpStack::TickState Tick(int target, int lastApplied = 0, int tracked = 10)
+{
+	OpStack::TickState s;
+	s.featureAvailable = true;
+	s.target = target;
+	s.lastApplied = lastApplied;
+	s.itemsTracked = tracked;
+	return s;
+}
+
+static void StackTests()
+{
+	const Context ctx;
+	StackFake f;
+	OpStack::SetEnv(f.MakeEnv());
+	CHECK(OpStack::Available());
+
+	// A size from 1 to 9999 is set through the env; the reply carries the size in effect.
+	{
+		const Result r = OpStack::Handle(ctx, StackReq("999"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == "Stack size set to 999.");
+		CHECK(r.fields.size() == 1 && r.fields[0].first == "size" && r.fields[0].second == "999");
+		CHECK(f.sets == 1 && f.target == 999 && f.lastReq == 11);
+		CHECK(OpStack::Handle(ctx, StackReq("9999")).status == CheatWire::Status::Ok && f.target == 9999);
+		CHECK(OpStack::Handle(ctx, StackReq("0042")).status == CheatWire::Status::Ok && f.target == 42);
+	}
+
+	// size=0 puts the game's sizes back.
+	{
+		const Result r = OpStack::Handle(ctx, StackReq("0"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == OpStack::kTextCleared);
+		CHECK(r.fields.size() == 1 && r.fields[0].second == "0");
+		CHECK(f.clears == 1 && f.target == 0);
+	}
+
+	// A missing, empty, signed, fractional, text or too large size is refused and touches nothing.
+	{
+		const int sets = f.sets, clears = f.clears;
+		for (const char* bad : { "", "-1", "+5", "1.5", "abc", "10000", "5 0", "99999999999999999999" })
+		{
+			const Result r = OpStack::Handle(ctx, StackReq(bad));
+			CHECK(r.status == CheatWire::Status::Refused && r.reason == kTextBadRequest);
+		}
+		CHECK(OpStack::Handle(ctx, StackReq(nullptr)).reason == kTextBadRequest);
+		CHECK(f.sets == sets && f.clears == clears);
+	}
+
+	// The call failed in the game: an error with the one failure text, and the size is unchanged.
+	{
+		f.callsOk = false;
+		const Result r = OpStack::Handle(ctx, StackReq("500"));
+		CHECK(r.status == CheatWire::Status::Error && r.reason == OpStack::kTextFailed && r.fields.empty());
+		CHECK(OpStack::Handle(ctx, StackReq("0")).status == CheatWire::Status::Error);
+		f.callsOk = true;
+	}
+
+	// A key missing on this build: the op is off, checked on each call.
+	{
+		StackFake g;
+		g.available = false;
+		OpStack::SetEnv(g.MakeEnv());
+		CHECK(!OpStack::Available());
+		const Result r = OpStack::Handle(ctx, StackReq("500"));
+		CHECK(r.status == CheatWire::Status::Refused && r.reason == "Not available on this server's game build.");
+		CHECK(OpStack::Handle(ctx, StackReq(nullptr)).reason == OpStack::kTextOff && g.sets == 0 && g.clears == 0);
+		g.available = true;
+		CHECK(OpStack::Available());
+	}
+
+	// No env at all: off.
+	{
+		OpStack::SetEnv(OpStack::Env());
+		CHECK(!OpStack::Available());
+		CHECK(OpStack::Handle(ctx, StackReq("500")).reason == OpStack::kTextOff);
+	}
+
+	// The tick: nothing to do with no size, a rescan before the first write, then a write, then a
+	// guard write, and a restore when the size goes to 0 or the feature goes off.
+	{
+		using OpStack::Decide;
+		using OpStack::Action;
+		CHECK(Decide(Tick(0)) == Action::None);
+		CHECK(Decide(Tick(0, 500)) == Action::Restore);
+		OpStack::TickState raised = Tick(0);
+		raised.itemsRaised = 3;
+		CHECK(Decide(raised) == Action::Restore);
+		OpStack::TickState off = Tick(500, 500);
+		off.featureAvailable = false;
+		CHECK(Decide(off) == Action::Restore);
+		off.lastApplied = 0;
+		CHECK(Decide(off) == Action::None);
+		CHECK(Decide(Tick(500, 0, 0)) == Action::Rescan);
+		CHECK(Decide(Tick(500, 0)) == Action::Apply);
+		CHECK(Decide(Tick(700, 500)) == Action::Apply);
+		CHECK(Decide(Tick(500, 500)) == Action::None);
+		OpStack::TickState moved = Tick(500, 500);
+		moved.worldChanged = true;
+		CHECK(Decide(moved) == Action::Rescan);
+		OpStack::TickState grown = Tick(500, 500);
+		grown.catalogueChanged = true;
+		CHECK(Decide(grown) == Action::Rescan);
+	}
+
+	// ParseSize on its own.
+	{
+		int n = 77;
+		CHECK(OpStack::ParseSize("0", n) && n == 0);
+		CHECK(OpStack::ParseSize("9999", n) && n == 9999);
+		CHECK(!OpStack::ParseSize("10000", n) && n == 9999);
+	}
+}
+
 int main()
 {
 	const Context ctx;
 	WaveTests();
+	StackTests();
 	Fake f;
 	f.result.outcome = OpGive::GiveResult::Outcome::Gave;
 	f.result.name = "Iron Ore";

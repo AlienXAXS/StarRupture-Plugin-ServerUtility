@@ -26,6 +26,7 @@
 #include "cheats/cheat_ledger_game.h"
 #include "cheats/op_give_game.h"
 #include "cheats/op_wave_game.h"
+#include "cheats/op_stack_game.h"
 #endif
 
 // -----------------------------------------------------------------------
@@ -90,6 +91,7 @@ static void OnEngineShutdown()
 #ifdef MODLOADER_SERVER_BUILD
 	CheatNet::Shutdown();
 	CheatLedgerGame::Shutdown();
+	OpStackGame::Shutdown();
 #endif
 	InGameAdmin::Shutdown();
 	AdminClaim::Shutdown();
@@ -136,6 +138,7 @@ __declspec(dllexport) void OnPluginLoadHooks(IPluginSelf* self, IPluginHookScann
 	ServerUtilityFields::Resolve(self, scanner);
 #ifdef MODLOADER_SERVER_BUILD
 	OpGiveGame::Resolve(self, scanner);
+	OpStackGame::Resolve(self, scanner);
 #endif
 
 	// Optional: without it the DSSettings command-line bypass is skipped, but the
@@ -198,6 +201,7 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 	CheatLedgerGame::Init();
 	OpGiveGame::Init();
 	OpWaveGame::Init();
+	OpStackGame::Init();
 	CheatNet::Init();
 #endif
 
@@ -248,6 +252,7 @@ __declspec(dllexport) void PluginShutdown()
 
 #ifdef MODLOADER_SERVER_BUILD
 	CheatLedgerGame::Shutdown();
+	OpStackGame::Shutdown();
 #endif
 	g_self = nullptr;
 }

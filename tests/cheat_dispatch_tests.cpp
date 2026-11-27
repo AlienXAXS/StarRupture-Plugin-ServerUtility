@@ -1,10 +1,11 @@
 // Unit tests of the su.cheat dispatch: the rate bucket, the op table, `cap` and the replies.
 // No project file: from a Visual Studio developer prompt, in the repo root:
-//   cl /nologo /EHsc /std:c++17 /Isrc tests\cheat_dispatch_tests.cpp src\cheats\cheat_dispatch.cpp src\cheats\op_give.cpp src\cheats\op_wave.cpp src\cheats\cheat_wire.cpp src\admin_wire\admin_wire.cpp /Fe:cheat_dispatch_tests.exe
+//   cl /nologo /EHsc /std:c++17 /Isrc tests\cheat_dispatch_tests.cpp src\cheats\cheat_dispatch.cpp src\cheats\op_give.cpp src\cheats\op_wave.cpp src\cheats\op_stack.cpp src\cheats\cheat_wire.cpp src\admin_wire\admin_wire.cpp /Fe:cheat_dispatch_tests.exe
 //   cheat_dispatch_tests.exe
 #include "cheats/cheat_dispatch.h"
 #include "cheats/op_give.h"
 #include "cheats/op_wave.h"
+#include "cheats/op_stack.h"
 
 #include <cstdio>
 #include <cstring>
@@ -77,7 +78,7 @@ int main()
 		CHECK(fresh.Idle(0));
 	}
 
-	// The op table: ten ops. Give and wave have a handler (with an `available` hook); the rest are stubs.
+	// The op table: ten ops. Give, wave and stack have a handler (with an `available` hook); the rest are stubs.
 	{
 		CHECK(Ops().size() == 10);
 		for (const OpEntry& op : Ops())
@@ -87,12 +88,14 @@ int main()
 				CHECK(op.run == &OpGive::Handle && op.available == &OpGive::Available);
 			else if (std::strcmp(op.name, "cheat.wave") == 0)
 				CHECK(op.run == &OpWave::Handle && op.available == &OpWave::Available);
+			else if (std::strcmp(op.name, "cheat.stack") == 0)
+				CHECK(op.run == &OpStack::Handle && op.available == &OpStack::Available);
 			else
 				CHECK(op.run == &NotYet && !op.available);
 		}
 	}
 
-	// `cap` lists all ten ops as off: give and wave have no game glue here, so they are off too.
+	// `cap` lists all ten ops as off: give, wave and stack have no game glue here, so they are off too.
 	{
 		Rig r;
 		std::string expect = Res(1, "ok", "", std::string(1, US) + "su=0.19.0");
@@ -113,6 +116,7 @@ int main()
 			const char* text = kTextNotYet;
 			if (std::strcmp(op.name, "cheat.give") == 0) text = OpGive::kTextOff;
 			if (std::strcmp(op.name, "cheat.wave") == 0) text = OpWave::kTextOff;
+			if (std::strcmp(op.name, "cheat.stack") == 0) text = OpStack::kTextOff;
 			CHECK(r.Send("p1", Req(id, op.name)) == Res(id, "refused", text));
 			++id;
 		}
