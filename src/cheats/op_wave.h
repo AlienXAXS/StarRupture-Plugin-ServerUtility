@@ -25,9 +25,9 @@ namespace OpWave
 	constexpr const char* kTextCancelled    = "Wave cancelled.";
 	constexpr const char* kTextNoWave       = "No wave is running.";
 	constexpr const char* kTextAlreadyWave  = "A wave is already running.";
-	constexpr const char* kTextNotPaused    = "The wave is not paused.";
+	constexpr const char* kTextNotPaused    = "The wave isn't paused.";
 	constexpr const char* kTextAlreadyPause = "The wave is already paused.";
-	constexpr const char* kTextFailed       = "Could not change the wave on this server.";
+	constexpr const char* kTextFailed       = "Couldn't change the wave on this server.";
 
 	struct State
 	{
