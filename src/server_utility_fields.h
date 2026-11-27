@@ -123,6 +123,19 @@ namespace ServerUtilityFields
 	inline constexpr const char* CheckStabilityCustom       = "ACrAPHelperActorCustom::CheckStability";
 	inline constexpr const char* CheckStabilityPillar       = "ACrAPHelperDynamicPillar::CheckStability";
 
+	// The anywhere parts: the two collision checks the placement helper runs (windows and benches),
+	// and the socket pick with the stability subsystem's slot check (benches). The helper's building
+	// data names the piece being placed; its snapped actors say what the piece sits in.
+	inline constexpr const char* CheckMainMeshCollision = "ACrAPHelperActorCustom::CheckMainMeshCollision";
+	inline constexpr const char* GetBoxCollisionResult  = "ACrAPHelper::GetBoxCollisionResult";
+	inline constexpr const char* GetSnappedSocket       = "UCrSocketSnapPlacementMethod::GetSnappedSocket";
+	inline constexpr const char* IsSocketFree           = "UCrBuildingStabilitySubsystem::IsSocketFree";
+	inline auto CrAPHelperBuildingData = SERVER_UTILITY_FIELD(ACrAPHelper, BuildingData);
+	inline auto PlacementBuildingID    = SERVER_UTILITY_FIELD(UAuActorPlacementData, BuildingID);
+	// Absent on some builds (the client build has no such member): found by name on first use, null
+	// there, and the anywhere parts then leave collision alone.
+	inline PluginLazyField<SDK::TArray<SDK::AActor*>> CrAPHelperSnappedActors{ "SnappedActors" };
+
 	// What the su.cheat corp op reads and writes: the game state's corporations owner and its data points.
 	inline auto CorporationsOwner = SERVER_UTILITY_FIELD(ACrGameStateBase, CorporationsOwner);
 	inline auto CorporationsDataPoints = SERVER_UTILITY_FIELD(ACrCorporationsOwner, DataPoints);
@@ -323,13 +336,21 @@ namespace ServerUtilityFields
 	inline PluginMap::Feature CheatBuildStability{ "cheat-build-stability", "Free building stability", PluginMap::KeysOf(
 		CheckStabilityCustom, CheckStabilityPillar, ObjectOuter, ActorOwner, PawnController) };
 
+	// The build op's anywhere rule, one feature per part. Benches also need the collision hooks.
+	inline PluginMap::Feature CheatBuildWindows{ "cheat-build-windows", "Building windows anywhere", PluginMap::KeysOf(
+		CheckMainMeshCollision, GetBoxCollisionResult, CrAPHelperBuildingData, PlacementBuildingID,
+		ObjectOuter, ActorOwner, PawnController) };
+	inline PluginMap::Feature CheatBuildBenches{ "cheat-build-benches", "Building benches anywhere", PluginMap::KeysOf(
+		CheckMainMeshCollision, GetBoxCollisionResult, GetSnappedSocket, IsSocketFree, CrAPHelperBuildingData,
+		PlacementBuildingID, ObjectOuter, ActorOwner, PawnController) };
+
 	// Asks the loader for every member above. False when a key that no feature
 	// lists did not resolve; the loader has then recorded the failure and
 	// refuses the plugin. A miss on a key a feature lists only turns that
 	// feature off.
 	inline bool Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
 	{
-		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand, CheatGive, CheatWave, CheatCorp, CheatPower, CheatEnemy, CheatWeapon, CheatGrid, CheatMine, CheatBuildUnlock, CheatBuildCost, CheatBuildStability);
+		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand, CheatGive, CheatWave, CheatCorp, CheatPower, CheatEnemy, CheatWeapon, CheatGrid, CheatMine, CheatBuildUnlock, CheatBuildCost, CheatBuildStability, CheatBuildWindows, CheatBuildBenches);
 
 		// A miss only turns off the features that list the key. Every row is
 		// asked even after a miss, so the loader's log lists them all.
@@ -350,14 +371,14 @@ namespace ServerUtilityFields
 			RemoveTagsReplicate, GetAscSize, GetAscActor, GetAscResult, TagCountSize, TagCountTag, TagCountResult,
 			MassConfigAssetConfig, MassConfigParent, MassConfigTraits, ElectricityParameters, ElectricityValue,
 			ElectricityType, ElectricityParametersSize, ConstSharedFragmentsContainer,
-			TechnologyKeeper, UnlockAllBuildings, ObjectOuter);
+			TechnologyKeeper, UnlockAllBuildings, ObjectOuter, CrAPHelperBuildingData, PlacementBuildingID);
 
 		// The entity manager's field is shared by the power and enemy ops; this is the one place it is asked.
 		PluginMap::ResolveMassEntityManager(scanner, self);
 
 		// One line per feature the loader switched off, so the text names
 		// exactly what is off and follows the feature's key list.
-		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand, &CheatGive, &CheatWave, &CheatCorp, &CheatPower, &CheatEnemy, &CheatWeapon, &CheatGrid, &CheatMine, &CheatBuildUnlock, &CheatBuildCost, &CheatBuildStability })
+		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand, &CheatGive, &CheatWave, &CheatCorp, &CheatPower, &CheatEnemy, &CheatWeapon, &CheatGrid, &CheatMine, &CheatBuildUnlock, &CheatBuildCost, &CheatBuildStability, &CheatBuildWindows, &CheatBuildBenches })
 		{
 			if (!f->On())
 				LOG_WARN("[%s] The loader has no row for one of its engine members on this game build - %s is off",

@@ -3,8 +3,9 @@
 // The game side of the cheat.build op. Server builds only. The unlock rule sets the technology
 // keeper's unlock flag through the loader's version map and has the game rebuild its available
 // buildings. The free rule (cost, stability) hooks the game's placement checks through the loader,
-// by their map rows, and forces their result for a player who has the part on. The anywhere parts
-// (windows, benches) report off for now. Game thread.
+// by their map rows, and forces their result for a player who has the part on. The anywhere rule
+// (windows, benches) hooks the placement helper's collision checks, and for benches the socket pick,
+// the same way. Game thread.
 #include "plugin_interface.h"
 
 namespace OpBuildGame
