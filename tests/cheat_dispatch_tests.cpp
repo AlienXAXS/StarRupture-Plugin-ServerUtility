@@ -98,7 +98,7 @@ int main()
 		CHECK(fresh.Idle(0));
 	}
 
-	// The op table: fourteen ops. Give, wave, stack, move, skill, corp, power and enemy have a handler (with an `available` hook); the rest are stubs.
+	// The op table: fourteen ops, each with a handler and an `available` hook; the checks below name each op's wiring.
 	{
 		CHECK(Ops().size() == 14);
 		for (const OpEntry& op : Ops())
@@ -138,7 +138,7 @@ int main()
 		}
 	}
 
-	// `cap` lists all fourteen ops as off: give, wave and stack have no game glue here, so they are off too.
+	// `cap` lists all fourteen ops as off: no op has game glue in this test, so every `available` hook says no.
 	{
 		Rig r;
 		std::string expect = Res(1, "ok", "", std::string(1, US) + "su=0.19.0");
@@ -149,8 +149,7 @@ int main()
 		CHECK(r.checks == 0);   // cap needs no authority
 	}
 
-	// Every other op is stubbed: allowed by the rules, answered "not available yet". Give and wave,
-	// with no glue, are refused as off.
+	// With no game glue every op is allowed by the rules and then refused with its own off text.
 	{
 		Rig r;
 		uint32_t id = 10;
@@ -222,11 +221,20 @@ int main()
 		OpCorp::SetEnv(OpCorp::Env());
 	}
 
-	// An op this server does not know.
+	// An op this server does not know: refused each time, logged once per player and op name.
 	{
 		Rig r;
 		CHECK(r.Send("p1", Req(5, "cheat.unknown")) == Res(5, "refused", kTextUnknownOp));
 		CHECK(r.checks == 0);
+		r.now += 10;
+		CHECK(r.Send("p1", Req(6, "cheat.unknown")) == Res(6, "refused", kTextUnknownOp));
+		r.now += 10;
+		CHECK(r.Send("p1", Req(7, "cheat.other")) == Res(7, "refused", kTextUnknownOp));
+		r.now += 10;
+		CHECK(r.Send("p2", Req(8, "cheat.unknown")) == Res(8, "refused", kTextUnknownOp));
+		int lines = 0;
+		for (const auto& l : r.logs) if (l.find("Unknown op") != std::string::npos) ++lines;
+		CHECK(lines == 3);   // p1 cheat.unknown, p1 cheat.other, p2 cheat.unknown
 	}
 
 	// Malformed: an error reply when an id was read, silence (and one log line) when not.

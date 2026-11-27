@@ -166,7 +166,7 @@ namespace CheatDispatch
 			if (req.op == op.name) { entry = &op; break; }
 		if (!entry)
 		{
-			log("Unknown op '" + req.op + "' from " + playerId);
+			if (LogOnce(playerId, ("op|" + req.op).c_str())) log("Unknown op '" + req.op + "' from " + playerId);
 			return reply(req.id, CheatWire::Status::Refused, kTextUnknownOp);
 		}
 
