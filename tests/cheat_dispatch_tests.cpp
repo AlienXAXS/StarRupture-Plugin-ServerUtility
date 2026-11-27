@@ -15,6 +15,7 @@
 #include "cheats/op_mine.h"
 #include "cheats/op_stat.h"
 #include "cheats/op_move.h"
+#include "cheats/op_skill.h"
 #include "cheats/op_plant.h"
 #include "cheats/op_build.h"
 
@@ -97,7 +98,7 @@ int main()
 		CHECK(fresh.Idle(0));
 	}
 
-	// The op table: fourteen ops. Give, wave, stack, move, corp, power and enemy have a handler (with an `available` hook); the rest are stubs.
+	// The op table: fourteen ops. Give, wave, stack, move, skill, corp, power and enemy have a handler (with an `available` hook); the rest are stubs.
 	{
 		CHECK(Ops().size() == 14);
 		for (const OpEntry& op : Ops())
@@ -125,6 +126,8 @@ int main()
 				CHECK(op.run == &OpMine::Handle && op.available == &OpMine::Available && op.state == &OpMine::StateFields);
 			else if (std::strcmp(op.name, "cheat.move") == 0)
 				CHECK(op.run == &OpMove::Handle && op.available == &OpMove::Available && op.state == &OpMove::StateFields);
+			else if (std::strcmp(op.name, "cheat.skill") == 0)
+				CHECK(op.run == &OpSkill::Handle && op.available == &OpSkill::Available && !op.state);
 			else if (std::strcmp(op.name, "cheat.stat") == 0)
 				CHECK(op.run == &OpStat::Handle && op.available == &OpStat::Available && op.state == &OpStat::StateFields);
 			else if (std::strcmp(op.name, "cheat.build") == 0)
@@ -166,6 +169,7 @@ int main()
 			if (std::strcmp(op.name, "cheat.plant") == 0) text = OpPlant::kTextOff;
 			if (std::strcmp(op.name, "cheat.stat") == 0) text = OpStat::kTextOff;
 			if (std::strcmp(op.name, "cheat.move") == 0) text = OpMove::kTextOff;
+			if (std::strcmp(op.name, "cheat.skill") == 0) text = OpSkill::kTextOff;
 			if (std::strcmp(op.name, "cheat.mine") == 0) text = OpMine::kTextOff;
 			if (std::strcmp(op.name, "cheat.build") == 0) text = OpBuild::kTextOff;
 			CHECK(r.Send("p1", Req(id, op.name)) == Res(id, "refused", text));

@@ -13,6 +13,7 @@
 #include "cheats/op_mine.h"
 #include "cheats/op_stat.h"
 #include "cheats/op_move.h"
+#include "cheats/op_skill.h"
 #include "cheats/op_plant.h"
 #include "cheats/op_build.h"
 
@@ -1859,6 +1860,149 @@ static void MoveTests()
 	CHECK(OpMove::StateFields("p1").empty());
 }
 
+// A fake skill game: a count of skills, each with a level and an experience, the calls recorded.
+// A grant: the Env has no ledger hook, so the op can leave no revert entry.
+struct SkillFake
+{
+	bool available = true;
+	std::optional<int> count = 8;
+	bool callsOk = true;
+	int calls = 0;
+	uint32_t lastReq = 0;
+	std::vector<int> levels = std::vector<int>(32, 5);
+	std::vector<int> xp = std::vector<int>(32, 77);
+	std::vector<std::string> logs;
+
+	OpSkill::Env MakeEnv()
+	{
+		OpSkill::Env e;
+		e.available  = [this] { return available; };
+		e.skillCount = [this](const Context&) { return count; };
+		e.setSkill   = [this](const Context&, uint32_t id, int index, int level)
+		{
+			++calls; lastReq = id;
+			if (!callsOk) return false;
+			levels[index] = level; xp[index] = 0;
+			return true;
+		};
+		e.log        = [this](const std::string& s) { logs.push_back(s); };
+		return e;
+	}
+};
+
+static CheatWire::Request SkillReq(const char* skill, const char* all, const char* level)
+{
+	CheatWire::Request r;
+	r.id = 53;
+	r.op = "cheat.skill";
+	if (skill) r.fields.emplace_back("skill", skill);
+	if (all) r.fields.emplace_back("all", all);
+	if (level) r.fields.emplace_back("level", level);
+	return r;
+}
+
+static void SkillTests()
+{
+	const std::string id = "p1";
+	Context ctx;
+	ctx.playerId = &id;
+	SkillFake f;
+	OpSkill::SetEnv(f.MakeEnv());
+	CHECK(OpSkill::Available());
+	// One skill: level set, experience zeroed, the others untouched, and the audit line logged.
+	{
+		const Result r = OpSkill::Handle(ctx, SkillReq("3", nullptr, "60"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == "Skill 3 set to 60." && *Field(r, "level") == "60" && r.fields.size() == 1);
+		CHECK(f.calls == 1 && f.lastReq == 53 && f.levels[3] == 60 && f.xp[3] == 0 && f.levels[2] == 5 && f.xp[2] == 77 && f.levels[4] == 5);
+		CHECK(f.logs.size() == 1 && f.logs[0] == "req 53: p1 asked to set skill 3 to level 60");
+	}
+	// The index is bounded by the fake count: the last one works, the next is refused.
+	{
+		f.calls = 0;
+		CHECK(OpSkill::Handle(ctx, SkillReq("7", nullptr, "1")).status == CheatWire::Status::Ok);
+		const Result r = OpSkill::Handle(ctx, SkillReq("8", nullptr, "1"));
+		CHECK(r.status == CheatWire::Status::Refused && r.reason == "No such skill on this server." && f.calls == 1);
+	}
+	// Level 0 and 100 are fine, 101 is refused, and a non-number cannot be read.
+	{
+		f.calls = 0;
+		const Result lo = OpSkill::Handle(ctx, SkillReq("0", nullptr, "0"));
+		CHECK(lo.status == CheatWire::Status::Ok && lo.reason == "Skill 0 set to 0." && *Field(lo, "level") == "0" && f.levels[0] == 0);
+		CHECK(OpSkill::Handle(ctx, SkillReq("0", nullptr, "100")).reason == "Skill 0 set to 100." && f.levels[0] == 100);
+		const int ok = f.calls;
+		const Result hi = OpSkill::Handle(ctx, SkillReq("0", nullptr, "101"));
+		CHECK(hi.status == CheatWire::Status::Refused && hi.reason == OpSkill::kTextRange && f.calls == ok);
+		CHECK(OpSkill::Handle(ctx, SkillReq("0", nullptr, "1000")).reason == CheatDispatch::kTextBadRequest);
+		CHECK(OpSkill::Handle(ctx, SkillReq("0", nullptr, "-1")).reason == CheatDispatch::kTextBadRequest);
+		CHECK(OpSkill::Handle(ctx, SkillReq("0", nullptr, "high")).reason == CheatDispatch::kTextBadRequest);
+		CHECK(OpSkill::Handle(ctx, SkillReq("0", nullptr, "")).reason == CheatDispatch::kTextBadRequest);
+		CHECK(OpSkill::Handle(ctx, SkillReq("two", nullptr, "5")).reason == CheatDispatch::kTextBadRequest);
+		CHECK(f.calls == ok);
+	}
+	// all=1: every skill the server holds, levelled and zeroed; nothing past the count.
+	{
+		f.calls = 0;
+		const Result r = OpSkill::Handle(ctx, SkillReq(nullptr, "1", "100"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == "All skills set to 100." && *Field(r, "level") == "100");
+		CHECK(f.calls == 8);
+		for (int i = 0; i < 8; ++i) CHECK(f.levels[i] == 100 && f.xp[i] == 0);
+		CHECK(f.levels[8] == 5 && f.xp[8] == 77);
+		CHECK(f.logs.back() == "req 53: p1 asked to set all skills to level 100");
+	}
+	// The 16-entry cap: a server with more skills is touched on the first 16 only, and an index past 16 is refused.
+	{
+		f.count = 20;
+		f.calls = 0;
+		f.levels.assign(32, 5); f.xp.assign(32, 77);
+		CHECK(OpSkill::Handle(ctx, SkillReq(nullptr, "1", "50")).status == CheatWire::Status::Ok);
+		CHECK(f.calls == 16 && f.levels[15] == 50 && f.levels[16] == 5);
+		CHECK(OpSkill::Handle(ctx, SkillReq("15", nullptr, "9")).status == CheatWire::Status::Ok && f.levels[15] == 9);
+		const Result r = OpSkill::Handle(ctx, SkillReq("16", nullptr, "9"));
+		CHECK(r.status == CheatWire::Status::Refused && r.reason == OpSkill::kTextNoSkill && f.calls == 17);
+		f.count = 8;
+	}
+	// Bad shapes: neither skill nor all, both, all other than 1, no level. Nothing is called.
+	{
+		const int calls = f.calls;
+		CHECK(OpSkill::Handle(ctx, SkillReq(nullptr, nullptr, "5")).reason == CheatDispatch::kTextBadRequest);
+		CHECK(OpSkill::Handle(ctx, SkillReq("1", "1", "5")).reason == CheatDispatch::kTextBadRequest);
+		CHECK(OpSkill::Handle(ctx, SkillReq(nullptr, "0", "5")).reason == CheatDispatch::kTextBadRequest);
+		CHECK(OpSkill::Handle(ctx, SkillReq(nullptr, "yes", "5")).reason == CheatDispatch::kTextBadRequest);
+		CHECK(OpSkill::Handle(ctx, SkillReq("1", nullptr, nullptr)).status == CheatWire::Status::Refused);
+		CHECK(f.calls == calls);
+	}
+	// No world or controller: error. A server with no skills: refused.
+	{
+		const int calls = f.calls;
+		f.count = std::nullopt;
+		const Result r = OpSkill::Handle(ctx, SkillReq(nullptr, "1", "5"));
+		CHECK(r.status == CheatWire::Status::Error && r.reason == "Not in a world right now." && f.calls == calls);
+		f.count = 0;
+		CHECK(OpSkill::Handle(ctx, SkillReq(nullptr, "1", "5")).reason == OpSkill::kTextNoSkill && f.calls == calls);
+		f.count = 8;
+	}
+	// A failed write: error with the op's text.
+	{
+		f.callsOk = false;
+		const Result r = OpSkill::Handle(ctx, SkillReq("1", nullptr, "5"));
+		CHECK(r.status == CheatWire::Status::Error && r.reason == "Couldn't change your skills on this server.");
+		f.callsOk = true;
+	}
+	// Off in cap: refused with the off text, even for a request with no field.
+	{
+		f.available = false;
+		const int calls = f.calls;
+		CHECK(!OpSkill::Available());
+		CHECK(OpSkill::Handle(ctx, SkillReq(nullptr, "1", "5")).reason == OpSkill::kTextOff);
+		CHECK(OpSkill::Handle(ctx, SkillReq(nullptr, nullptr, nullptr)).reason == OpSkill::kTextOff && f.calls == calls);
+		f.available = true;
+	}
+	// No env at all: off.
+	OpSkill::SetEnv(OpSkill::Env());
+	CHECK(!OpSkill::Available());
+	CHECK(OpSkill::Handle(ctx, SkillReq(nullptr, "1", "5")).reason == OpSkill::kTextOff);
+}
+
 int main()
 {
 	const Context ctx;
@@ -1869,6 +2013,7 @@ int main()
 	MineTests();
 	StatTests();
 	MoveTests();
+	SkillTests();
 	PlantTests();
 	BuildTests();
 	WaveTests();
