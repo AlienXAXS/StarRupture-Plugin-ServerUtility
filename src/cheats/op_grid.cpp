@@ -22,6 +22,13 @@ namespace OpGrid
 		}
 	}
 
+	bool Fits(int reach, int cols, int rows) { return reach <= cols * rows; }
+
+	Size StepSize(int cols, int rows)
+	{
+		return rows >= kMax ? Size{ cols + 1, rows } : Size{ cols, rows + 1 };
+	}
+
 	void SetEnv(Env env) { g_env = std::move(env); }
 
 	bool Available()
@@ -51,11 +58,11 @@ namespace OpGrid
 		if (!g_env.inWorld())
 			return Make(CheatWire::Status::Error, kTextNoWorld);
 
-		// Never shrink a grid that holds items: the extra slots would drop them.
+		// Never shrink a grid past an item: the slots beyond the new grid would drop it.
 		const std::optional<int> used = g_env.occupied(ctx);
 		if (!used)
 			return Make(CheatWire::Status::Refused, kTextNoCheck);
-		if (*used > cols * rows)
+		if (!Fits(*used, cols, rows))
 			return Make(CheatWire::Status::Refused, "Your items need " + std::to_string(*used) + " slots. Pick a bigger grid.");
 
 		if (g_env.log)

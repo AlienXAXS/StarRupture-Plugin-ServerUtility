@@ -76,10 +76,11 @@ namespace OpGridGame
 			}
 		}
 
-		// The size of the slot array, and how many slots hold an item (an item id that is not all
-		// zero). The array is stepped by the slot size the game reflects. False when the array or
-		// the slot size did not resolve, the array is empty, or on a fault.
-		bool CountSlots_SEH(SDK::UCrInventoryComponent* inv, int* total, int* occupied)
+		// The size of the slot array, and how many slots the items reach: the highest slot that holds
+		// an item (an item id that is not all zero) plus one, 0 for an empty grid. The array is
+		// stepped by the slot size the game reflects. False when the array or the slot size did not
+		// resolve, the array is empty, or on a fault.
+		bool ReadSlots_SEH(SDK::UCrInventoryComponent* inv, int* total, int* reach)
 		{
 			__try
 			{
@@ -89,7 +90,7 @@ namespace OpGridGame
 				const size_t idSize = ServerUtilityFields::InventorySlotItemId.resolvedSize;
 				if (idSize == 0)
 					return false;
-				int used = 0;
+				int highest = 0;
 				for (int i = 0; i < slots->Num(); ++i)
 				{
 					const uint8_t* slot = PluginMap::ElementAt(*slots, i, ServerUtilityFields::InventorySlotSize);
@@ -101,13 +102,13 @@ namespace OpGridGame
 					{
 						if (bytes[b] != 0)
 						{
-							++used;
+							highest = i + 1;
 							break;
 						}
 					}
 				}
-				*total    = slots->Num();
-				*occupied = used;
+				*total = slots->Num();
+				*reach = highest;
 				return true;
 			}
 			__except (EXCEPTION_EXECUTE_HANDLER)
@@ -133,6 +134,18 @@ namespace OpGridGame
 
 			SDK::UCrInventoryComponent* inv = ref.Get();
 			return inv && Invoke(inv, kClass, kFunction, block.Data());
+		}
+
+		// One resize, but only when no item sits at or past the new slot count: the slots are read
+		// again right before the call, so a step that moved items is seen. False when the slots
+		// can't be read, an item would be dropped, or the call could not be made.
+		bool CheckedResize(const InventoryRef& ref, int cols, int rows)
+		{
+			SDK::UCrInventoryComponent* inv = ref.Get();
+			int total = 0, reach = 0;
+			if (!inv || !ReadSlots_SEH(inv, &total, &reach) || !OpGrid::Fits(reach, cols, rows))
+				return false;
+			return CallResize(ref, cols, rows);
 		}
 
 		// The one connected player with this ID, or null. Game thread; the controller is only used in
@@ -172,27 +185,28 @@ namespace OpGridGame
 		std::optional<int> Occupied(const CheatDispatch::Context& ctx)
 		{
 			InventoryRef ref;
-			int total = 0, used = 0;
+			int total = 0, reach = 0;
 			if (!Available() || !World() || !Capture_SEH(ctx.controller, &ref))
 				return std::nullopt;
 			SDK::UCrInventoryComponent* inv = ref.Get();
-			if (!inv || !CountSlots_SEH(inv, &total, &used))
+			if (!inv || !ReadSlots_SEH(inv, &total, &reach))
 				return std::nullopt;
-			return used;
+			return reach;
 		}
 
 		// BetterCheats' resize: when the new grid holds as many slots as the old one the engine does
-		// nothing (16x8 and 8x16 are both 128), so a one-row-taller grid goes first. The grid is read
-		// back afterwards, because the engine refuses without saying so.
+		// nothing (16x8 and 8x16 are both 128), so a slightly bigger grid goes first (OpGrid::StepSize).
+		// Every call goes through CheckedResize, the steps and the roll back included, so none drops
+		// an item. The grid is read back afterwards, because the engine refuses without saying so.
 		bool Resize(const CheatDispatch::Context& ctx, uint32_t reqId, int cols, int rows)
 		{
 			InventoryRef ref;
 			if (!Available() || !World() || !Capture_SEH(ctx.controller, &ref))
 				return false;
 
-			int total = 0, used = 0, nowCols = 0, nowRows = 0;
+			int total = 0, reach = 0, nowCols = 0, nowRows = 0;
 			SDK::UCrInventoryComponent* inv = ref.Get();
-			if (!inv || !ReadGrid_SEH(inv, &nowCols, &nowRows) || !CountSlots_SEH(inv, &total, &used))
+			if (!inv || !ReadGrid_SEH(inv, &nowCols, &nowRows) || !ReadSlots_SEH(inv, &total, &reach))
 				return false;
 
 			const int oldCols = nowCols, oldRows = nowRows;
@@ -200,9 +214,13 @@ namespace OpGridGame
 			if (!done)
 			{
 				const bool steps = total == cols * rows;
-				if (steps && !CallResize(ref, cols, rows + 1))
-					return false;
-				if (!CallResize(ref, cols, rows))
+				if (steps)
+				{
+					const OpGrid::Size step = OpGrid::StepSize(cols, rows);
+					if (!CheckedResize(ref, step.cols, step.rows))
+						return false;
+				}
+				if (!CheckedResize(ref, cols, rows))
 					return false;
 
 				inv = ref.Get();
@@ -211,7 +229,7 @@ namespace OpGridGame
 				{
 					// Leave the player's grid as it was if only the first step took.
 					if (steps)
-						CallResize(ref, oldCols, oldRows);
+						CheckedResize(ref, oldCols, oldRows);
 					return false;
 				}
 			}

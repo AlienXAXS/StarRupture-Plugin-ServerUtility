@@ -1,7 +1,7 @@
 #pragma once
 
-// The cheat.grid op, apart from the game: it checks the request, refuses a grid smaller than the
-// slots the player's items fill, asks the game glue to resize the caller's own inventory grid, and
+// The cheat.grid op, apart from the game: it checks the request, refuses a grid that does not reach
+// the highest slot the player's items sit in, asks the game glue to resize the caller's own inventory grid, and
 // builds the reply. A resize is a grant: it stays, the glue logs it in the ledger, and nothing ever
 // reverts it on leave, deny or stop. The game side comes in through Env, so this runs in unit
 // tests. Game thread.
@@ -40,13 +40,21 @@ namespace OpGrid
 		std::function<bool()> inWorld;
 		// The grid a player has now; nullopt when it can't be read.
 		std::function<std::optional<Size>(const std::string& playerId)> current;
-		// How many slots the caller's items fill; nullopt when that can't be read.
+		// How many slots the caller's items reach: the highest filled slot index plus one. A grid
+		// with fewer slots would drop the item in that slot. nullopt when that can't be read.
 		std::function<std::optional<int>(const CheatDispatch::Context& ctx)> occupied;
 		// Resize the caller's grid. Records a ledger Grant and one log line on success. False when
 		// it failed. reqId is for the audit line.
 		std::function<bool(const CheatDispatch::Context& ctx, uint32_t reqId, int cols, int rows)> resize;
 		std::function<void(const std::string&)> log;
 	};
+
+	// Do items reaching `reach` slots (see Env::occupied) fit a grid of cols x rows.
+	bool Fits(int reach, int cols, int rows);
+
+	// The grid the reshape goes through first when the new grid holds as many slots as the old one
+	// (the engine does nothing then): one row taller, or one column wider when rows is at kMax.
+	Size StepSize(int cols, int rows);
 
 	void SetEnv(Env env);
 
