@@ -89,6 +89,8 @@ namespace OpEnemyGame
 			}
 		}
 
+		// The three members are written one after another, so a fault can leave some of them written.
+		// Callers only write ranges they have cached first (see ApplyAi), so RestoreOne undoes any mix.
 		bool WriteRanges_SEH(SDK::AMassEnemyCharacterBase* enemy, float distanceValue, float coneValue, float buildingValue)
 		{
 			__try
@@ -264,14 +266,18 @@ namespace OpEnemyGame
 
 		// First time Disable AI reaches this enemy: remember its ranges, stop its Mass agent once (the
 		// call does real work, so it is not repeated) and its behaviour tree, and zero the ranges.
+		// The enemy counts as applied from the moment its ranges are cached, before the first thing is
+		// changed: a fault part-way through the writes then still leaves it in RestoreOne's reach, which
+		// writes all three cached ranges back whatever was zeroed. The tick keeps writing the zeros.
 		void ApplyAi(Tracked& t, SDK::AMassEnemyCharacterBase* enemy)
 		{
 			float ranges[3] = {};
 			if (!ReadRanges_SEH(enemy, ranges))
 				return;
-			t.distance = ranges[0];
-			t.cone     = ranges[1];
-			t.building = ranges[2];
+			t.distance  = ranges[0];
+			t.cone      = ranges[1];
+			t.building  = ranges[2];
+			t.aiApplied = true;
 
 			SDK::UMassAgentComponent* agent = t.agent.Get();
 			if (!agent)
@@ -282,7 +288,7 @@ namespace OpEnemyGame
 			if (agent)
 				t.agentDisabled = AgentEnable_SEH(agent, false);
 			BrainTick_SEH(enemy, false);
-			t.aiApplied = WriteRanges_SEH(enemy, 0.0f, 0.0f, 0.0f);
+			WriteRanges_SEH(enemy, 0.0f, 0.0f, 0.0f);
 		}
 
 		// ---- Tracking

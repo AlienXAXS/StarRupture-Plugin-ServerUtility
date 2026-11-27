@@ -26,6 +26,8 @@ static bool Has(const std::vector<std::string>& logs, const std::string& part)
 	return false;
 }
 
+static const Value kHalf = std::vector<float>{ 9.0f, 9.0f, 1.0f, 1.0f };
+
 struct Rig
 {
 	std::map<std::string, Value> live;      // "target index|slot" -> live value
@@ -37,6 +39,7 @@ struct Rig
 	std::set<std::string> spectator;        // player ids who hold a spectator pawn (their character died)
 	int stanceCalls = 0;                    // pawn reads, one per controller per tick expected
 	bool failWrites = false;                // every write fails
+	int halfWrites = 0;                     // the next N writes leave a half value (kHalf) and fail
 	bool gameThread = true;
 	uint64_t now = 1000;
 	int writes = 0;
@@ -51,7 +54,12 @@ struct Rig
 	{
 		Env env;
 		env.read = [this](const Entry& e) { auto it = live.find(Key(e)); return it == live.end() ? Value() : it->second; };
-		env.write = [this](const Entry& e, const Value& v) { if (failWrites) return false; live[Key(e)] = v; ++writes; return true; };
+		env.write = [this](const Entry& e, const Value& v)
+		{
+			if (halfWrites > 0) { --halfWrites; live[Key(e)] = kHalf; return false; }
+			if (failWrites) return false;
+			live[Key(e)] = v; ++writes; return true;
+		};
 		env.alive = [this](const Weak& w) { return !dead.count(w.index); };
 		env.stance = [this](const Entry& e)
 		{
@@ -998,6 +1006,48 @@ static void PawnClasses()
 	CHECK(ClassifyPawn(true, false, true) == PawnKind::None);      // a spectator pawn is no pawn
 }
 
+static void HalfWrite()
+{
+	const Value prior = std::vector<float>{ 1.0f, 1.0f, 5.0f, 5.0f };
+	const Value want  = std::vector<float>{ 3.0f, 3.0f, 5.0f, 5.0f };
+	{   // a new entry whose write fails part-way: the value read first is put back, no entry
+		Rig r; r.Seed(10, "boost", prior);
+		r.halfWrites = 1;
+		CHECK(!r.ledger.Apply(r.Req(Kind::Toggle, "A", "boost", want)));
+		CHECK(r.Live(10, "boost") == prior);
+		CHECK(r.ledger.Size() == 0);
+		CHECK(r.writes == 1);
+		CHECK(!r.logs.empty() && r.logs.back().find("could not be written") != std::string::npos);
+		CHECK(r.logs.back().find("put back") == std::string::npos);
+	}
+	{   // the put back fails too: it is said in the log
+		Rig r; r.Seed(10, "boost", prior);
+		r.halfWrites = 2;
+		CHECK(!r.ledger.Apply(r.Req(Kind::Toggle, "A", "boost", want)));
+		CHECK(r.ledger.Size() == 0);
+		CHECK(r.logs.back().find("could not be put back") != std::string::npos);
+	}
+	{   // an entry that already exists: the half write is undone, so the release still finds its own value
+		Rig r; r.Seed(10, "boost", prior);
+		CHECK(r.ledger.Apply(r.Req(Kind::Toggle, "A", "boost", want)));
+		const int before = r.writes;
+		r.halfWrites = 1;
+		CHECK(!r.ledger.Apply(r.Req(Kind::Toggle, "A", "boost", std::vector<float>{ 4.0f, 4.0f, 5.0f, 5.0f })));
+		CHECK(r.writes == before + 1);
+		CHECK(r.Live(10, "boost") == want);
+		CHECK(r.ledger.Size() == 1);
+		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "boost"));
+		CHECK(r.Live(10, "boost") == prior);
+	}
+	{   // a write that fails with nothing written puts nothing back and says nothing about it
+		Rig r; r.Seed(10, "boost", prior);
+		r.failWrites = true;
+		CHECK(!r.ledger.Apply(r.Req(Kind::Toggle, "A", "boost", want)));
+		CHECK(r.Live(10, "boost") == prior);
+		CHECK(r.logs.back().find("put back") == std::string::npos);
+	}
+}
+
 int main()
 {
 	Toggles();
@@ -1014,6 +1064,7 @@ int main()
 	LogOnCommit();
 	ThreadGuard();
 	SlotPrefixCut();
+	HalfWrite();
 	std::printf("=== cheat_ledger_tests  %d checks, %d failed\n", g_checks, g_failed);
 	return g_failed ? 1 : 0;
 }

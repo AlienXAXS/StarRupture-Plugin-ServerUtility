@@ -146,9 +146,17 @@ namespace CheatLedger
 			e = it->second;
 		}
 
+		// What the slot holds right before the write: the prior just read for a new entry.
+		const Value before = it == m_entries.end() ? e.prior : m_env.read(e);
 		if (!m_env.write(e, req.value))
 		{
-			Log("refuse " + Describe(e) + ": the value could not be written");
+			// A write can fail part-way (a slot with several members), which nothing later would put
+			// right: a new entry does not exist yet, and the release of an existing one leaves a value
+			// that is not the one it wrote. So when the slot no longer holds what it held, put that back.
+			const bool intact = std::holds_alternative<std::monostate>(before) || m_env.read(e) == before;
+			const bool putBack = intact || m_env.write(e, before);
+			Log("refuse " + Describe(e) + ": the value could not be written" +
+				(putBack ? "" : ", and the earlier value could not be put back"));
 			return false;
 		}
 
