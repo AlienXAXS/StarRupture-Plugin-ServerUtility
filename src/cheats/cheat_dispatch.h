@@ -14,6 +14,9 @@
 #include <utility>
 #include <vector>
 
+// The ServerUtility release that first carries the cheat ops.
+#define SU_CHEATS_MIN_VERSION "0.20.0"
+
 namespace CheatDispatch
 {
 	constexpr double kRequestsPerSecond = 5;    // refill rate per player
@@ -26,7 +29,7 @@ namespace CheatDispatch
 	constexpr const char* kTextNotYet      = "Not available yet.";
 	constexpr const char* kTextBadRequest  = "That request could not be read.";
 	// The ServerUtility version that has these ops. An op this server does not know was added later.
-	constexpr const char* kTextUnknownOp   = "This server's ServerUtility is too old for this. It needs 0.19.0 or newer.";
+	constexpr const char* kTextUnknownOp   = "This server's ServerUtility is too old for this. It needs " SU_CHEATS_MIN_VERSION " or newer.";
 
 	// A token bucket. Starts full; time is passed in (seconds, steady) so tests need no clock.
 	class Bucket
