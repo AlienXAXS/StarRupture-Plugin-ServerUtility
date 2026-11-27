@@ -114,7 +114,8 @@ namespace OpBuildGame
 		}
 
 		// Sets the flag, reads it back (it has to read true) and has the game rebuild its available
-		// buildings. A Grant in the ledger, one log line; never reverted.
+		// buildings. A Grant in the ledger and one log line whenever the flag reads true, even when the
+		// refresh fails (that returns false); never reverted.
 		bool Unlock(const CheatDispatch::Context& ctx, uint32_t reqId)
 		{
 			if (!UnlockAvailable() || !World())
@@ -122,15 +123,17 @@ namespace OpBuildGame
 			bool on = false;
 			if (!WriteFlag_SEH() || !ReadFlag_SEH(&on) || !on)
 				return false;
-			if (!CallCheck_SEH())
-				return false;
+			// The flag is set server-wide from here on, so the grant is logged even when the refresh fails.
+			const bool refreshed = CallCheck_SEH();
 
 			const std::string id = ctx.playerId ? *ctx.playerId : std::string();
 			PlayerList::Entry who;
 			PlayerList::Find(id, who);
 			CheatLedgerGame::Get().Grant(id, who.label, OpBuild::kFeatureUnlock, kSlot, "all buildings unlocked", reqId);
 			LOG_INFO("[cheat.build] req %u: %s unlocked all buildings", reqId, id.c_str());
-			return true;
+			if (!refreshed)
+				LOG_WARN("[cheat.build] req %u: the buildings on offer were not refreshed", reqId);
+			return refreshed;
 		}
 
 		// ---- The free-building hooks. Each part is a post-hook on the game's own placement check: the
