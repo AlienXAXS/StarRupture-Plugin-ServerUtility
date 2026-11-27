@@ -5,6 +5,7 @@
 #include "cheats/op_give.h"
 #include "cheats/op_wave.h"
 #include "cheats/op_stack.h"
+#include "cheats/op_corp.h"
 
 #include <cstdio>
 #include <optional>
@@ -346,11 +347,114 @@ static void StackTests()
 	}
 }
 
+struct CorpFake
+{
+	bool available = true;
+	bool callsOk = true;
+	std::optional<int> value = 100;
+	int sets = 0;
+	uint32_t lastReq = 0;
+
+	OpCorp::Env MakeEnv()
+	{
+		OpCorp::Env e;
+		e.available = [this] { return available; };
+		e.current = [this] { return value; };
+		e.set = [this](const Context&, uint32_t id, int points) { ++sets; lastReq = id; if (callsOk) value = points; return callsOk; };
+		e.log = [](const std::string&) {};
+		return e;
+	}
+};
+
+static CheatWire::Request CorpReq(const char* points)
+{
+	CheatWire::Request r;
+	r.id = 13;
+	r.op = "cheat.corp";
+	if (points) r.fields.emplace_back("points", points);
+	return r;
+}
+
+static void CorpTests()
+{
+	const Context ctx;
+	CorpFake f;
+	OpCorp::SetEnv(f.MakeEnv());
+	CHECK(OpCorp::Available());
+
+	// The contract's example, and the edges 0 and 999999999.
+	{
+		const Result r = OpCorp::Handle(ctx, CorpReq("50000"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == "Data points set to 50000.");
+		CHECK(r.fields.size() == 1 && r.fields[0].first == "points" && r.fields[0].second == "50000");
+		CHECK(f.sets == 1 && f.lastReq == 13 && f.value == 50000);
+		CHECK(OpCorp::Handle(ctx, CorpReq("0")).status == CheatWire::Status::Ok && f.value == 0);
+		CHECK(OpCorp::Handle(ctx, CorpReq("999999999")).status == CheatWire::Status::Ok && f.value == 999999999);
+		CHECK(OpCorp::Handle(ctx, CorpReq("0007")).status == CheatWire::Status::Ok && f.value == 7);
+	}
+
+	// Out of range or not plain digits: refused, the game is not asked.
+	{
+		CorpFake g;
+		OpCorp::SetEnv(g.MakeEnv());
+		for (const char* bad : { "1000000000", "-1", "+5", "12x", " 5", "", "abc", "99999999999999999999", "1.5" })
+		{
+			const Result r = OpCorp::Handle(ctx, CorpReq(bad));
+			CHECK(r.status == CheatWire::Status::Refused && r.reason == OpCorp::kTextBounds && r.fields.empty());
+		}
+		CHECK(OpCorp::Handle(ctx, CorpReq(nullptr)).reason == kTextBadRequest);
+		CHECK(g.sets == 0);
+	}
+
+	// No world: an error, nothing written.
+	{
+		CorpFake g;
+		g.value = std::nullopt;
+		OpCorp::SetEnv(g.MakeEnv());
+		const Result r = OpCorp::Handle(ctx, CorpReq("5"));
+		CHECK(r.status == CheatWire::Status::Error && r.reason == OpCorp::kTextNoWorld && g.sets == 0);
+	}
+
+	// The write fails: an error with no fields.
+	{
+		CorpFake g;
+		g.callsOk = false;
+		OpCorp::SetEnv(g.MakeEnv());
+		const Result r = OpCorp::Handle(ctx, CorpReq("5"));
+		CHECK(r.status == CheatWire::Status::Error && r.reason == OpCorp::kTextFailed && r.fields.empty());
+	}
+
+	// A key missing on this build: off, checked on each call; and no env at all.
+	{
+		CorpFake g;
+		g.available = false;
+		OpCorp::SetEnv(g.MakeEnv());
+		CHECK(!OpCorp::Available());
+		const Result r = OpCorp::Handle(ctx, CorpReq("5"));
+		CHECK(r.status == CheatWire::Status::Refused && r.reason == "Not available on this server's game build.");
+		CHECK(OpCorp::Handle(ctx, CorpReq(nullptr)).reason == OpCorp::kTextOff && g.sets == 0);
+		g.available = true;
+		CHECK(OpCorp::Available());
+		OpCorp::SetEnv(OpCorp::Env());
+		CHECK(!OpCorp::Available());
+		CHECK(OpCorp::Handle(ctx, CorpReq("5")).reason == OpCorp::kTextOff);
+	}
+
+	// ParsePoints on its own.
+	{
+		int n = 77;
+		CHECK(OpCorp::ParsePoints("0", n) && n == 0);
+		CHECK(OpCorp::ParsePoints("999999999", n) && n == 999999999);
+		CHECK(!OpCorp::ParsePoints("1000000000", n) && n == 999999999);
+	}
+}
+
 int main()
 {
 	const Context ctx;
 	WaveTests();
 	StackTests();
+	CorpTests();
 	Fake f;
 	f.result.outcome = OpGive::GiveResult::Outcome::Gave;
 	f.result.name = "Iron Ore";

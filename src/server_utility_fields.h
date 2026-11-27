@@ -102,6 +102,10 @@ namespace ServerUtilityFields
 	inline auto IsWavePausedSize   = SR_PARAMS_SIZE(CrEnviroWaveSubsystem, IsWavePaused);
 	inline auto IsWavePausedResult = SR_PARAM(CrEnviroWaveSubsystem, IsWavePaused, ReturnValue);
 
+	// What the su.cheat corp op reads and writes: the game state's corporations owner and its data points.
+	inline auto CorporationsOwner = SERVER_UTILITY_FIELD(ACrGameStateBase, CorporationsOwner);
+	inline auto CorporationsDataPoints = SERVER_UTILITY_FIELD(ACrCorporationsOwner, DataPoints);
+
 	// The engine members that lead from the world to a connected player's
 	// controller and from a controller to its player state (the player lookup).
 	// The player list and the admin player actions read the same game state.
@@ -165,13 +169,18 @@ namespace ServerUtilityFields
 	inline PluginMap::Feature CheatWave{ "cheat-wave", "Wave control", PluginMap::KeysOf(
 		StartWaveSize, StartWaveType, IsWaveInProgressSize, IsWaveInProgressResult, IsWavePausedSize, IsWavePausedResult) };
 
+	// The su.cheat corp op: the corporations owner and its data points. While it is off `cap` reports
+	// the op off and a request is refused.
+	inline PluginMap::Feature CheatCorp{ "cheat-corp", "Corporation data points", PluginMap::KeysOf(
+		CorporationsOwner, CorporationsDataPoints) };
+
 	// Asks the loader for every member above. False when a key that no feature
 	// lists did not resolve; the loader has then recorded the failure and
 	// refuses the plugin. A miss on a key a feature lists only turns that
 	// feature off.
 	inline bool Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
 	{
-		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand, CheatGive, CheatWave);
+		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand, CheatGive, CheatWave, CheatCorp);
 
 		// A miss only turns off the features that list the key. Every row is
 		// asked even after a miss, so the loader's log lists them all.
@@ -180,11 +189,12 @@ namespace ServerUtilityFields
 			PlayerStateName, PlayerStatePing,
 			ActorAlwaysRelevant, ObjectClass, ObjectIndex,
 			ItemName, InventoryComponent, AuAddedItem_Amount, AuAddedItem_Size,
-			StartWaveSize, StartWaveType, IsWaveInProgressSize, IsWaveInProgressResult, IsWavePausedSize, IsWavePausedResult);
+			StartWaveSize, StartWaveType, IsWaveInProgressSize, IsWaveInProgressResult, IsWavePausedSize, IsWavePausedResult,
+			CorporationsOwner, CorporationsDataPoints);
 
 		// One line per feature the loader switched off, so the text names
 		// exactly what is off and follows the feature's key list.
-		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand, &CheatGive, &CheatWave })
+		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand, &CheatGive, &CheatWave, &CheatCorp })
 		{
 			if (!f->On())
 				LOG_WARN("[%s] The loader has no row for one of its engine members on this game build - %s is off",

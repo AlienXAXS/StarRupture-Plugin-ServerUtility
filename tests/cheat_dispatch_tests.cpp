@@ -6,6 +6,7 @@
 #include "cheats/op_give.h"
 #include "cheats/op_wave.h"
 #include "cheats/op_stack.h"
+#include "cheats/op_corp.h"
 #include "cheats/op_state.h"
 
 #include <cstdio>
@@ -87,7 +88,7 @@ int main()
 		CHECK(fresh.Idle(0));
 	}
 
-	// The op table: ten ops. Give, wave and stack have a handler (with an `available` hook); the rest are stubs.
+	// The op table: ten ops. Give, wave, stack and corp have a handler (with an `available` hook); the rest are stubs.
 	{
 		CHECK(Ops().size() == 10);
 		for (const OpEntry& op : Ops())
@@ -99,6 +100,8 @@ int main()
 				CHECK(op.run == &OpWave::Handle && op.available == &OpWave::Available);
 			else if (std::strcmp(op.name, "cheat.stack") == 0)
 				CHECK(op.run == &OpStack::Handle && op.available == &OpStack::Available);
+			else if (std::strcmp(op.name, "cheat.corp") == 0)
+				CHECK(op.run == &OpCorp::Handle && op.available == &OpCorp::Available);
 			else
 				CHECK(op.run == &NotYet && !op.available);
 		}
@@ -127,6 +130,7 @@ int main()
 			if (std::strcmp(op.name, "cheat.give") == 0) text = OpGive::kTextOff;
 			if (std::strcmp(op.name, "cheat.wave") == 0) text = OpWave::kTextOff;
 			if (std::strcmp(op.name, "cheat.stack") == 0) text = OpStack::kTextOff;
+			if (std::strcmp(op.name, "cheat.corp") == 0) text = OpCorp::kTextOff;
 			CHECK(r.Send("p1", Req(id, op.name)) == Res(id, "refused", text));
 			++id;
 		}
@@ -149,6 +153,32 @@ int main()
 
 		r.decision.why = kTextAdminsOnly;
 		CHECK(r.Send("p1", Req(4, "cheat.wave")) == Res(4, "refused", kTextAdminsOnly));
+	}
+
+	// cheat.corp through the dispatch: the corporations rule is checked on the server (a non-admin
+	// gets the admins-only text and the game is never asked); an admin's request is answered.
+	{
+		int sets = 0;
+		int value = 100;
+		OpCorp::Env ce;
+		ce.available = [] { return true; };
+		ce.current   = [&] { return std::optional<int>(value); };
+		ce.set       = [&](const Context&, uint32_t, int points) { ++sets; value = points; return true; };
+		OpCorp::SetEnv(ce);
+		const std::string tail = std::string(1, US) + "points=50000";
+		{
+			Rig r;
+			r.decision.allowed = false;
+			r.decision.why = kTextAdminsOnly;
+			CHECK(r.Send("p1", Req(70, "cheat.corp") + US + "points=1") == Res(70, "refused", kTextAdminsOnly));
+			CHECK(sets == 0);
+		}
+		{
+			Rig r;
+			CHECK(r.Send("p1", Req(71, "cheat.corp") + US + "points=50000") == Res(71, "ok", "Data points set to 50000.", tail));
+			CHECK(sets == 1 && value == 50000);
+		}
+		OpCorp::SetEnv(OpCorp::Env());
 	}
 
 	// An op this server does not know.
