@@ -62,6 +62,11 @@ namespace CheatDispatch
 	using Fields  = std::vector<std::pair<std::string, std::string>>;
 	// What `cheat.state` asks an op for: its key=value pairs for this player, or none.
 	using StateHook = Fields (*)(const std::string& playerId);
+	// A state hook for an op that spans several features: it is called whatever the op's own
+	// feature says, and gets the rules check per feature id to apply to its own keys.
+	using StateHookEx = Fields (*)(const std::string& playerId, const std::function<bool(const char* feature)>& allowed);
+	// Picks the feature id the rules decide on for one request, for an op that spans several.
+	using FeatureHook = const char* (*)(const CheatWire::Request& req);
 
 	// What a slice with no executor yet puts in the table.
 	Result NotYet(const Context&, const CheatWire::Request&);
@@ -76,6 +81,10 @@ namespace CheatDispatch
 		bool      (*available)() = nullptr;
 		// Optional: what this op adds to a `cheat.state` reply. Ops without one add nothing.
 		StateHook   state = nullptr;
+		// Optional: replaces `state` for an op whose keys follow more than one feature.
+		StateHookEx stateEx = nullptr;
+		// Optional: the feature id for a request, instead of `feature` (which is then the default).
+		FeatureHook featureFor = nullptr;
 	};
 
 	// Whether `cap` reports the op on: it has a handler and its `available` hook (if any) says yes.

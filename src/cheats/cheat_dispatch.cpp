@@ -9,6 +9,7 @@
 #include "op_grid.h"
 #include "op_mine.h"
 #include "op_plant.h"
+#include "op_build.h"
 #include "op_state.h"
 
 #include <algorithm>
@@ -65,7 +66,7 @@ namespace CheatDispatch
 			{ "cheat.grid",   1, "inventory",     &OpGrid::Handle, &OpGrid::Available, &OpGrid::StateFields },
 			{ "cheat.plant",  1, "inventory",     &OpPlant::Handle, &OpPlant::Available, &OpPlant::StateFields },
 			{ "cheat.mine",   1, "mining-tools",  &OpMine::Handle, &OpMine::Available, &OpMine::StateFields },
-			{ "cheat.build", 1, "build-free",     &NotYet },
+			{ "cheat.build", 1, "build-free",     &OpBuild::Handle, &OpBuild::Available, nullptr, &OpBuild::StateFieldsFor, &OpBuild::FeatureFor },
 		};
 		return table;
 	}
@@ -165,10 +166,11 @@ namespace CheatDispatch
 			return reply(req.id, CheatWire::Status::Refused, kTextUnknownOp);
 		}
 
-		const RulesModel::Decision d = m_env.check(controller, playerId, entry->feature);
+		const char* feature = entry->featureFor ? entry->featureFor(req) : entry->feature;
+		const RulesModel::Decision d = m_env.check(controller, playerId, feature);
 		if (!d.allowed)
 		{
-			log("Refused " + req.op + " (" + entry->feature + ") for " + playerId + ": " + (d.why ? d.why : ""));
+			log("Refused " + req.op + " (" + feature + ") for " + playerId + ": " + (d.why ? d.why : ""));
 			const bool adminsOnly = d.why && std::strcmp(d.why, kTextAdminsOnly) == 0;
 			return reply(req.id, CheatWire::Status::Refused, adminsOnly ? kTextAdminsOnly : kTextRuleDeny);
 		}

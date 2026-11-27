@@ -14,6 +14,7 @@
 #include "cheats/op_grid.h"
 #include "cheats/op_mine.h"
 #include "cheats/op_plant.h"
+#include "cheats/op_build.h"
 
 #include <cstdio>
 #include <optional>
@@ -120,6 +121,9 @@ int main()
 				CHECK(op.run == &OpPlant::Handle && op.available == &OpPlant::Available && op.state == &OpPlant::StateFields);
 			else if (std::strcmp(op.name, "cheat.mine") == 0)
 				CHECK(op.run == &OpMine::Handle && op.available == &OpMine::Available && op.state == &OpMine::StateFields);
+			else if (std::strcmp(op.name, "cheat.build") == 0)
+				CHECK(op.run == &OpBuild::Handle && op.available == &OpBuild::Available && !op.state
+					&& op.stateEx == &OpBuild::StateFieldsFor && op.featureFor == &OpBuild::FeatureFor);
 			else
 				CHECK(op.run == &NotYet && !op.available);
 		}
@@ -155,6 +159,7 @@ int main()
 			if (std::strcmp(op.name, "cheat.grid") == 0) text = OpGrid::kTextOff;
 			if (std::strcmp(op.name, "cheat.plant") == 0) text = OpPlant::kTextOff;
 			if (std::strcmp(op.name, "cheat.mine") == 0) text = OpMine::kTextOff;
+			if (std::strcmp(op.name, "cheat.build") == 0) text = OpBuild::kTextOff;
 			CHECK(r.Send("p1", Req(id, op.name)) == Res(id, "refused", text));
 			++id;
 		}
@@ -457,6 +462,33 @@ int main()
 			CHECK(r.Send("p1", Req(106, "cheat.state")) == Res(106, "ok", "", U + "wave=paused" + U + "stack=500"));
 			OpPlant::SetMultiplier("p1", 1);
 			OpPlant::SetEnv(OpPlant::Env());
+		}
+		// cheat.build: unlock goes to every caller whatever the rules say, build= lists only the parts
+		// on whose own feature is allowed, and the key is sent while build-free or build-anywhere is allowed.
+		{
+			OpBuild::Env be;
+			be.available       = [](OpBuild::Part) { return true; };
+			be.unlockAvailable = [] { return true; };
+			be.inWorld         = [] { return true; };
+			be.apply           = [](const Context&, uint32_t, const std::vector<OpBuild::Part>&, bool) { return true; };
+			be.unlocked        = [] { return false; };
+			OpBuild::SetEnv(be);
+			Rig r;
+			const std::string base = U + "wave=paused" + U + "stack=500";
+			CHECK(r.Send("p1", Req(107, "cheat.state")) == Res(107, "ok", "", base + U + "build=none" + U + "unlock=off"));
+			OpBuild::SetPart("p1", OpBuild::Part::Cost, true);
+			OpBuild::SetPart("p1", OpBuild::Part::Windows, true);
+			r.now += 10;
+			CHECK(r.Send("p1", Req(108, "cheat.state")) == Res(108, "ok", "", base + U + "build=cost,windows" + U + "unlock=off"));
+			r.denyFeature = "build-free";
+			r.now += 10;
+			CHECK(r.Send("p1", Req(109, "cheat.state")) == Res(109, "ok", "", base + U + "build=windows" + U + "unlock=off"));
+			r.denyFeature = "build-unlock";
+			r.now += 10;
+			CHECK(r.Send("p1", Req(110, "cheat.state")) == Res(110, "ok", "", base + U + "build=cost,windows" + U + "unlock=off"));
+			OpBuild::SetPart("p1", OpBuild::Part::Cost, false);
+			OpBuild::SetPart("p1", OpBuild::Part::Windows, false);
+			OpBuild::SetEnv(OpBuild::Env());
 		}
 		// The wave's three states.
 		{

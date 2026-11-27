@@ -12,6 +12,7 @@
 #include "cheats/op_grid.h"
 #include "cheats/op_mine.h"
 #include "cheats/op_plant.h"
+#include "cheats/op_build.h"
 
 #include <cstdio>
 #include <map>
@@ -1337,6 +1338,212 @@ static void PlantTests()
 	CHECK(std::string(OpPlant::kFeature) == "inventory" && std::string(OpPlant::kSlot) == "plant");
 }
 
+// A fake build game: the calls recorded, the hook installs counted per part.
+struct BuildFake
+{
+	bool parts[OpBuild::kPartCount] = { true, true, true, true };
+	bool unlockAvail = true;
+	bool world = true;
+	bool callsOk = true;
+	bool unlockedNow = false;
+	int applies = 0, unlocks = 0;
+	uint32_t lastReq = 0;
+	bool lastOn = false;
+	std::vector<OpBuild::Part> lastParts;
+	int installs[OpBuild::kPartCount] = {}, removes[OpBuild::kPartCount] = {};
+
+	OpBuild::Env MakeEnv()
+	{
+		OpBuild::Env e;
+		e.available       = [this](OpBuild::Part p) { return parts[static_cast<int>(p)]; };
+		e.unlockAvailable = [this] { return unlockAvail; };
+		e.inWorld         = [this] { return world; };
+		e.apply           = [this](const Context&, uint32_t id, const std::vector<OpBuild::Part>& ps, bool on)
+		                    { ++applies; lastReq = id; lastOn = on; lastParts = ps; return callsOk; };
+		e.installHook     = [this](OpBuild::Part p) { ++installs[static_cast<int>(p)]; return true; };
+		e.removeHook      = [this](OpBuild::Part p) { ++removes[static_cast<int>(p)]; };
+		e.unlocked        = [this] { return unlockedNow; };
+		e.unlock          = [this](const Context&, uint32_t id) { ++unlocks; lastReq = id; if (callsOk) unlockedNow = true; return callsOk; };
+		e.log             = [](const std::string&) {};
+		return e;
+	}
+};
+
+static CheatWire::Request BuildReq(const char* rule, const char* on, const char* part = nullptr)
+{
+	CheatWire::Request r;
+	r.id = 23;
+	r.op = "cheat.build";
+	if (rule) r.fields.emplace_back("rule", rule);
+	if (on) r.fields.emplace_back("on", on);
+	if (part) r.fields.emplace_back("part", part);
+	return r;
+}
+
+static void BuildTests()
+{
+	using OpBuild::Part;
+	const std::string id = "p1";
+	Context ctx;
+	ctx.playerId = &id;
+	BuildFake f;
+	OpBuild::SetEnv(f.MakeEnv());
+	CHECK(OpBuild::Available());
+	const auto all = [](const char*) { return true; };
+
+	// The feature follows rule=; missing or unknown is build-free.
+	CHECK(std::string(OpBuild::FeatureFor(BuildReq("free", "on"))) == "build-free");
+	CHECK(std::string(OpBuild::FeatureFor(BuildReq("anywhere", "on"))) == "build-anywhere");
+	CHECK(std::string(OpBuild::FeatureFor(BuildReq("unlock", "on"))) == "build-unlock");
+	CHECK(std::string(OpBuild::FeatureFor(BuildReq("bogus", "on"))) == "build-free");
+	CHECK(std::string(OpBuild::FeatureFor(BuildReq(nullptr, "on"))) == "build-free");
+
+	// Free on, every part: text 28, parts listed, each hook goes in once.
+	{
+		const Result r = OpBuild::Handle(ctx, BuildReq("free", "on"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == "Free building is on for your builds.");
+		CHECK(r.fields == Fields({ { "rule", "free" }, { "on", "on" }, { "parts", "cost,stability" } }));
+		CHECK(f.applies == 1 && f.lastReq == 23 && f.lastOn && f.lastParts.size() == 2);
+		CHECK(OpBuild::PartOn("p1", Part::Cost) && OpBuild::PartOn("p1", Part::Stability));
+		CHECK(!OpBuild::PartOn("p1", Part::Windows) && !OpBuild::PartOn("p2", Part::Cost));
+		CHECK(f.installs[0] == 1 && f.installs[1] == 1 && f.installs[2] == 0);
+		CHECK(OpBuild::StateFieldsFor("p1", all) == Fields({ { "build", "cost,stability" }, { "unlock", "off" } }));
+	}
+	// Anywhere with one part: text 30, only that part; the free part stays.
+	{
+		const Result r = OpBuild::Handle(ctx, BuildReq("anywhere", "on", "windows"));
+		CHECK(r.reason == "Building anywhere is on for your builds.");
+		CHECK(r.fields == Fields({ { "rule", "anywhere" }, { "on", "on" }, { "parts", "windows" } }));
+		CHECK(OpBuild::PartOn("p1", Part::Windows) && !OpBuild::PartOn("p1", Part::Benches) && OpBuild::PartOn("p1", Part::Cost));
+		CHECK(f.installs[2] == 1 && f.installs[3] == 0);
+	}
+	// A second player does not install again; the first one leaving does not remove while another is on.
+	{
+		OpBuild::SetPart("p2", Part::Cost, true);
+		CHECK(f.installs[0] == 1);
+		OpBuild::SetPart("p1", Part::Cost, false);
+		CHECK(f.removes[0] == 0 && OpBuild::PartOn("p2", Part::Cost) && !OpBuild::PartOn("p1", Part::Cost));
+		OpBuild::SetPart("p2", Part::Cost, false);
+		CHECK(f.removes[0] == 1);
+	}
+	// Off: texts 29 and 31; the last one off removes the hooks. A revert from the ledger uses SetPart.
+	{
+		const Result r = OpBuild::Handle(ctx, BuildReq("free", "off"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == "Free building is off." && !f.lastOn);
+		CHECK(r.fields == Fields({ { "rule", "free" }, { "on", "off" }, { "parts", "cost,stability" } }));
+		CHECK(!OpBuild::PartOn("p1", Part::Stability) && f.removes[1] == 1);
+		CHECK(OpBuild::Handle(ctx, BuildReq("anywhere", "off")).reason == "Building anywhere is off.");
+		CHECK(f.removes[2] == 1 && f.removes[3] == 0);
+		CHECK(OpBuild::StateFieldsFor("p1", all) == Fields({ { "build", "none" }, { "unlock", "off" } }));
+		OpBuild::SetPart("p1", Part::Benches, true);
+		OpBuild::SetPart("p1", Part::Benches, false);
+	}
+	// State: a part counts only while its own feature is allowed; no key with both features denied;
+	// unlock goes out whatever the rules say.
+	{
+		OpBuild::SetPart("p1", Part::Cost, true);
+		OpBuild::SetPart("p1", Part::Windows, true);
+		const auto onlyAnywhere = [](const char* feat) { return std::string(feat) == "build-anywhere"; };
+		CHECK(OpBuild::StateFieldsFor("p1", onlyAnywhere) == Fields({ { "build", "windows" }, { "unlock", "off" } }));
+		const auto none = [](const char*) { return false; };
+		CHECK(OpBuild::StateFieldsFor("p1", none) == Fields({ { "unlock", "off" } }));
+		f.unlockedNow = true;
+		CHECK(OpBuild::StateFieldsFor("p1", none) == Fields({ { "unlock", "on" } }));
+		f.unlockedNow = false;
+		OpBuild::SetPart("p1", Part::Cost, false);
+		OpBuild::SetPart("p1", Part::Windows, false);
+	}
+	// A part that does not work here is left out of a whole-rule request and refused when named.
+	{
+		f.parts[static_cast<int>(Part::Stability)] = false;
+		const Result r = OpBuild::Handle(ctx, BuildReq("free", "on"));
+		CHECK(r.fields == Fields({ { "rule", "free" }, { "on", "on" }, { "parts", "cost" } }));
+		OpBuild::Handle(ctx, BuildReq("free", "off"));
+		const int before = f.applies;
+		CHECK(OpBuild::Handle(ctx, BuildReq("free", "on", "stability")).reason == OpBuild::kTextOff && f.applies == before);
+		f.parts[static_cast<int>(Part::Cost)] = false;
+		CHECK(OpBuild::Handle(ctx, BuildReq("free", "on")).reason == OpBuild::kTextOff);
+		CHECK(OpBuild::Available());   // anywhere and unlock still work
+		f.parts[static_cast<int>(Part::Cost)] = true;
+		f.parts[static_cast<int>(Part::Stability)] = true;
+	}
+	// Unlock: grant once, text 32; asking again is ok with the same text and no second call.
+	{
+		const Result r = OpBuild::Handle(ctx, BuildReq("unlock", "on"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == "All buildings are unlocked on this server.");
+		CHECK(r.fields == Fields({ { "rule", "unlock" }, { "on", "on" } }));
+		CHECK(f.unlocks == 1 && f.lastReq == 23 && f.unlockedNow);
+		CHECK(OpBuild::Handle(ctx, BuildReq("unlock", "on")).reason == OpBuild::kTextUnlocked && f.unlocks == 1);
+		CHECK(OpBuild::StateFieldsFor("p1", [](const char*) { return false; }) == Fields({ { "unlock", "on" } }));
+		// Locking again: refused, text 33, no call.
+		const Result no = OpBuild::Handle(ctx, BuildReq("unlock", "off"));
+		CHECK(no.status == CheatWire::Status::Refused && no.reason == "Unlocked buildings can't be locked again.");
+		CHECK(f.unlocks == 1);
+		f.unlockedNow = false;
+	}
+	// Bad requests: nothing is called.
+	{
+		const int before = f.applies + f.unlocks;
+		const Result bad[] = {
+			OpBuild::Handle(ctx, BuildReq(nullptr, "on")),
+			OpBuild::Handle(ctx, BuildReq("free", nullptr)),
+			OpBuild::Handle(ctx, BuildReq("free", "maybe")),
+			OpBuild::Handle(ctx, BuildReq("bogus", "on")),
+			OpBuild::Handle(ctx, BuildReq("free", "on", "windows")),
+			OpBuild::Handle(ctx, BuildReq("anywhere", "on", "cost")),
+			OpBuild::Handle(ctx, BuildReq("free", "on", "nope")),
+			OpBuild::Handle(ctx, BuildReq("unlock", "on", "cost")),
+		};
+		for (const Result& r : bad)
+			CHECK(r.status == CheatWire::Status::Refused && r.reason == CheatDispatch::kTextBadRequest);
+		CHECK(f.applies + f.unlocks == before);
+	}
+	// No world: error, no call.
+	{
+		f.world = false;
+		const int before = f.applies + f.unlocks;
+		for (const char* rule : { "free", "anywhere", "unlock" })
+		{
+			const Result r = OpBuild::Handle(ctx, BuildReq(rule, "on"));
+			CHECK(r.status == CheatWire::Status::Error && r.reason == "Not in a world right now.");
+		}
+		CHECK(f.applies + f.unlocks == before);
+		f.world = true;
+	}
+	// A failed call: error, nothing recorded, the flag not set.
+	{
+		f.callsOk = false;
+		const Result a = OpBuild::Handle(ctx, BuildReq("free", "on"));
+		CHECK(a.status == CheatWire::Status::Error && a.reason == "Couldn't change building on this server.");
+		CHECK(!OpBuild::PartOn("p1", Part::Cost));
+		const Result u = OpBuild::Handle(ctx, BuildReq("unlock", "on"));
+		CHECK(u.status == CheatWire::Status::Error && !f.unlockedNow);
+		f.callsOk = true;
+	}
+	// Unlock off here while the parts work: unlock is refused as off, the rest runs.
+	{
+		f.unlockAvail = false;
+		CHECK(OpBuild::Handle(ctx, BuildReq("unlock", "on")).reason == OpBuild::kTextOff);
+		CHECK(OpBuild::Available());
+		f.unlockAvail = true;
+	}
+	// Everything off: not available, refused with the off text.
+	{
+		for (bool& p : f.parts) p = false;
+		f.unlockAvail = false;
+		CHECK(!OpBuild::Available());
+		CHECK(OpBuild::Handle(ctx, BuildReq("free", "on")).reason == OpBuild::kTextOff);
+	}
+
+	// No env at all: off, no state fields.
+	OpBuild::SetEnv(OpBuild::Env());
+	CHECK(!OpBuild::Available());
+	CHECK(OpBuild::StateFieldsFor("p1", all).empty());
+
+	CHECK(std::string(OpBuild::kFeatureFree) == "build-free" && std::string(OpBuild::kFeatureAnywhere) == "build-anywhere"
+		&& std::string(OpBuild::kFeatureUnlock) == "build-unlock");
+}
+
 int main()
 {
 	const Context ctx;
@@ -1346,6 +1553,7 @@ int main()
 	GridTests();
 	MineTests();
 	PlantTests();
+	BuildTests();
 	WaveTests();
 	StackTests();
 	CorpTests();

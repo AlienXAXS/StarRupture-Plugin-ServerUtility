@@ -15,7 +15,22 @@ namespace OpState
 		r.status = CheatWire::Status::Ok;
 		for (const CheatDispatch::OpEntry& op : CheatDispatch::Ops())
 		{
-			if (!op.state || !CheatDispatch::IsOn(op) || !allowed(op))
+			if (!(op.state || op.stateEx) || !CheatDispatch::IsOn(op))
+				continue;
+			if (op.stateEx)
+			{
+				// The op decides per feature itself, so its own feature is not a gate here.
+				const auto featureAllowed = [&](const char* feature)
+				{
+					CheatDispatch::OpEntry probe = op;
+					probe.feature = feature;
+					return allowed(probe);
+				};
+				for (auto& field : op.stateEx(playerId, featureAllowed))
+					r.fields.push_back(std::move(field));
+				continue;
+			}
+			if (!allowed(op))
 				continue;
 			for (auto& field : op.state(playerId))
 				r.fields.push_back(std::move(field));
