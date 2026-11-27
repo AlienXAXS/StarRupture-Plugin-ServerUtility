@@ -29,6 +29,7 @@
 #include "cheats/op_wave_game.h"
 #include "cheats/op_stack_game.h"
 #include "cheats/op_corp_game.h"
+#include "cheats/op_power_game.h"
 #endif
 
 // -----------------------------------------------------------------------
@@ -206,6 +207,7 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 	OpWaveGame::Init();
 	OpStackGame::Init();
 	OpCorpGame::Init();
+	OpPowerGame::Init();
 	CheatNet::Init();
 #endif
 

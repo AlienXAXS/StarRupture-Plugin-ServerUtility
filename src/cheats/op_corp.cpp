@@ -38,6 +38,14 @@ namespace OpCorp
 		return true;
 	}
 
+	CheatDispatch::Fields StateFields(const std::string&)
+	{
+		if (!g_env.current) return {};
+		const std::optional<int> now = g_env.current();
+		if (!now) return {};
+		return { { "points", std::to_string(*now) } };
+	}
+
 	CheatDispatch::Result Handle(const CheatDispatch::Context& ctx, const CheatWire::Request& req)
 	{
 		if (!Available())

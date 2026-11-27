@@ -8,6 +8,7 @@
 #include "cheats/op_stack.h"
 #include "cheats/op_corp.h"
 #include "cheats/op_state.h"
+#include "cheats/op_power.h"
 
 #include <cstdio>
 #include <optional>
@@ -101,7 +102,9 @@ int main()
 			else if (std::strcmp(op.name, "cheat.stack") == 0)
 				CHECK(op.run == &OpStack::Handle && op.available == &OpStack::Available);
 			else if (std::strcmp(op.name, "cheat.corp") == 0)
-				CHECK(op.run == &OpCorp::Handle && op.available == &OpCorp::Available);
+				CHECK(op.run == &OpCorp::Handle && op.available == &OpCorp::Available && op.state == &OpCorp::StateFields);
+			else if (std::strcmp(op.name, "cheat.power") == 0)
+				CHECK(op.run == &OpPower::Handle && op.available == &OpPower::Available && op.state == &OpPower::StateFields);
 			else
 				CHECK(op.run == &NotYet && !op.available);
 		}
@@ -131,6 +134,7 @@ int main()
 			if (std::strcmp(op.name, "cheat.wave") == 0) text = OpWave::kTextOff;
 			if (std::strcmp(op.name, "cheat.stack") == 0) text = OpStack::kTextOff;
 			if (std::strcmp(op.name, "cheat.corp") == 0) text = OpCorp::kTextOff;
+			if (std::strcmp(op.name, "cheat.power") == 0) text = OpPower::kTextOff;
 			CHECK(r.Send("p1", Req(id, op.name)) == Res(id, "refused", text));
 			++id;
 		}
@@ -296,6 +300,39 @@ int main()
 			CHECK(r.Send("p1", Req(64, "cheat.state")) == Res(64, "ok", "", U + "wave=paused"));
 			OpStack::SetEnv(se);
 		}
+		// cheat.corp adds points=<n> (nothing with no world), cheat.power adds power=<n>|off.
+		{
+			int points = 4200;
+			bool world = true;
+			int edited = 0;
+			OpCorp::Env ce;
+			ce.available = [] { return true; };
+			ce.current   = [&] { return world ? std::optional<int>(points) : std::nullopt; };
+			ce.set       = [](const Context&, uint32_t, int) { return true; };
+			OpCorp::SetEnv(ce);
+			OpPower::Env pe;
+			pe.available = [] { return true; };
+			pe.find      = [](const std::string&, OpPower::Building&) { return OpPower::Lookup::NotFound; };
+			pe.list      = [] { return std::optional<std::vector<OpPower::Building>>(std::vector<OpPower::Building>()); };
+			pe.edited    = [&] { return edited; };
+			pe.set       = [](const Context&, uint32_t, const std::string&, float) { return true; };
+			pe.reset     = [](const Context&, uint32_t, const std::string&) { return true; };
+			pe.resetAll  = [](const Context&, uint32_t) { return true; };
+			OpPower::SetEnv(pe);
+			Rig r;
+			CHECK(r.Send("p1", Req(80, "cheat.state")) == Res(80, "ok", "", U + "wave=paused" + U + "stack=500" + U + "points=4200" + U + "power=off"));
+			edited = 3;
+			r.now += 10;
+			CHECK(r.Send("p1", Req(81, "cheat.state")) == Res(81, "ok", "", U + "wave=paused" + U + "stack=500" + U + "points=4200" + U + "power=3"));
+			world = false;
+			r.now += 10;
+			CHECK(r.Send("p1", Req(82, "cheat.state")) == Res(82, "ok", "", U + "wave=paused" + U + "stack=500" + U + "power=3"));
+			r.denyFeature = "machine-power";
+			r.now += 10;
+			CHECK(r.Send("p1", Req(83, "cheat.state")) == Res(83, "ok", "", U + "wave=paused" + U + "stack=500"));
+			OpCorp::SetEnv(OpCorp::Env());
+			OpPower::SetEnv(OpPower::Env());
+		}
 		// The wave's three states.
 		{
 			Rig r;
@@ -330,7 +367,7 @@ int main()
 	{
 		const std::string reply = CheatWire::EncodeReply(2147483647, CheatWire::Status::Ok, "", OpState::WorstCaseFields());
 		CHECK(!reply.empty() && reply.size() <= CheatWire::kMaxMessage);
-		CHECK(OpState::WorstCaseFields().size() == 12);
+		CHECK(OpState::WorstCaseFields().size() == 13);
 	}
 
 	std::printf("cheat_dispatch_tests: %d checks, %d failed\n", g_checks, g_failed);

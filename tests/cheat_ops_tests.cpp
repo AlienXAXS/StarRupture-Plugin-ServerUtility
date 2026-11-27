@@ -6,8 +6,10 @@
 #include "cheats/op_wave.h"
 #include "cheats/op_stack.h"
 #include "cheats/op_corp.h"
+#include "cheats/op_power.h"
 
 #include <cstdio>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -440,6 +442,17 @@ static void CorpTests()
 		CHECK(OpCorp::Handle(ctx, CorpReq("5")).reason == OpCorp::kTextOff);
 	}
 
+	// The state hook: points=<n>, nothing when there is no world or no env.
+	{
+		CorpFake g;
+		OpCorp::SetEnv(g.MakeEnv());
+		CHECK(OpCorp::StateFields("p1").size() == 1 && OpCorp::StateFields("p1")[0].first == "points" && OpCorp::StateFields("p1")[0].second == "100");
+		g.value = std::nullopt;
+		CHECK(OpCorp::StateFields("p1").empty());
+		OpCorp::SetEnv(OpCorp::Env());
+		CHECK(OpCorp::StateFields("p1").empty());
+	}
+
 	// ParsePoints on its own.
 	{
 		int n = 77;
@@ -449,9 +462,242 @@ static void CorpTests()
 	}
 }
 
+// A fake power game: buildings by asset name, the calls recorded.
+struct PowerFake
+{
+	bool available = true;
+	bool world = true;
+	bool callsOk = true;
+	std::map<std::string, OpPower::Building> buildings;
+	int sets = 0, resets = 0, resetAlls = 0;
+	uint32_t lastReq = 0;
+
+	PowerFake()
+	{
+		buildings["DA_WindPowerGeneratorTier2"] = { "DA_WindPowerGeneratorTier2", "Wind Power Generator Tier 2", "producer", 100, 100 };
+		buildings["DA_Smelter"] = { "DA_Smelter", "Smelter", "consumer", 20, 20 };
+	}
+
+	int Edited() const
+	{
+		int n = 0;
+		for (const auto& b : buildings) if (b.second.value != b.second.defaultValue) ++n;
+		return n;
+	}
+
+	OpPower::Env MakeEnv()
+	{
+		OpPower::Env e;
+		e.available = [this] { return available; };
+		e.find = [this](const std::string& asset, OpPower::Building& out)
+		{
+			if (!world) return OpPower::Lookup::NoWorld;
+			const auto it = buildings.find(asset);
+			if (it == buildings.end()) return OpPower::Lookup::NotFound;
+			out = it->second;
+			return OpPower::Lookup::Found;
+		};
+		e.list = [this]() -> std::optional<std::vector<OpPower::Building>>
+		{
+			if (!world) return std::nullopt;
+			std::vector<OpPower::Building> all;
+			for (const auto& b : buildings) all.push_back(b.second);
+			return all;
+		};
+		e.edited = [this] { return Edited(); };
+		e.set = [this](const Context&, uint32_t id, const std::string& asset, float v) { ++sets; lastReq = id; if (callsOk) buildings[asset].value = v; return callsOk; };
+		e.reset = [this](const Context&, uint32_t id, const std::string& asset) { ++resets; lastReq = id; if (callsOk) buildings[asset].value = buildings[asset].defaultValue; return callsOk; };
+		e.resetAll = [this](const Context&, uint32_t id) { ++resetAlls; lastReq = id; if (callsOk) for (auto& b : buildings) b.second.value = b.second.defaultValue; return callsOk; };
+		e.log = [](const std::string&) {};
+		return e;
+	}
+};
+
+static CheatWire::Request PowerReq(const char* action, const char* building = nullptr, const char* value = nullptr)
+{
+	CheatWire::Request r;
+	r.id = 14;
+	r.op = "cheat.power";
+	if (action) r.fields.emplace_back("do", action);
+	if (building) r.fields.emplace_back("building", building);
+	if (value) r.fields.emplace_back("value", value);
+	return r;
+}
+
+static const std::string* Field(const Result& r, const char* key)
+{
+	for (const auto& f : r.fields) if (f.first == key) return &f.second;
+	return nullptr;
+}
+
+static void PowerTests()
+{
+	const Context ctx;
+	PowerFake f;
+	OpPower::SetEnv(f.MakeEnv());
+	CHECK(OpPower::Available());
+	const char* wind = "DA_WindPowerGeneratorTier2";
+
+	// set: the reply names the building, the value in effect and the default.
+	{
+		const Result r = OpPower::Handle(ctx, PowerReq("set", wind, "500"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == "Wind Power Generator Tier 2 power set to 500.");
+		CHECK(r.fields.size() == 3 && *Field(r, "building") == "Wind Power Generator Tier 2" && *Field(r, "value") == "500" && *Field(r, "default") == "100");
+		CHECK(f.sets == 1 && f.lastReq == 14 && f.buildings[wind].value == 500);
+		CHECK(OpPower::Handle(ctx, PowerReq("set", wind, "0.01")).status == CheatWire::Status::Ok && f.buildings[wind].value == 0.01f);
+		CHECK(OpPower::Handle(ctx, PowerReq("set", wind, "1000000")).status == CheatWire::Status::Ok);
+		CHECK(OpPower::Handle(ctx, PowerReq("set", wind, "12.5")).reason == "Wind Power Generator Tier 2 power set to 12.5.");
+	}
+
+	// reset one: back to the default; a building with no edit is a quiet ok.
+	{
+		const Result r = OpPower::Handle(ctx, PowerReq("reset", wind));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == "Wind Power Generator Tier 2 power back to 100.");
+		CHECK(*Field(r, "value") == "100" && f.buildings[wind].value == 100 && f.resets == 1);
+		CHECK(OpPower::Handle(ctx, PowerReq("reset", "DA_Smelter")).status == CheatWire::Status::Ok);
+	}
+
+	// reset-all.
+	{
+		OpPower::Handle(ctx, PowerReq("set", wind, "7"));
+		OpPower::Handle(ctx, PowerReq("set", "DA_Smelter", "8"));
+		CHECK(f.Edited() == 2);
+		const Result r = OpPower::Handle(ctx, PowerReq("reset-all"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == "All building power values reset." && r.fields.empty());
+		CHECK(f.resetAlls == 1 && f.Edited() == 0);
+	}
+
+	// Out of bounds: the bounds text, nothing touched.
+	{
+		const int sets = f.sets;
+		for (const char* bad : { "0", "0.005", "-5", "1000000.01", "99999999" })
+		{
+			const Result r = OpPower::Handle(ctx, PowerReq("set", wind, bad));
+			CHECK(r.status == CheatWire::Status::Refused && r.reason == "Power must be 0.01 to 1,000,000." && r.fields.empty());
+		}
+		CHECK(f.sets == sets);
+	}
+
+	// Unreadable requests: no do, a wrong do, no or bad building, no or non-numeric value.
+	{
+		const int sets = f.sets, resets = f.resets;
+		const std::string longName(OpPower::kMaxName + 1, 'a');
+		CHECK(OpPower::Handle(ctx, PowerReq(nullptr)).reason == kTextBadRequest);
+		CHECK(OpPower::Handle(ctx, PowerReq("explode", wind, "5")).reason == kTextBadRequest);
+		CHECK(OpPower::Handle(ctx, PowerReq("set", nullptr, "5")).reason == kTextBadRequest);
+		CHECK(OpPower::Handle(ctx, PowerReq("set", "", "5")).reason == kTextBadRequest);
+		CHECK(OpPower::Handle(ctx, PowerReq("reset", longName.c_str())).reason == kTextBadRequest);
+		CHECK(OpPower::Handle(ctx, PowerReq("reset")).reason == kTextBadRequest);
+		CHECK(OpPower::Handle(ctx, PowerReq("set", wind)).reason == kTextBadRequest);
+		for (const char* bad : { "", "abc", "1e3", "+5", "5.", ".5", "1.2.3", "5 0", "nan", "inf", "1,000" })
+			CHECK(OpPower::Handle(ctx, PowerReq("set", wind, bad)).reason == kTextBadRequest);
+		CHECK(f.sets == sets && f.resets == resets);
+		const std::string maxName(OpPower::kMaxName, 'a');
+		CHECK(OpPower::Handle(ctx, PowerReq("reset", maxName.c_str())).reason == OpPower::kTextNoSuch);
+	}
+
+	// An unknown building is refused; no world is an error with its own text.
+	{
+		const Result r = OpPower::Handle(ctx, PowerReq("set", "DA_Nope", "5"));
+		CHECK(r.status == CheatWire::Status::Refused && r.reason == "No such building on this server.");
+		CHECK(OpPower::Handle(ctx, PowerReq("reset", "DA_Nope")).reason == OpPower::kTextNoSuch);
+		f.world = false;
+		const int sets = f.sets;
+		CHECK(OpPower::Handle(ctx, PowerReq("set", wind, "5")).status == CheatWire::Status::Error);
+		CHECK(OpPower::Handle(ctx, PowerReq("set", wind, "5")).reason == "Not in a world right now.");
+		CHECK(OpPower::Handle(ctx, PowerReq("list")).reason == OpPower::kTextNoWorld);
+		CHECK(f.sets == sets);
+		f.world = true;
+	}
+
+	// The game call failed: the one failure text.
+	{
+		f.callsOk = false;
+		CHECK(OpPower::Handle(ctx, PowerReq("set", wind, "5")).reason == "Could not change power on this server.");
+		CHECK(OpPower::Handle(ctx, PowerReq("reset", wind)).status == CheatWire::Status::Error);
+		CHECK(OpPower::Handle(ctx, PowerReq("reset-all")).reason == OpPower::kTextFailed);
+		f.callsOk = true;
+	}
+
+	// list: count, then one entry per building.
+	{
+		const Result r = OpPower::Handle(ctx, PowerReq("list"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason.empty());
+		CHECK(*Field(r, "count") == "2" && !Field(r, "more"));
+		CHECK(*Field(r, "b0") == "DA_Smelter~consumer~20~20");
+		CHECK(*Field(r, "b1") == "DA_WindPowerGeneratorTier2~producer~100~100");
+	}
+
+	// list caps: 20 entries and more=1, and the whole reply stays inside 1024 bytes even with long names.
+	{
+		PowerFake g;
+		g.buildings.clear();
+		for (int i = 0; i < 45; ++i)
+		{
+			const std::string asset = "DA_B" + std::to_string(100 + i);
+			g.buildings[asset] = { asset, "B", "producer", 1.5f, 1.5f };
+		}
+		OpPower::SetEnv(g.MakeEnv());
+		const Result r = OpPower::Handle(ctx, PowerReq("list"));
+		CHECK(*Field(r, "count") == "45" && Field(r, "more") && *Field(r, "more") == "1");
+		CHECK(Field(r, "b19") && !Field(r, "b20"));
+		CHECK(CheatWire::EncodeReply(14, r.status, r.reason, r.fields).size() <= CheatWire::kMaxMessage);
+
+		g.buildings.clear();
+		for (int i = 0; i < 20; ++i)
+		{
+			const std::string asset = std::string(OpPower::kMaxName - 3, 'a') + std::to_string(100 + i);
+			g.buildings[asset] = { asset, "B", "producer", 999999.f, 999999.f };
+		}
+		const Result big = OpPower::Handle(ctx, PowerReq("list"));
+		const std::string wire = CheatWire::EncodeReply(14, big.status, big.reason, big.fields);
+		CHECK(wire.size() <= CheatWire::kMaxMessage);
+		CHECK(*Field(big, "count") == "20" && Field(big, "more") && *Field(big, "more") == "1" && !Field(big, "b19"));
+		CHECK(Field(big, "b0") != nullptr);
+		OpPower::SetEnv(f.MakeEnv());
+	}
+
+	// The state hook: how many buildings are edited, off for none.
+	{
+		CHECK(OpPower::StateFields("p1").size() == 1 && OpPower::StateFields("p1")[0].second == "off");
+		OpPower::Handle(ctx, PowerReq("set", wind, "9"));
+		OpPower::Handle(ctx, PowerReq("set", "DA_Smelter", "9"));
+		CHECK(OpPower::StateFields("p1")[0].first == "power" && OpPower::StateFields("p1")[0].second == "2");
+		OpPower::Handle(ctx, PowerReq("reset-all"));
+		CHECK(OpPower::StateFields("p1")[0].second == "off");
+	}
+
+	// A key missing on this build: off, checked on each call. No env: off.
+	{
+		f.available = false;
+		CHECK(!OpPower::Available());
+		const int sets = f.sets;
+		const Result r = OpPower::Handle(ctx, PowerReq("set", wind, "5"));
+		CHECK(r.status == CheatWire::Status::Refused && r.reason == "Not available on this server's game build." && f.sets == sets);
+		CHECK(OpPower::Handle(ctx, PowerReq("list")).reason == OpPower::kTextOff);
+		f.available = true;
+		CHECK(OpPower::Available());
+		OpPower::SetEnv(OpPower::Env());
+		CHECK(!OpPower::Available());
+		CHECK(OpPower::Handle(ctx, PowerReq("reset-all")).reason == OpPower::kTextOff);
+		CHECK(OpPower::StateFields("p1").empty());
+	}
+
+	// Helpers: the slot name, the value text, the parser.
+	{
+		CHECK(OpPower::Slot("DA_Smelter") == "power:DA_Smelter");
+		CHECK(OpPower::FormatValue(500) == "500" && OpPower::FormatValue(0.5f) == "0.5" && OpPower::FormatValue(33.333f) == "33.33" && OpPower::FormatValue(0.01f) == "0.01");
+		double d = 0;
+		CHECK(OpPower::ParseValue("12.5", d) && d == 12.5);
+		CHECK(OpPower::ParseValue("-3", d) && d == -3);
+		CHECK(!OpPower::ParseValue("1e3", d));
+	}
+}
+
 int main()
 {
 	const Context ctx;
+	PowerTests();
 	WaveTests();
 	StackTests();
 	CorpTests();

@@ -3,6 +3,7 @@
 #include "op_wave.h"
 #include "op_stack.h"
 #include "op_corp.h"
+#include "op_power.h"
 #include "op_state.h"
 
 #include <algorithm>
@@ -52,8 +53,8 @@ namespace CheatDispatch
 			{ "cheat.stat",  1, "player-stats",   &NotYet },
 			{ "cheat.move",  1, "movement",       &NotYet },
 			{ "cheat.skill", 1, "skills",         &NotYet },
-			{ "cheat.corp",  1, "corporations",   &OpCorp::Handle, &OpCorp::Available },
-			{ "cheat.power", 1, "machine-power",  &NotYet },
+			{ "cheat.corp",  1, "corporations",   &OpCorp::Handle, &OpCorp::Available, &OpCorp::StateFields },
+			{ "cheat.power", 1, "machine-power",  &OpPower::Handle, &OpPower::Available, &OpPower::StateFields },
 			{ "cheat.enemy", 1, "enemies",        &NotYet },
 			{ "cheat.build", 1, "build-free",     &NotYet },
 		};

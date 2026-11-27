@@ -29,6 +29,7 @@ namespace OpState
 			{ "stack",  "9999" },
 			{ "wave",   "running" },
 			{ "power",  "2147483647" },
+			{ "points", "999999999" },
 			{ "ai",     "off" },
 			{ "onehit", "off" },
 			{ "weapon", "1000.000000,1000.000000" },
