@@ -150,6 +150,19 @@ namespace ServerUtilityFields
 	inline auto CharacterWeaponAttributes    = SERVER_UTILITY_FIELD(ACrCharacterPlayerBase, WeaponAttributes);
 	inline auto WeaponDamageMod              = SERVER_UTILITY_FIELD(UCrWeaponAttributeSet, DamageModMultiplier);
 	inline auto WeaponFireRateMod            = SERVER_UTILITY_FIELD(UCrWeaponAttributeSet, FireRateModMultiplier);
+
+	// What the su.cheat grid op reads and calls: the inventory component's grid size and slot array,
+	// the slot struct's size (the array is stepped by the size the game reflects, not a compiled one)
+	// and its item id (a slot with an all-zero id is empty), and the parameter block of the
+	// resize call. All reflected, so no map row of its own is needed.
+	inline auto InventoryGridColumns      = SERVER_UTILITY_FIELD(UCrInventoryComponent, GridColumns);
+	inline auto InventoryGridRows         = SERVER_UTILITY_FIELD(UCrInventoryComponent, GridRows);
+	inline auto InventorySlots            = SERVER_UTILITY_FIELD(UCrInventoryComponent, Slots);
+	inline auto InventorySlotSize         = SR_SIZE(FCrInventorySlot);
+	inline auto InventorySlotItemId       = SERVER_UTILITY_FIELD(FCrInventorySlot, ItemId);
+	inline auto ResizeInventorySize       = SR_PARAMS_SIZE(CrInventoryComponent, ServerResizeInventory);
+	inline auto ResizeInventoryColumns    = SR_PARAM(CrInventoryComponent, ServerResizeInventory, Columns);
+	inline auto ResizeInventoryRows       = SR_PARAM(CrInventoryComponent, ServerResizeInventory, Rows);
 	inline constexpr const char* WeakObjectPtrAssign       = "FWeakObjectPtr::operator=(FObjectPtr)";
 	inline constexpr const char* GetEntityHandleFromActor  = "UMassActorSubsystem::GetEntityHandleFromActor";
 	inline constexpr const char* InternalGetFragmentDataPtr = "FMassEntityManager::InternalGetFragmentDataPtr";
@@ -242,13 +255,19 @@ namespace ServerUtilityFields
 	inline PluginMap::Feature CheatWeapon{ "cheat-weapon", "Weapon cheats", PluginMap::KeysOf(
 		CharacterWeaponAttributes, WeaponDamageMod, WeaponFireRateMod) };
 
+	// The su.cheat grid op: the player's inventory component, its grid size and slots, and the resize
+	// call. While it is off `cap` reports the op off.
+	inline PluginMap::Feature CheatGrid{ "cheat-grid", "Inventory grid", PluginMap::KeysOf(
+		InventoryComponent, InventoryGridColumns, InventoryGridRows, InventorySlots, InventorySlotSize,
+		InventorySlotItemId, ResizeInventorySize, ResizeInventoryColumns, ResizeInventoryRows) };
+
 	// Asks the loader for every member above. False when a key that no feature
 	// lists did not resolve; the loader has then recorded the failure and
 	// refuses the plugin. A miss on a key a feature lists only turns that
 	// feature off.
 	inline bool Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
 	{
-		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand, CheatGive, CheatWave, CheatCorp, CheatPower, CheatEnemy, CheatWeapon);
+		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand, CheatGive, CheatWave, CheatCorp, CheatPower, CheatEnemy, CheatWeapon, CheatGrid);
 
 		// A miss only turns off the features that list the key. Every row is
 		// asked even after a miss, so the loader's log lists them all.
@@ -262,6 +281,8 @@ namespace ServerUtilityFields
 			EnemyIsInPool, EnemyAllowedAttackDistance, EnemyAllowedAttackConeHalfAngle, EnemyAllowedBuildingAttackDistance,
 			PawnController, AIControllerBrainComponent, EnemyHealthHP,
 			CharacterWeaponAttributes, WeaponDamageMod, WeaponFireRateMod,
+			InventoryGridColumns, InventoryGridRows, InventorySlots, InventorySlotSize, InventorySlotItemId,
+			ResizeInventorySize, ResizeInventoryColumns, ResizeInventoryRows,
 			MassConfigAssetConfig, MassConfigParent, MassConfigTraits, ElectricityParameters, ElectricityValue,
 			ElectricityType, ElectricityParametersSize, ConstSharedFragmentsContainer);
 
@@ -270,7 +291,7 @@ namespace ServerUtilityFields
 
 		// One line per feature the loader switched off, so the text names
 		// exactly what is off and follows the feature's key list.
-		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand, &CheatGive, &CheatWave, &CheatCorp, &CheatPower, &CheatEnemy, &CheatWeapon })
+		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand, &CheatGive, &CheatWave, &CheatCorp, &CheatPower, &CheatEnemy, &CheatWeapon, &CheatGrid })
 		{
 			if (!f->On())
 				LOG_WARN("[%s] The loader has no row for one of its engine members on this game build - %s is off",
