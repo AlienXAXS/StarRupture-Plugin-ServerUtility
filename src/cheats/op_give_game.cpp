@@ -33,7 +33,7 @@ namespace OpGiveGame
 			SDK::UAuItemsComponent*     inventory = nullptr;
 			const SDK::UAuItemDataBase* grant     = nullptr;
 			wchar_t                     name[kNameChars] = {};
-			OpGive::GiveResult::Outcome failure   = OpGive::GiveResult::Outcome::Failed;
+			AddStatus                   failure   = AddStatus::Fault;
 		};
 
 		// The item's display name into buf. The text is engine-owned; call inside the caller's guard.
@@ -65,27 +65,26 @@ namespace OpGiveGame
 		// No C++ objects with destructors in this frame: SEH is legal. err is caller-owned.
 		bool Locate_SEH(void* controller, const char* assetPath, Located* out, char* err, int errCap)
 		{
-			using Outcome = OpGive::GiveResult::Outcome;
 			__try
 			{
 				auto* world = static_cast<SDK::UWorld*>(PluginSdkRuntime::GetWorld());
 				auto* pc = static_cast<SDK::APlayerController*>(controller);
-				if (!world || !pc) { out->failure = Outcome::Failed; return false; }
+				if (!world || !pc) { out->failure = AddStatus::Fault; return false; }
 
 				auto* itemSubsys = static_cast<SDK::UAuItemDataBaseSubsystem*>(
 					SDK::USubsystemBlueprintLibrary::GetWorldSubsystem(world, SDK::UAuItemDataBaseSubsystem::StaticClass()));
-				if (!itemSubsys) { out->failure = Outcome::Failed; return false; }
+				if (!itemSubsys) { out->failure = AddStatus::NoSubsystem; return false; }
 
 				SDK::UAuItemDataBase* entry = FindItemByPath(itemSubsys, assetPath, err, errCap);
-				if (!entry) { out->failure = Outcome::NoItem; return false; }
+				if (!entry) { out->failure = AddStatus::NoItem; return false; }
 
 				SDK::ACrCharacterPlayerBase* character = GameAccess::CharacterOf(pc);
 				if (!character)
-				{ out->failure = Outcome::NoCharacter; return false; }
+				{ out->failure = AddStatus::NoCharacter; return false; }
 
 				SDK::UCrInventoryComponent** invAt = ServerUtilityFields::InventoryComponent.In(character);
 				out->inventory = invAt ? *invAt : nullptr;
-				if (!out->inventory) { out->failure = Outcome::NoCharacter; return false; }
+				if (!out->inventory) { out->failure = AddStatus::NoCharacter; return false; }
 
 				out->grant = GrantObject(entry);
 				CopyName(entry, out->name);
@@ -93,7 +92,7 @@ namespace OpGiveGame
 			}
 			__except (EXCEPTION_EXECUTE_HANDLER)
 			{
-				out->failure = Outcome::Failed;
+				out->failure = AddStatus::Fault;
 				return false;
 			}
 		}
@@ -141,35 +140,59 @@ namespace OpGiveGame
 			using Outcome = OpGive::GiveResult::Outcome;
 			OpGive::GiveResult r;
 
-			auto* hooks = GetHooks();
-			if (!hooks || !hooks->Engine || !hooks->Engine->IsGameThread() || !Available())
-				return r;
-
-			Located loc;
 			char err[160] = {};
-			if (!Locate_SEH(ctx.controller, item.c_str(), &loc, err, static_cast<int>(sizeof(err))))
+			const Added a = AddItem(ctx.controller, item.c_str(), count, err, static_cast<int>(sizeof(err)));
+			switch (a.status)
 			{
-				r.outcome = loc.failure;
-				return r;
+			case AddStatus::Added:        break;
+			case AddStatus::NoItem:       r.outcome = Outcome::NoItem;       return r;
+			case AddStatus::NoCharacter:  r.outcome = Outcome::NoCharacter;  return r;
+			case AddStatus::NothingAdded: r.outcome = Outcome::NothingAdded; return r;
+			default:                      return r;
 			}
 
-			const int added = Add_SEH(reinterpret_cast<AddNewItemFn>(g_addNewItem), loc.inventory, loc.grant, count);
-			if (added < 0) return r;
-			if (added == 0) { r.outcome = Outcome::NothingAdded; return r; }
-
 			r.outcome = Outcome::Gave;
-			r.name    = Narrow(loc.name);
-			if (r.name.empty()) r.name = item;
-			r.given   = added;
+			r.name    = a.name.empty() ? item : a.name;
+			r.given   = a.given;
 
 			const std::string id = ctx.playerId ? *ctx.playerId : std::string();
 			PlayerList::Entry who;
 			PlayerList::Find(id, who);
-			const std::string what = std::to_string(added) + " x " + r.name;
+			const std::string what = std::to_string(a.given) + " x " + r.name;
 			CheatLedgerGame::Get().Grant(id, who.label, "item-spawner", "give", what, reqId);
 			LOG_INFO("[cheat.give] req %u: %s gave %s", reqId, id.c_str(), what.c_str());
 			return r;
 		}
+	}
+
+	Added AddItem(void* controller, const char* assetPath, int count, char* err, int errCap)
+	{
+		Added a;
+
+		auto* hooks = GetHooks();
+		if (!hooks || !hooks->Engine || !hooks->Engine->IsGameThread())
+			return a;
+		if (!Available())
+		{
+			a.status = AddStatus::Unavailable;
+			return a;
+		}
+
+		Located loc;
+		if (!Locate_SEH(controller, assetPath, &loc, err, errCap))
+		{
+			a.status = loc.failure;
+			return a;
+		}
+
+		const int added = Add_SEH(reinterpret_cast<AddNewItemFn>(g_addNewItem), loc.inventory, loc.grant, count);
+		if (added < 0) return a;
+		if (added == 0) { a.status = AddStatus::NothingAdded; return a; }
+
+		a.status = AddStatus::Added;
+		a.given  = added;
+		a.name   = Narrow(loc.name);
+		return a;
 	}
 
 	void Resolve(IPluginSelf* self, IPluginHookScanner* scanner)

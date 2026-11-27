@@ -3,13 +3,13 @@
 #include "../session/session_store.h"
 #include "../admin_gamethread.h"
 
-#if defined(MODLOADER_SERVER_BUILD) || defined(MODLOADER_CLIENT_BUILD)
+#if defined(MODLOADER_SERVER_BUILD)
 #  include "SDK/Engine_classes.hpp"
 #  include "SDK/Chimera_classes.hpp"
-#  include "SDK/AuItems_classes.hpp"
 #  include "server_utility_fields.h"
 #  include "game_access.h"
-#  include "item_lookup.h"
+#  include "cheats/op_give.h"
+#  include "cheats/op_give_game.h"
 #  include "../../rcon/listed_players.h"
 #  define INV_HAS_SDK 1
 #else
@@ -24,50 +24,63 @@ static constexpr int kMaxGiveCount = 9999;
 
 #if INV_HAS_SDK
 
-// No C++ objects with destructors in this frame — SEH is legal.
-// err is caller-owned storage for the error JSON FindItemByPath may produce.
+// The controller of the listed player when it holds a player character; null with *refusal set to
+// the reply otherwise. No C++ objects with destructors in this frame: SEH is legal.
 // playerIndex is a players/list index; expectedName and expectedId are what the list showed at it.
-static const char* GiveItem_SEH(int playerIndex, const wchar_t* expectedName, const char* expectedId, int count,
-                                const char* assetPath,
-                                char* err, int errCap)
+static void* GiveTarget_SEH(int playerIndex, const wchar_t* expectedName, const char* expectedId, const char** refusal)
 {
 	__try
 	{
 		auto* world = static_cast<SDK::UWorld*>(PluginSdkRuntime::GetWorld());
-		if (!world) return R"({"ok":false,"error":"world unavailable"})";
+		if (!world) { *refusal = R"({"ok":false,"error":"world unavailable"})"; return nullptr; }
 
-		if (!ServerUtilityFields::PlayerActions.On()) return R"({"ok":false,"error":"player actions unavailable"})";
+		if (!ServerUtilityFields::PlayerActions.On())
+		{ *refusal = R"({"ok":false,"error":"player actions unavailable"})"; return nullptr; }
 
 		SDK::AGameStateBase* gs = ListedPlayers::GameStateOf(world);
-		if (!gs) return R"({"ok":false,"error":"game state unavailable"})";
+		if (!gs) { *refusal = R"({"ok":false,"error":"game state unavailable"})"; return nullptr; }
 		SDK::APlayerState* ps = ListedPlayers::Find(gs, playerIndex, expectedName, expectedId);
-		if (!ps) return R"({"ok":false,"error":"player not found"})";
+		if (!ps) { *refusal = R"({"ok":false,"error":"player not found"})"; return nullptr; }
 
 		SDK::APlayerController* pc = static_cast<SDK::APlayerController*>(ListedPlayers::OwnerOf(ps));
-		if (!pc) return R"({"ok":false,"error":"player has no controller"})";
+		if (!pc) { *refusal = R"({"ok":false,"error":"player has no controller"})"; return nullptr; }
 
 		const GameAccess::PlayerPawn held = GameAccess::PawnOf_SEH(pc);
-		if (held.kind == PawnKind::None) return R"({"ok":false,"error":"player has no pawn"})";
+		if (held.kind == PawnKind::None) { *refusal = R"({"ok":false,"error":"player has no pawn"})"; return nullptr; }
 		if (held.kind != PawnKind::Character)
-			return R"({"ok":false,"error":"player pawn is not a player character"})";
+		{ *refusal = R"({"ok":false,"error":"player pawn is not a player character"})"; return nullptr; }
 
-		auto* character = static_cast<SDK::ACrCharacterPlayerBase*>(held.pawn);
-
-		auto* itemSubsys = static_cast<SDK::UAuItemDataBaseSubsystem*>(
-			SDK::USubsystemBlueprintLibrary::GetWorldSubsystem(
-				world, SDK::UAuItemDataBaseSubsystem::StaticClass()));
-		if (!itemSubsys) return R"({"ok":false,"error":"item subsystem unavailable"})";
-
-		SDK::UAuItemDataBase* foundItem = FindItemByPath(itemSubsys, assetPath, err, errCap);
-		if (!foundItem) return err;
-
-		character->ServerAddItem(foundItem, static_cast<int32_t>(count));
-		return R"({"ok":true})";
+		return pc;
 	}
 	__except (EXCEPTION_EXECUTE_HANDLER)
 	{
-		return R"({"ok":false,"error":"exception giving item"})";
+		*refusal = R"({"ok":false,"error":"exception giving item"})";
+		return nullptr;
 	}
+}
+
+// Adds the item through op_give's server path (AddNewItem). err is caller-owned storage for the
+// error JSON the item lookup may produce.
+static std::string GiveItem(int playerIndex, const wchar_t* expectedName, const char* expectedId, int count,
+                            const char* assetPath, char* err, int errCap)
+{
+	const char* refusal = nullptr;
+	void* controller = GiveTarget_SEH(playerIndex, expectedName, expectedId, &refusal);
+	if (!controller) return refusal;
+
+	const OpGiveGame::Added added = OpGiveGame::AddItem(controller, assetPath, count, err, errCap);
+	switch (added.status)
+	{
+	case OpGiveGame::AddStatus::Added:
+	case OpGiveGame::AddStatus::NothingAdded: return R"({"ok":true})";
+	case OpGiveGame::AddStatus::NoItem:       return err;
+	case OpGiveGame::AddStatus::NoSubsystem:  return R"({"ok":false,"error":"item subsystem unavailable"})";
+	case OpGiveGame::AddStatus::NoCharacter:  return R"({"ok":false,"error":"player has no pawn"})";
+	case OpGiveGame::AddStatus::Unavailable:
+		return std::string(R"({"ok":false,"error":")") + OpGive::kTextOff + R"("})";
+	case OpGiveGame::AddStatus::Fault:        break;
+	}
+	return R"({"ok":false,"error":"exception giving item"})";
 }
 #endif
 
@@ -121,8 +134,8 @@ namespace Ep_InventoryGive
 
 			const std::wstring expectedName = ListedPlayers::ToWide(listed.name);
 			char err[160] = {};
-			return GiveItem_SEH(position, expectedName.c_str(), listed.id.c_str(), count, assetPath.c_str(), err,
-			                    static_cast<int>(sizeof(err)));
+			return GiveItem(position, expectedName.c_str(), listed.id.c_str(), count, assetPath.c_str(), err,
+			                static_cast<int>(sizeof(err)));
 #else
 			return R"({"ok":false,"error":"SDK not available in this build"})";
 #endif
