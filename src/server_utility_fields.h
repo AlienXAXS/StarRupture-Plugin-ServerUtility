@@ -117,6 +117,12 @@ namespace ServerUtilityFields
 		"bUnlockAllBuildings", PLUGIN_FIELD_NATIVE, sizeof(bool), -1 } };
 	inline constexpr const char* CheckAvailableBuildings = "ACrTechnologyKeeper::CheckAvailableBuildings";
 
+	// The su.cheat build op's free-building hooks: the placement checks that decide the cost and the
+	// stability of a placement. Each is hooked through the loader by its map row.
+	inline constexpr const char* PlacementResourceCondition = "UCrBuildingComponent::GetPlacementResourceConditionResult";
+	inline constexpr const char* CheckStabilityCustom       = "ACrAPHelperActorCustom::CheckStability";
+	inline constexpr const char* CheckStabilityPillar       = "ACrAPHelperDynamicPillar::CheckStability";
+
 	// What the su.cheat corp op reads and writes: the game state's corporations owner and its data points.
 	inline auto CorporationsOwner = SERVER_UTILITY_FIELD(ACrGameStateBase, CorporationsOwner);
 	inline auto CorporationsDataPoints = SERVER_UTILITY_FIELD(ACrCorporationsOwner, DataPoints);
@@ -224,6 +230,8 @@ namespace ServerUtilityFields
 	inline auto ActorAlwaysRelevant = SR_BITFIELD(AActor, bAlwaysRelevant);
 	inline auto ObjectClass = SERVER_UTILITY_NATIVE(SDK::UClass*, UObject, ClassPrivate, offsetof(SDK::UObject, Class));
 	inline auto ObjectIndex = SERVER_UTILITY_NATIVE(int32_t,      UObject, InternalIndex, offsetof(SDK::UObject, Index));
+	// The object's outer (a component's owning actor), which the build hooks follow to the placing player.
+	inline auto ObjectOuter = SERVER_UTILITY_NATIVE(SDK::UObject*, UObject, OuterPrivate, offsetof(SDK::UObject, Outer));
 
 	// The part of the plugin that can be off while the rest runs: finding the
 	// connected players and the ID of each. Host rules, the player list, the
@@ -308,13 +316,20 @@ namespace ServerUtilityFields
 	inline PluginMap::Feature CheatBuildUnlock{ "cheat-build-unlock", "Building unlock", PluginMap::KeysOf(
 		TechnologyKeeper, UnlockAllBuildings, CheckAvailableBuildings) };
 
+	// The build op's free rule, one feature per part so a missing row turns off only that part. Both
+	// follow a hooked object to the player: its outer, its owner, a pawn's controller.
+	inline PluginMap::Feature CheatBuildCost{ "cheat-build-cost", "Free building cost", PluginMap::KeysOf(
+		PlacementResourceCondition, ObjectOuter, ActorOwner, PawnController) };
+	inline PluginMap::Feature CheatBuildStability{ "cheat-build-stability", "Free building stability", PluginMap::KeysOf(
+		CheckStabilityCustom, CheckStabilityPillar, ObjectOuter, ActorOwner, PawnController) };
+
 	// Asks the loader for every member above. False when a key that no feature
 	// lists did not resolve; the loader has then recorded the failure and
 	// refuses the plugin. A miss on a key a feature lists only turns that
 	// feature off.
 	inline bool Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
 	{
-		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand, CheatGive, CheatWave, CheatCorp, CheatPower, CheatEnemy, CheatWeapon, CheatGrid, CheatMine, CheatBuildUnlock);
+		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand, CheatGive, CheatWave, CheatCorp, CheatPower, CheatEnemy, CheatWeapon, CheatGrid, CheatMine, CheatBuildUnlock, CheatBuildCost, CheatBuildStability);
 
 		// A miss only turns off the features that list the key. Every row is
 		// asked even after a miss, so the loader's log lists them all.
@@ -335,14 +350,14 @@ namespace ServerUtilityFields
 			RemoveTagsReplicate, GetAscSize, GetAscActor, GetAscResult, TagCountSize, TagCountTag, TagCountResult,
 			MassConfigAssetConfig, MassConfigParent, MassConfigTraits, ElectricityParameters, ElectricityValue,
 			ElectricityType, ElectricityParametersSize, ConstSharedFragmentsContainer,
-			TechnologyKeeper, UnlockAllBuildings);
+			TechnologyKeeper, UnlockAllBuildings, ObjectOuter);
 
 		// The entity manager's field is shared by the power and enemy ops; this is the one place it is asked.
 		PluginMap::ResolveMassEntityManager(scanner, self);
 
 		// One line per feature the loader switched off, so the text names
 		// exactly what is off and follows the feature's key list.
-		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand, &CheatGive, &CheatWave, &CheatCorp, &CheatPower, &CheatEnemy, &CheatWeapon, &CheatGrid, &CheatMine, &CheatBuildUnlock })
+		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand, &CheatGive, &CheatWave, &CheatCorp, &CheatPower, &CheatEnemy, &CheatWeapon, &CheatGrid, &CheatMine, &CheatBuildUnlock, &CheatBuildCost, &CheatBuildStability })
 		{
 			if (!f->On())
 				LOG_WARN("[%s] The loader has no row for one of its engine members on this game build - %s is off",

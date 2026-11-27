@@ -101,6 +101,7 @@ static void OnEngineShutdown()
 	CheatNet::Shutdown();
 	CheatLedgerGame::Shutdown();
 	OpStackGame::Shutdown();
+	OpBuildGame::Shutdown();
 	OpPowerGame::Shutdown();
 	OpEnemyGame::Shutdown();
 #endif
@@ -276,6 +277,7 @@ __declspec(dllexport) void PluginShutdown()
 #ifdef MODLOADER_SERVER_BUILD
 	CheatLedgerGame::Shutdown();
 	OpStackGame::Shutdown();
+	OpBuildGame::Shutdown();
 	OpPowerGame::Shutdown();
 	OpEnemyGame::Shutdown();
 #endif
