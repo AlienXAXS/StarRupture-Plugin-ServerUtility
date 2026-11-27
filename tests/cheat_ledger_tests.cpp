@@ -110,8 +110,8 @@ struct Rig
 			}
 			return Value();
 		};
-		// The boost's current pair is derived by the game from what SU writes; only its max counts.
-		env.rebases = [](const Entry& e, size_t member) { return e.slot != "boost" || member >= 2; };
+		// The boost's current pair is derived by the game from what SU writes; only its max BaseValue counts.
+		env.rebases = [](const Entry& e, size_t member) { return e.slot != "boost" || member == 2; };
 		env.allowed = [this](Entry& e)
 		{
 			// Connected owner: live state, refreshed into the entry. Gone owner: the stored state.
@@ -578,11 +578,11 @@ static void Composed()
 		r.pawn["A"] = 20;
 		r.Respawned();
 		CHECK(r.Live(20, "boost") == Value(std::vector<float>{ 3.0f, 3.0f, 5.0f, 5.0f }));   // a max already above: kept
-		r.live["20|boost"] = Value(std::vector<float>{ 1.0f, 1.0f, 2.0f, 2.0f });             // the game lowered the max
+		r.live["20|boost"] = Value(std::vector<float>{ 1.0f, 1.0f, 2.0f, 2.0f });             // the game lowered the max BaseValue (its CurrentValues are derived, never rebased)
 		r.ledger.Tick();
-		CHECK(r.Live(20, "boost") == Value(std::vector<float>{ 3.0f, 3.0f, 3.0f, 3.0f }));   // raised to the value again, from the new max
+		CHECK(r.Live(20, "boost") == Value(std::vector<float>{ 3.0f, 3.0f, 2.0f, 5.0f }));   // composed again from the new max base
 		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "boost"));
-		CHECK(r.Live(20, "boost") == Value(std::vector<float>{ 1.0f, 1.0f, 2.0f, 2.0f }));
+		CHECK(r.Live(20, "boost") == Value(std::vector<float>{ 1.0f, 1.0f, 2.0f, 5.0f }));
 	}
 	{   // a failed write of the composed value is tried again next tick, from the game's value
 		Rig r; Weapon(r, 1.0f);
@@ -1092,7 +1092,7 @@ static void RebaseMembers()
 		r.ledger.Tick();
 		CHECK(r.Live(10, "boost") == Value(std::vector<float>{ 3.0f, 3.0f, 3.0f, 3.0f }));
 		e = r.ledger.Find(Kind::Toggle, "A", "feat", "boost");
-		CHECK(e && e->prior == Value(std::vector<float>{ 1.0f, 1.0f, 2.0f, 2.0f }));
+		CHECK(e && e->prior == Value(std::vector<float>{ 1.0f, 1.0f, 2.0f, 1.0f }));
 	}
 	{   // an Apply whose put-back fails, then a rebase: the half value is no game change
 		Rig r; Boost(r);

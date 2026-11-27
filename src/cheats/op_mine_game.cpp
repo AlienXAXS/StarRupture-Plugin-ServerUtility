@@ -154,11 +154,12 @@ namespace OpMineGame
 			return CheatLedger::Value(std::in_place_type<std::vector<float>>, ComposeBoostValue(p->data(), *value));
 		}
 
-		// Only the max pair is the game's to change. GAS derives the current pair from the BaseValue SU
-		// writes, so a change there (a drain) is built on our write, not the game's own value.
+		// Only the max BaseValue is the game's to change. GAS derives every CurrentValue from the
+		// BaseValue SU writes, so a change there (a drain, a recompute) is built on our write, not the
+		// game's own value.
 		bool BoostRebases(const CheatLedger::Entry&, size_t member)
 		{
-			return member >= 2;
+			return member == 2;
 		}
 
 		// ---- Heat tag
