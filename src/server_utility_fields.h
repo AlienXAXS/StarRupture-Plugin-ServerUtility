@@ -3,6 +3,7 @@
 #include "plugin_interface.h"
 #include "plugin_helpers.h"
 #include "SDK/Engine_classes.hpp"
+#include "SDK/Engine_parameters.hpp"
 #include "SDK/Chimera_classes.hpp"
 #include "SDK/Chimera_parameters.hpp"
 #include "SDK/AuItems_classes.hpp"
@@ -241,6 +242,25 @@ namespace ServerUtilityFields
 	SU_STAT_FIELDS_AFF(Corrosion)
 	SU_STAT_FIELDS_AFF(Infection)
 	SU_STAT_FIELDS_AFF(Temperature)
+
+	// What the su.cheat move op reads and writes: the player character's movement component, the
+	// component's updated (capsule) component, and on the movement component the movement mode,
+	// the two flying values and the cheat-flying flag, plus the three calls: SetMovementMode on the
+	// movement component and SetCollisionEnabled and GetCollisionEnabled on the capsule. All reflected,
+	// so no map row of its own is needed.
+	inline auto CharacterMovement          = SERVER_UTILITY_FIELD(ACrCharacterPlayerBase, CrCharacterMovementComponent);
+	inline auto MovementUpdated            = SERVER_UTILITY_FIELD(UMovementComponent, UpdatedComponent);
+	inline auto MovementMode               = SERVER_UTILITY_FIELD(UCharacterMovementComponent, MovementMode);
+	inline auto MovementMaxFlySpeed        = SERVER_UTILITY_FIELD(UCharacterMovementComponent, MaxFlySpeed);
+	inline auto MovementBrakingFlying      = SERVER_UTILITY_FIELD(UCharacterMovementComponent, BrakingDecelerationFlying);
+	inline auto MovementCheatFlying        = SR_BITFIELD(UCharacterMovementComponent, bCheatFlying);
+	inline auto SetModeSize                = SR_PARAMS_SIZE(CharacterMovementComponent, SetMovementMode);
+	inline auto SetModeMode                = SR_PARAM(CharacterMovementComponent, SetMovementMode, NewMovementMode);
+	inline auto SetModeCustom              = SR_PARAM(CharacterMovementComponent, SetMovementMode, NewCustomMode);
+	inline auto SetCollisionSize           = SR_PARAMS_SIZE(PrimitiveComponent, SetCollisionEnabled);
+	inline auto SetCollisionType           = SR_PARAM(PrimitiveComponent, SetCollisionEnabled, NewType);
+	inline auto GetCollisionSize           = SR_PARAMS_SIZE(PrimitiveComponent, GetCollisionEnabled);
+	inline auto GetCollisionResult         = SR_PARAM(PrimitiveComponent, GetCollisionEnabled, ReturnValue);
 	inline constexpr const char* WeakObjectPtrAssign       = "FWeakObjectPtr::operator=(FObjectPtr)";
 	inline constexpr const char* GetEntityHandleFromActor  = "UMassActorSubsystem::GetEntityHandleFromActor";
 	inline constexpr const char* InternalGetFragmentDataPtr = "FMassEntityManager::InternalGetFragmentDataPtr";
@@ -352,6 +372,12 @@ namespace ServerUtilityFields
 	// off `cap` reports the op off.
 	inline PluginMap::Feature CheatStat{ "cheat-stat", "Player stats", PluginMap::KeysOf(SU_STAT_KEYS_ALL) };
 
+	// The su.cheat move op: the character's movement component, its flying members and the mode and
+	// collision calls. While it is off `cap` reports the op off.
+	inline PluginMap::Feature CheatMove{ "cheat-move", "Flying and speed", PluginMap::KeysOf(
+		CharacterMovement, MovementUpdated, MovementMode, MovementMaxFlySpeed, MovementBrakingFlying, MovementCheatFlying,
+		SetModeSize, SetModeMode, SetModeCustom, SetCollisionSize, SetCollisionType, GetCollisionSize, GetCollisionResult) };
+
 	// The su.cheat build op's unlock rule. While it is off the rule is not in `cap`'s build.rules.
 	inline PluginMap::Feature CheatBuildUnlock{ "cheat-build-unlock", "Building unlock", PluginMap::KeysOf(
 		TechnologyKeeper, UnlockAllBuildings, CheckAvailableBuildings) };
@@ -377,7 +403,7 @@ namespace ServerUtilityFields
 	// feature off.
 	inline bool Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
 	{
-		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand, CheatGive, CheatWave, CheatCorp, CheatPower, CheatEnemy, CheatWeapon, CheatGrid, CheatMine, CheatStat, CheatBuildUnlock, CheatBuildCost, CheatBuildStability, CheatBuildWindows, CheatBuildBenches);
+		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand, CheatGive, CheatWave, CheatCorp, CheatPower, CheatEnemy, CheatWeapon, CheatGrid, CheatMine, CheatStat, CheatMove, CheatBuildUnlock, CheatBuildCost, CheatBuildStability, CheatBuildWindows, CheatBuildBenches);
 
 		// A miss only turns off the features that list the key. Every row is
 		// asked even after a miss, so the loader's log lists them all.
@@ -397,6 +423,8 @@ namespace ServerUtilityFields
 			AddTagsSize, AddTagsActor, AddTagsTags, AddTagsReplicate, RemoveTagsSize, RemoveTagsActor, RemoveTagsTags,
 			RemoveTagsReplicate, GetAscSize, GetAscActor, GetAscResult, TagCountSize, TagCountTag, TagCountResult,
 			SU_STAT_KEYS_ALL,
+			CharacterMovement, MovementUpdated, MovementMode, MovementMaxFlySpeed, MovementBrakingFlying, MovementCheatFlying,
+			SetModeSize, SetModeMode, SetModeCustom, SetCollisionSize, SetCollisionType, GetCollisionSize, GetCollisionResult,
 			MassConfigAssetConfig, MassConfigParent, MassConfigTraits, ElectricityParameters, ElectricityValue,
 			ElectricityType, ElectricityParametersSize, ConstSharedFragmentsContainer,
 			TechnologyKeeper, UnlockAllBuildings, ObjectOuter, CrAPHelperBuildingData, PlacementBuildingID);
@@ -406,7 +434,7 @@ namespace ServerUtilityFields
 
 		// One line per feature the loader switched off, so the text names
 		// exactly what is off and follows the feature's key list.
-		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand, &CheatGive, &CheatWave, &CheatCorp, &CheatPower, &CheatEnemy, &CheatWeapon, &CheatGrid, &CheatMine, &CheatStat, &CheatBuildUnlock, &CheatBuildCost, &CheatBuildStability, &CheatBuildWindows, &CheatBuildBenches })
+		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand, &CheatGive, &CheatWave, &CheatCorp, &CheatPower, &CheatEnemy, &CheatWeapon, &CheatGrid, &CheatMine, &CheatStat, &CheatMove, &CheatBuildUnlock, &CheatBuildCost, &CheatBuildStability, &CheatBuildWindows, &CheatBuildBenches })
 		{
 			if (!f->On())
 				LOG_WARN("[%s] The loader has no row for one of its engine members on this game build - %s is off",
