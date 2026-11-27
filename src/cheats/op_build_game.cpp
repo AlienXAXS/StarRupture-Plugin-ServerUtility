@@ -755,6 +755,11 @@ namespace OpBuildGame
 		RemoveHook(OpBuild::Part::Benches);
 	}
 
+	void OnWorldEnd()
+	{
+		OpBuild::Reset();
+	}
+
 	void Init()
 	{
 		for (OpBuild::Part p : { OpBuild::Part::Cost, OpBuild::Part::Stability, OpBuild::Part::Windows, OpBuild::Part::Benches })

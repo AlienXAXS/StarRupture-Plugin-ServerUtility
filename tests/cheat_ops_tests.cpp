@@ -1457,6 +1457,21 @@ static void BuildTests()
 		OpBuild::SetPart("p1", Part::Benches, true);
 		OpBuild::SetPart("p1", Part::Benches, false);
 	}
+	// A world end clears every player's parts and removes the hooks of the parts that were on, once.
+	{
+		OpBuild::SetPart("p1", Part::Cost, true);
+		OpBuild::SetPart("p2", Part::Cost, true);
+		OpBuild::SetPart("p1", Part::Benches, true);
+		const int costRemoves = f.removes[0], benchRemoves = f.removes[3], stabilityRemoves = f.removes[1];
+		OpBuild::Reset();
+		CHECK(!OpBuild::PartOn("p1", Part::Cost) && !OpBuild::PartOn("p2", Part::Cost) && !OpBuild::PartOn("p1", Part::Benches));
+		CHECK(f.removes[0] == costRemoves + 1 && f.removes[3] == benchRemoves + 1 && f.removes[1] == stabilityRemoves);
+		OpBuild::Reset();
+		CHECK(f.removes[0] == costRemoves + 1 && f.removes[3] == benchRemoves + 1);   // nothing on: nothing removed
+		OpBuild::SetPart("p1", Part::Cost, true);   // the next first player installs again
+		CHECK(OpBuild::PartOn("p1", Part::Cost));
+		OpBuild::SetPart("p1", Part::Cost, false);
+	}
 	// State: a part counts only while its own feature is allowed; no key with both features denied;
 	// unlock goes out whatever the rules say.
 	{

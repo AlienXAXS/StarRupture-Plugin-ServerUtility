@@ -91,4 +91,8 @@ namespace OpBuild
 	// and when it is reverted (leave, deny, stop). Installs the part's hook when the first player
 	// turns it on and removes it when the last one turns it off.
 	void SetPart(const std::string& playerId, Part part, bool on);
+
+	// Clears every player's parts and removes the hooks of the parts that were on. The glue calls it
+	// when the world ends: the ledger drops its toggles then without telling OpBuild.
+	void Reset();
 }

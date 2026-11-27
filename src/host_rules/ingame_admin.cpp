@@ -11,6 +11,7 @@
 #include "../plugin_helpers.h"
 #ifdef MODLOADER_SERVER_BUILD
 #include "../cheats/cheat_ledger_game.h"
+#include "../cheats/op_build_game.h"
 #include "../cheats/op_stack_game.h"
 #endif
 
@@ -309,6 +310,7 @@ namespace InGameAdmin
 		{
 #ifdef MODLOADER_SERVER_BUILD
 			CheatLedgerGame::OnWorldEnd();
+			OpBuildGame::OnWorldEnd();
 #endif
 			// Travel: proven state and connection numbers start over.
 			if (const auto model = ModelPtr())

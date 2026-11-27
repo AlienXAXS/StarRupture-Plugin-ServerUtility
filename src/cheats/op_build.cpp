@@ -124,6 +124,20 @@ namespace OpBuild
 		if (last && g_env.removeHook) g_env.removeHook(part);
 	}
 
+	void Reset()
+	{
+		bool wasOn[kPartCount] = {};
+		{
+			std::lock_guard<std::mutex> hold(g_lock);
+			g_parts.clear();
+			for (int i = 0; i < kPartCount; ++i)
+				wasOn[i] = g_active[i].exchange(0, std::memory_order_acq_rel) > 0;
+		}
+		if (g_env.removeHook)
+			for (int i = 0; i < kPartCount; ++i)
+				if (wasOn[i]) g_env.removeHook(static_cast<Part>(i));
+	}
+
 	CheatDispatch::Fields StateFieldsFor(const std::string& playerId, const std::function<bool(const char*)>& allowed)
 	{
 		CheatDispatch::Fields out;

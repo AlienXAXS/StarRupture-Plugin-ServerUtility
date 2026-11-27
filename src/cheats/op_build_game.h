@@ -18,4 +18,8 @@ namespace OpBuildGame
 
 	// From PluginInit, after CheatLedgerGame::Init: gives OpBuild its game side.
 	void Init();
+
+	// From the world-end callback, after CheatLedgerGame::OnWorldEnd: clears every player's parts
+	// and removes the placement hooks. Game thread.
+	void OnWorldEnd();
 }
