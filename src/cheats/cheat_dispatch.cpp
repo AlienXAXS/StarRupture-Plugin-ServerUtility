@@ -95,6 +95,15 @@ namespace CheatDispatch
 		for (const OpEntry& op : Ops())
 			fields.emplace_back(op.name, std::to_string(op.version) + (IsOn(op) ? ",on" : ",off"));
 		fields.emplace_back(OpState::kOp, std::to_string(OpState::kVersion) + ",on");
+
+		// Appended after the old fields (a client that doesn't know it ignores it): the build rules
+		// this server can do. Sent only while cheat.build is on, which is when some rule works.
+		for (const OpEntry& op : Ops())
+		{
+			if (std::strcmp(op.name, "cheat.build") != 0 || !IsOn(op)) continue;
+			const std::string rules = OpBuild::Rules();
+			if (!rules.empty()) fields.emplace_back("build.rules", rules);
+		}
 		return CheatWire::EncodeReply(id, CheatWire::Status::Ok, "", fields);
 	}
 

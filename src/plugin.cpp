@@ -152,6 +152,7 @@ __declspec(dllexport) void OnPluginLoadHooks(IPluginSelf* self, IPluginHookScann
 	OpStackGame::Resolve(self, scanner);
 	OpPowerGame::Resolve(self, scanner);
 	OpEnemyGame::Resolve(self, scanner);
+	OpBuildGame::Resolve(self, scanner);
 #endif
 
 	// Optional: without it the DSSettings command-line bypass is skipped, but the

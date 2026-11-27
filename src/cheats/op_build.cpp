@@ -84,6 +84,16 @@ namespace OpBuild
 		return g_env.unlock && UnlockAvailable();
 	}
 
+	std::string Rules()
+	{
+		std::string out;
+		const auto add = [&](const char* name) { out += (out.empty() ? "" : ",") + std::string(name); };
+		if (PartAvailable(kFree[0]) || PartAvailable(kFree[1])) add("free");
+		if (PartAvailable(kAnywhere[0]) || PartAvailable(kAnywhere[1])) add("anywhere");
+		if (g_env.unlock && UnlockAvailable()) add("unlock");
+		return out;
+	}
+
 	const char* FeatureFor(const CheatWire::Request& req)
 	{
 		const std::string* rule = req.Get("rule");

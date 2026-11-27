@@ -109,6 +109,14 @@ namespace ServerUtilityFields
 	inline auto IsWavePausedSize   = SR_PARAMS_SIZE(CrEnviroWaveSubsystem, IsWavePaused);
 	inline auto IsWavePausedResult = SR_PARAM(CrEnviroWaveSubsystem, IsWavePaused, ReturnValue);
 
+	// What the su.cheat build op needs to unlock every building: the game state's technology keeper, its
+	// unlock flag (a member the SDK dumps as padding: its builtOffset is -1, so only the loader's version
+	// map can place it) and the call that rebuilds the available buildings from it.
+	inline auto TechnologyKeeper = SERVER_UTILITY_FIELD(ACrGameStateBase, TechnologyKeeper);
+	inline auto UnlockAllBuildings = PluginField<bool>{ { "ACrTechnologyKeeper::bUnlockAllBuildings", "ACrTechnologyKeeper",
+		"bUnlockAllBuildings", PLUGIN_FIELD_NATIVE, sizeof(bool), -1 } };
+	inline constexpr const char* CheckAvailableBuildings = "ACrTechnologyKeeper::CheckAvailableBuildings";
+
 	// What the su.cheat corp op reads and writes: the game state's corporations owner and its data points.
 	inline auto CorporationsOwner = SERVER_UTILITY_FIELD(ACrGameStateBase, CorporationsOwner);
 	inline auto CorporationsDataPoints = SERVER_UTILITY_FIELD(ACrCorporationsOwner, DataPoints);
@@ -296,13 +304,17 @@ namespace ServerUtilityFields
 		AddTagsSize, AddTagsActor, AddTagsTags, AddTagsReplicate, RemoveTagsSize, RemoveTagsActor, RemoveTagsTags,
 		RemoveTagsReplicate, GetAscSize, GetAscActor, GetAscResult, TagCountSize, TagCountTag, TagCountResult) };
 
+	// The su.cheat build op's unlock rule. While it is off the rule is not in `cap`'s build.rules.
+	inline PluginMap::Feature CheatBuildUnlock{ "cheat-build-unlock", "Building unlock", PluginMap::KeysOf(
+		TechnologyKeeper, UnlockAllBuildings, CheckAvailableBuildings) };
+
 	// Asks the loader for every member above. False when a key that no feature
 	// lists did not resolve; the loader has then recorded the failure and
 	// refuses the plugin. A miss on a key a feature lists only turns that
 	// feature off.
 	inline bool Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
 	{
-		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand, CheatGive, CheatWave, CheatCorp, CheatPower, CheatEnemy, CheatWeapon, CheatGrid, CheatMine);
+		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand, CheatGive, CheatWave, CheatCorp, CheatPower, CheatEnemy, CheatWeapon, CheatGrid, CheatMine, CheatBuildUnlock);
 
 		// A miss only turns off the features that list the key. Every row is
 		// asked even after a miss, so the loader's log lists them all.
@@ -322,14 +334,15 @@ namespace ServerUtilityFields
 			AddTagsSize, AddTagsActor, AddTagsTags, AddTagsReplicate, RemoveTagsSize, RemoveTagsActor, RemoveTagsTags,
 			RemoveTagsReplicate, GetAscSize, GetAscActor, GetAscResult, TagCountSize, TagCountTag, TagCountResult,
 			MassConfigAssetConfig, MassConfigParent, MassConfigTraits, ElectricityParameters, ElectricityValue,
-			ElectricityType, ElectricityParametersSize, ConstSharedFragmentsContainer);
+			ElectricityType, ElectricityParametersSize, ConstSharedFragmentsContainer,
+			TechnologyKeeper, UnlockAllBuildings);
 
 		// The entity manager's field is shared by the power and enemy ops; this is the one place it is asked.
 		PluginMap::ResolveMassEntityManager(scanner, self);
 
 		// One line per feature the loader switched off, so the text names
 		// exactly what is off and follows the feature's key list.
-		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand, &CheatGive, &CheatWave, &CheatCorp, &CheatPower, &CheatEnemy, &CheatWeapon, &CheatGrid, &CheatMine })
+		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand, &CheatGive, &CheatWave, &CheatCorp, &CheatPower, &CheatEnemy, &CheatWeapon, &CheatGrid, &CheatMine, &CheatBuildUnlock })
 		{
 			if (!f->On())
 				LOG_WARN("[%s] The loader has no row for one of its engine members on this game build - %s is off",

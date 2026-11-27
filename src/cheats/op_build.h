@@ -67,6 +67,11 @@ namespace OpBuild
 	// The op's `available` hook for the dispatch table: some rule works on this server.
 	bool Available();
 
+	// The `build.rules=` value of the `cap` reply: the rules (free, anywhere, unlock, in that order,
+	// comma-separated) that work on this server. A rule works when any of its parts is available;
+	// unlock when the unlock flag can be set. Empty when none does.
+	std::string Rules();
+
 	// The feature id the rules decide on for this request: by `rule=` (free, anywhere, unlock), and
 	// build-free when it is missing or unknown (the handler then refuses it as unreadable).
 	const char* FeatureFor(const CheatWire::Request& req);

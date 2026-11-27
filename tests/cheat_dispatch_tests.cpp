@@ -490,6 +490,43 @@ int main()
 			OpBuild::SetPart("p1", OpBuild::Part::Windows, false);
 			OpBuild::SetEnv(OpBuild::Env());
 		}
+		// cheat.build in `cap`: build.rules lists the rules that work, last, and only while the op is on.
+		{
+			struct Case { bool cost, stab, win, bench, unlock; const char* cheatBuild; const char* rules; };
+			const Case cases[] = {
+				{ false, false, false, false, false, "cheat.build=1,off", nullptr },
+				{ false, false, false, false, true,  "cheat.build=1,on",  "unlock" },
+				{ true,  false, false, true,  false, "cheat.build=1,on",  "free,anywhere" },
+				{ false, true,  false, false, true,  "cheat.build=1,on",  "free,unlock" },
+				{ true,  true,  true,  true,  true,  "cheat.build=1,on",  "free,anywhere,unlock" },
+			};
+			for (const Case& c : cases)
+			{
+				OpBuild::Env be;
+				be.available       = [c](OpBuild::Part p)
+				{
+					switch (p) { case OpBuild::Part::Cost: return c.cost; case OpBuild::Part::Stability: return c.stab;
+					             case OpBuild::Part::Windows: return c.win; default: return c.bench; }
+				};
+				be.unlockAvailable = [c] { return c.unlock; };
+				be.inWorld         = [] { return true; };
+				be.apply           = [](const Context&, uint32_t, const std::vector<OpBuild::Part>&, bool) { return true; };
+				be.unlock          = [](const Context&, uint32_t) { return true; };
+				OpBuild::SetEnv(be);
+				Rig r;
+				const std::string reply = r.Send("p1", Req(111, "cap"));
+				const std::string buildField = std::string(1, US) + c.cheatBuild;
+				const std::string stateField = std::string(1, US) + "cheat.state=1,on";
+				const std::string rulesField = c.rules ? std::string(1, US) + "build.rules=" + c.rules : std::string();
+				CHECK(reply.find(buildField) != std::string::npos);
+				// build.rules comes after every old field, so cheat.state stays where it was.
+				CHECK(reply.size() >= stateField.size() + rulesField.size()
+					&& reply.compare(reply.size() - stateField.size() - rulesField.size(), stateField.size(), stateField) == 0
+					&& reply.compare(reply.size() - rulesField.size(), rulesField.size(), rulesField) == 0);
+				CHECK((reply.find("build.rules=") != std::string::npos) == (c.rules != nullptr));
+			}
+			OpBuild::SetEnv(OpBuild::Env());
+		}
 		// The wave's three states.
 		{
 			Rig r;
