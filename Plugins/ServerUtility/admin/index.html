@@ -103,7 +103,8 @@
     <tr><td><code>count</code></td><td>int</td><td>Number of items to give (default: 1)</td></tr>
   </table>
   <pre>{ "session_token": "...", "player_index": 0, "asset_path": "/Game/Items/Weapons/BP_Sword", "count": 5 }
-// → { "ok": true }</pre>
+// → { "ok": true, "added": 5 }</pre>
+  <p><code>added</code> is the number of items put into the player's inventory. A give that adds nothing (for example, a full inventory) fails with <code>{ "ok": false, "error": "..." }</code>.</p>
 </div>
 
 <h2>Configuration (ServerUtility.ini)</h2>

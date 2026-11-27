@@ -207,8 +207,10 @@ curl -s -X POST http://localhost:7777/ServerUtility/api/inventory/give \
 
 Response:
 ```json
-{"ok": true}
+{"ok": true, "added": 1}
 ```
+
+`added` is the number of items put into the player's inventory. A give that adds nothing (for example, a full inventory) returns `{"ok": false, "error": "..."}` instead.
 
 ---
 
