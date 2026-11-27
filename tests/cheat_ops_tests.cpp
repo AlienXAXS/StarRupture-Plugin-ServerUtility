@@ -9,6 +9,7 @@
 #include "cheats/op_power.h"
 #include "cheats/op_enemy.h"
 #include "cheats/op_weapon.h"
+#include "cheats/op_grid.h"
 
 #include <cstdio>
 #include <map>
@@ -950,12 +951,149 @@ static void WeaponTests()
 	CHECK(std::string(OpWeapon::kFeature) == "weapons" && std::string(OpWeapon::kSlotDamage) == "damage" && std::string(OpWeapon::kSlotRate) == "rate");
 }
 
+struct GridFake
+{
+	bool available = true;
+	bool world = true;
+	bool readable = true;
+	bool callsOk = true;
+	int used = 0;
+	OpGrid::Size size{ 12, 8 };
+	int calls = 0;
+	uint32_t lastReq = 0;
+
+	OpGrid::Env MakeEnv()
+	{
+		OpGrid::Env e;
+		e.available = [this] { return available; };
+		e.inWorld   = [this] { return world; };
+		e.current   = [this](const std::string&) { return std::optional<OpGrid::Size>(size); };
+		e.occupied  = [this](const Context&) { return readable ? std::optional<int>(used) : std::nullopt; };
+		e.resize    = [this](const Context&, uint32_t id, int cols, int rows)
+		{
+			++calls; lastReq = id;
+			if (!callsOk) return false;
+			size = OpGrid::Size{ cols, rows };
+			return true;
+		};
+		e.log       = [](const std::string&) {};
+		return e;
+	}
+};
+
+static CheatWire::Request GridReq(const char* cols, const char* rows)
+{
+	CheatWire::Request r;
+	r.id = 55;
+	r.op = "cheat.grid";
+	if (cols) r.fields.emplace_back("cols", cols);
+	if (rows) r.fields.emplace_back("rows", rows);
+	return r;
+}
+
+static void GridTests()
+{
+	const std::string id = "p1";
+	Context ctx;
+	ctx.playerId = &id;
+	GridFake f;
+	OpGrid::SetEnv(f.MakeEnv());
+	CHECK(OpGrid::Available());
+
+	// A good request: text 18, the reply carries both fields, the call got the request id.
+	{
+		const Result r = OpGrid::Handle(ctx, GridReq("20", "12"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == "Inventory is now 20 by 12.");
+		CHECK(r.fields.size() == 2 && r.fields[0].first == "cols" && r.fields[0].second == "20" && r.fields[1].first == "rows" && r.fields[1].second == "12");
+		CHECK(f.calls == 1 && f.lastReq == 55 && f.size == (OpGrid::Size{ 20, 12 }));
+		CHECK(OpGrid::StateFields("p1") == Fields({ { "grid", "20x12" } }));
+	}
+	// The same size as now still goes through (the game side handles that case).
+	{
+		f.calls = 0;
+		CHECK(OpGrid::Handle(ctx, GridReq("20", "12")).status == CheatWire::Status::Ok && f.calls == 1);
+	}
+	// Bounds: 8 and 40 are fine, 7 and 41 are text 19 on either side; nothing called for those.
+	{
+		f.calls = 0;
+		CHECK(OpGrid::Handle(ctx, GridReq("8", "40")).status == CheatWire::Status::Ok && f.calls == 1);
+		for (const char* bad : { "7", "41", "0", "-8" })
+		{
+			CHECK(OpGrid::Handle(ctx, GridReq(bad, "12")).reason == "Grid must be 8 to 40 on each side.");
+			CHECK(OpGrid::Handle(ctx, GridReq("12", bad)).reason == "Grid must be 8 to 40 on each side.");
+		}
+		CHECK(f.calls == 1);
+	}
+	// Unreadable or missing values: bad request, nothing called.
+	{
+		f.calls = 0;
+		for (const char* bad : { "big", "12.5", "", "1e1" })
+			CHECK(OpGrid::Handle(ctx, GridReq(bad, "12")).reason == CheatDispatch::kTextBadRequest);
+		CHECK(OpGrid::Handle(ctx, GridReq("12", nullptr)).reason == CheatDispatch::kTextBadRequest);
+		CHECK(OpGrid::Handle(ctx, GridReq(nullptr, nullptr)).reason == CheatDispatch::kTextBadRequest);
+		CHECK(f.calls == 0);
+	}
+	// Items fill more slots than the new grid has: text 20 with the count, nothing called. An exact fit goes.
+	{
+		f.calls = 0;
+		f.used = 100;
+		const Result r = OpGrid::Handle(ctx, GridReq("8", "12"));
+		CHECK(r.status == CheatWire::Status::Refused && r.reason == "Your items need 100 slots. Pick a bigger grid." && f.calls == 0);
+		CHECK(OpGrid::Handle(ctx, GridReq("10", "10")).status == CheatWire::Status::Ok && f.calls == 1);
+		f.used = 0;
+	}
+	// Slots can't be read: text 21, nothing called.
+	{
+		f.calls = 0;
+		f.readable = false;
+		const Result r = OpGrid::Handle(ctx, GridReq("20", "12"));
+		CHECK(r.status == CheatWire::Status::Refused && r.reason == "Cannot check your slots right now." && f.calls == 0);
+		f.readable = true;
+	}
+	// No world: error, nothing called.
+	{
+		f.calls = 0;
+		f.world = false;
+		const Result r = OpGrid::Handle(ctx, GridReq("20", "12"));
+		CHECK(r.status == CheatWire::Status::Error && r.reason == "Not in a world right now." && f.calls == 0);
+		f.world = true;
+	}
+	// A failed call: error, text from the op.
+	{
+		f.callsOk = false;
+		const Result r = OpGrid::Handle(ctx, GridReq("20", "12"));
+		CHECK(r.status == CheatWire::Status::Error && r.reason == "Couldn't change your inventory on this server.");
+		f.callsOk = true;
+	}
+	// Off in cap: refused with the off text.
+	{
+		f.available = false;
+		CHECK(!OpGrid::Available());
+		CHECK(OpGrid::Handle(ctx, GridReq("20", "12")).reason == OpGrid::kTextOff);
+		f.available = true;
+	}
+	// A grid that can't be read gives no state key.
+	{
+		OpGrid::Env e = f.MakeEnv();
+		e.current = [](const std::string&) { return std::optional<OpGrid::Size>(); };
+		OpGrid::SetEnv(e);
+		CHECK(OpGrid::StateFields("p1").empty());
+	}
+	// No env at all: off, no state fields.
+	OpGrid::SetEnv(OpGrid::Env());
+	CHECK(!OpGrid::Available());
+	CHECK(OpGrid::StateFields("p1").empty());
+
+	CHECK(std::string(OpGrid::kFeature) == "inventory");
+}
+
 int main()
 {
 	const Context ctx;
 	PowerTests();
 	EnemyTests();
 	WeaponTests();
+	GridTests();
 	WaveTests();
 	StackTests();
 	CorpTests();

@@ -11,6 +11,7 @@
 #include "cheats/op_power.h"
 #include "cheats/op_enemy.h"
 #include "cheats/op_weapon.h"
+#include "cheats/op_grid.h"
 
 #include <cstdio>
 #include <optional>
@@ -93,7 +94,7 @@ int main()
 
 	// The op table: ten ops. Give, wave, stack, corp, power and enemy have a handler (with an `available` hook); the rest are stubs.
 	{
-		CHECK(Ops().size() == 11);
+		CHECK(Ops().size() == 12);
 		for (const OpEntry& op : Ops())
 		{
 			CHECK(op.version == 1 && op.feature && *op.feature);
@@ -111,16 +112,18 @@ int main()
 				CHECK(op.run == &OpEnemy::Handle && op.available == &OpEnemy::Available && op.state == &OpEnemy::StateFields);
 			else if (std::strcmp(op.name, "cheat.weapon") == 0)
 				CHECK(op.run == &OpWeapon::Handle && op.available == &OpWeapon::Available && op.state == &OpWeapon::StateFields);
+			else if (std::strcmp(op.name, "cheat.grid") == 0)
+				CHECK(op.run == &OpGrid::Handle && op.available == &OpGrid::Available && op.state == &OpGrid::StateFields);
 			else
 				CHECK(op.run == &NotYet && !op.available);
 		}
 	}
 
-	// `cap` lists all eleven ops as off: give, wave and stack have no game glue here, so they are off too.
+	// `cap` lists all twelve ops as off: give, wave and stack have no game glue here, so they are off too.
 	{
 		Rig r;
 		std::string expect = Res(1, "ok", "", std::string(1, US) + "su=0.19.0");
-		for (const char* op : { "cheat.give", "cheat.wave", "cheat.stack", "cheat.stat", "cheat.move", "cheat.skill", "cheat.corp", "cheat.power", "cheat.enemy", "cheat.weapon", "cheat.build" })
+		for (const char* op : { "cheat.give", "cheat.wave", "cheat.stack", "cheat.stat", "cheat.move", "cheat.skill", "cheat.corp", "cheat.power", "cheat.enemy", "cheat.weapon", "cheat.grid", "cheat.build" })
 			expect += std::string(1, US) + op + "=1,off";
 		expect += std::string(1, US) + "cheat.state=1,on";
 		CHECK(r.Send("p1", Req(1, "cap")) == expect);
@@ -143,10 +146,11 @@ int main()
 			if (std::strcmp(op.name, "cheat.power") == 0) text = OpPower::kTextOff;
 			if (std::strcmp(op.name, "cheat.enemy") == 0) text = OpEnemy::kTextOff;
 			if (std::strcmp(op.name, "cheat.weapon") == 0) text = OpWeapon::kTextOff;
+			if (std::strcmp(op.name, "cheat.grid") == 0) text = OpGrid::kTextOff;
 			CHECK(r.Send("p1", Req(id, op.name)) == Res(id, "refused", text));
 			++id;
 		}
-		CHECK(r.checks == 11);
+		CHECK(r.checks == 12);
 	}
 
 	// The two refusal texts, exact.
@@ -383,6 +387,28 @@ int main()
 			r.now += 10;
 			CHECK(r.Send("p1", Req(97, "cheat.state")) == Res(97, "ok", "", U + "wave=paused" + U + "stack=500"));
 			OpWeapon::SetEnv(OpWeapon::Env());
+		}
+		// cheat.grid adds grid=<cols>x<rows> for the caller and drops it when the feature is denied
+		// or the grid can't be read.
+		{
+			std::optional<OpGrid::Size> size = OpGrid::Size{ 20, 12 };
+			OpGrid::Env ge;
+			ge.available = [] { return true; };
+			ge.inWorld   = [] { return true; };
+			ge.current   = [&](const std::string&) { return size; };
+			ge.occupied  = [](const Context&) { return std::optional<int>(0); };
+			ge.resize    = [](const Context&, uint32_t, int, int) { return true; };
+			OpGrid::SetEnv(ge);
+			Rig r;
+			CHECK(r.Send("p1", Req(98, "cheat.state")) == Res(98, "ok", "", U + "wave=paused" + U + "stack=500" + U + "grid=20x12"));
+			size.reset();
+			r.now += 10;
+			CHECK(r.Send("p1", Req(99, "cheat.state")) == Res(99, "ok", "", U + "wave=paused" + U + "stack=500"));
+			size = OpGrid::Size{ 20, 12 };
+			r.denyFeature = "inventory";
+			r.now += 10;
+			CHECK(r.Send("p1", Req(100, "cheat.state")) == Res(100, "ok", "", U + "wave=paused" + U + "stack=500"));
+			OpGrid::SetEnv(OpGrid::Env());
 		}
 		// The wave's three states.
 		{
