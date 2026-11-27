@@ -10,6 +10,7 @@
 #include "cheats/op_enemy.h"
 #include "cheats/op_weapon.h"
 #include "cheats/op_grid.h"
+#include "cheats/op_mine.h"
 
 #include <cstdio>
 #include <map>
@@ -1087,6 +1088,128 @@ static void GridTests()
 	CHECK(std::string(OpGrid::kFeature) == "inventory");
 }
 
+// A fake mining game: one player's heat and boost, the calls recorded.
+struct MineFake
+{
+	bool available = true;
+	bool world = true;
+	bool callsOk = true;
+	OpMine::State state;
+	int calls = 0;
+	uint32_t lastReq = 0;
+
+	OpMine::Env MakeEnv()
+	{
+		OpMine::Env e;
+		e.available = [this] { return available; };
+		e.inWorld   = [this] { return world; };
+		e.current   = [this](const std::string&) { return state; };
+		e.apply     = [this](const Context&, uint32_t id, std::optional<bool> heat, std::optional<float> boost)
+		{
+			++calls; lastReq = id;
+			if (!callsOk) return false;
+			if (heat) state.heat = *heat;
+			if (boost) state.boost = *boost;
+			return true;
+		};
+		e.log       = [](const std::string&) {};
+		return e;
+	}
+};
+
+static CheatWire::Request MineReq(const char* heat, const char* boost = nullptr)
+{
+	CheatWire::Request r;
+	r.id = 17;
+	r.op = "cheat.mine";
+	if (heat) r.fields.emplace_back("heat", heat);
+	if (boost) r.fields.emplace_back("boost", boost);
+	return r;
+}
+
+static void MineTests()
+{
+	const std::string id = "p1";
+	Context ctx;
+	ctx.playerId = &id;
+	MineFake f;
+	OpMine::SetEnv(f.MakeEnv());
+	CHECK(OpMine::Available());
+
+	// Both: text 25, both fields, the call carries the request id.
+	{
+		const Result r = OpMine::Handle(ctx, MineReq("on", "3"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == "Mining heat off, boost 3x.");
+		CHECK(r.fields == Fields({ { "heat", "on" }, { "boost", "3" } }));
+		CHECK(f.calls == 1 && f.lastReq == 17);
+		CHECK(OpMine::StateFields("p1") == Fields({ { "mine", "3" }, { "heat", "on" } }));
+	}
+	// One at a time: the other stays as it is, and the text follows what is in force.
+	{
+		CHECK(OpMine::Handle(ctx, MineReq("off")).reason == "Mining boost 3x.");
+		CHECK(f.state.boost == 3.0f && !f.state.heat);
+		CHECK(OpMine::Handle(ctx, MineReq("on")).reason == "Mining heat off, boost 3x.");
+		CHECK(OpMine::Handle(ctx, MineReq(nullptr, "off")).reason == OpMine::kTextHeatOnly);
+		CHECK(f.state.heat && f.state.boost == 1.0f);
+	}
+	// Both back: text 26; boost 1 is off too.
+	{
+		OpMine::Handle(ctx, MineReq("on", "2.5"));
+		const Result r = OpMine::Handle(ctx, MineReq("off", "1"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == OpMine::kTextBothOff);
+		CHECK(r.fields == Fields({ { "heat", "off" }, { "boost", "1" } }));
+		CHECK(OpMine::StateFields("p1") == Fields({ { "mine", "off" }, { "heat", "off" } }));
+	}
+	// Range: 1 to 10 inclusive, text 27 outside.
+	{
+		CHECK(OpMine::Handle(ctx, MineReq(nullptr, "10")).reason == "Mining boost 10x.");
+		for (const char* bad : { "0.5", "10.5", "0", "-2", "100" })
+		{
+			const int before = f.calls;
+			const Result r = OpMine::Handle(ctx, MineReq(nullptr, bad));
+			CHECK(r.status == CheatWire::Status::Refused && r.reason == "Boost must be 1 to 10." && f.calls == before);
+		}
+	}
+	// Bad text, nothing to do.
+	{
+		const int before = f.calls;
+		CHECK(OpMine::Handle(ctx, MineReq(nullptr, "fast")).reason == CheatDispatch::kTextBadRequest);
+		CHECK(OpMine::Handle(ctx, MineReq("maybe")).reason == CheatDispatch::kTextBadRequest);
+		const Result r = OpMine::Handle(ctx, MineReq(nullptr));
+		CHECK(r.status == CheatWire::Status::Refused && r.reason == "Pick at least one setting.");
+		CHECK(f.calls == before);
+	}
+	// No world: error, no call.
+	{
+		f.world = false;
+		const int before = f.calls;
+		const Result r = OpMine::Handle(ctx, MineReq("on"));
+		CHECK(r.status == CheatWire::Status::Error && r.reason == "Not in a world right now." && f.calls == before);
+		f.world = true;
+	}
+	// A failed call: error, text from the op.
+	{
+		f.callsOk = false;
+		const Result r = OpMine::Handle(ctx, MineReq("on", "2"));
+		CHECK(r.status == CheatWire::Status::Error && r.reason == "Couldn't change your mining on this server.");
+		f.callsOk = true;
+	}
+	// Off in cap: refused with the off text.
+	{
+		f.available = false;
+		CHECK(!OpMine::Available());
+		CHECK(OpMine::Handle(ctx, MineReq("on")).reason == OpMine::kTextOff);
+		f.available = true;
+	}
+
+	// No env at all: off, no state fields.
+	OpMine::SetEnv(OpMine::Env());
+	CHECK(!OpMine::Available());
+	CHECK(OpMine::StateFields("p1").empty());
+
+	CHECK(std::string(OpMine::kFeature) == "mining-tools" && std::string(OpMine::kSlotHeat) == "heat" && std::string(OpMine::kSlotBoost) == "boost");
+}
+
 int main()
 {
 	const Context ctx;
@@ -1094,6 +1217,7 @@ int main()
 	EnemyTests();
 	WeaponTests();
 	GridTests();
+	MineTests();
 	WaveTests();
 	StackTests();
 	CorpTests();

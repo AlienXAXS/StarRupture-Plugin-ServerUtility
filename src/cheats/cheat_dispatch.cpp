@@ -7,6 +7,7 @@
 #include "op_enemy.h"
 #include "op_weapon.h"
 #include "op_grid.h"
+#include "op_mine.h"
 #include "op_state.h"
 
 #include <algorithm>
@@ -61,6 +62,7 @@ namespace CheatDispatch
 			{ "cheat.enemy", 1, "enemies",        &OpEnemy::Handle, &OpEnemy::Available, &OpEnemy::StateFields },
 			{ "cheat.weapon", 1, "weapons",       &OpWeapon::Handle, &OpWeapon::Available, &OpWeapon::StateFields },
 			{ "cheat.grid",   1, "inventory",     &OpGrid::Handle, &OpGrid::Available, &OpGrid::StateFields },
+			{ "cheat.mine",   1, "mining-tools",  &OpMine::Handle, &OpMine::Available, &OpMine::StateFields },
 			{ "cheat.build", 1, "build-free",     &NotYet },
 		};
 		return table;
