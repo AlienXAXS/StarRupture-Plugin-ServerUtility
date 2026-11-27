@@ -21,7 +21,6 @@ namespace OpMoveGame
 	namespace
 	{
 		constexpr const char* kMoveClass      = "CharacterMovementComponent";
-		constexpr const char* kPrimitiveClass = "PrimitiveComponent";
 
 		// UCharacterMovementComponent's own default, in cm/s, for a component that ships with no fly
 		// speed of its own. Only the base a multiplier is applied to; the prior put back is the real value.
@@ -105,46 +104,6 @@ namespace OpMoveGame
 				|| !hooks->ObjectWalker->InvokeResolvedUFunction || !OnGameThread())
 				return false;
 			return Invoke_SEH(hooks, object, cls, function, params);
-		}
-
-		// The component's capsule (its updated component), or null when it has none or it is not a
-		// primitive component.
-		SDK::UObject* Capsule_SEH(SDK::UCharacterMovementComponent* comp)
-		{
-			__try
-			{
-				SDK::USceneComponent** at = ServerUtilityFields::MovementUpdated.In(comp);
-				if (!at || !*at || !(*at)->IsA(SDK::UPrimitiveComponent::StaticClass()))
-					return nullptr;
-				return *at;
-			}
-			__except (EXCEPTION_EXECUTE_HANDLER)
-			{
-				return nullptr;
-			}
-		}
-
-		std::optional<uint8_t> GetCollision(SDK::UObject* capsule)
-		{
-			using namespace ServerUtilityFields;
-			if (!capsule || GetCollisionResult.resolvedSize != 1)
-				return std::nullopt;
-			PluginMap::ParamsBlock block = PluginMap::ParamsBlockOf(GetCollisionSize, { &GetCollisionResult });
-			if (!block || !Invoke(capsule, kPrimitiveClass, "GetCollisionEnabled", block.Data()))
-				return std::nullopt;
-			return *block.Param("ReturnValue");
-		}
-
-		bool SetCollision(SDK::UObject* capsule, uint8_t value)
-		{
-			using namespace ServerUtilityFields;
-			if (!capsule || SetCollisionType.resolvedSize != 1)
-				return false;
-			PluginMap::ParamsBlock block = PluginMap::ParamsBlockOf(SetCollisionSize, { &SetCollisionType });
-			if (!block)
-				return false;
-			*block.Param("NewType") = value;
-			return Invoke(capsule, kPrimitiveClass, "SetCollisionEnabled", block.Data());
 		}
 
 		bool SetMode(SDK::UCharacterMovementComponent* comp, uint8_t mode)
@@ -231,8 +190,8 @@ namespace OpMoveGame
 
 		// ---- Ledger accessors. obj is the entry's movement component, validated by the ledger glue.
 
-		// The fly slot's value is {cheat-flying flag, movement mode, capsule collision}, so a revert
-		// puts all three back exactly.
+		// The fly slot's value is {cheat-flying flag, movement mode}, so a revert puts both back
+		// exactly. Collision is never touched.
 		CheatLedger::Value ReadFly(SDK::UObject* obj, const CheatLedger::Entry&)
 		{
 			if (!obj || !OnGameThread())
@@ -242,10 +201,7 @@ namespace OpMoveGame
 			uint8_t mode = 0;
 			if (!ReadFlyMembers_SEH(comp, &flag, &mode))
 				return {};
-			const std::optional<uint8_t> collision = GetCollision(Capsule_SEH(comp));
-			if (!collision)
-				return {};
-			return CheatLedger::Value(std::vector<float>{ flag ? 1.0f : 0.0f, static_cast<float>(mode), static_cast<float>(*collision) });
+			return CheatLedger::Value(std::vector<float>{ flag ? 1.0f : 0.0f, static_cast<float>(mode) });
 		}
 
 		// Set semantics: a call is made only for a part that differs, so the pin on the tick costs
@@ -253,22 +209,17 @@ namespace OpMoveGame
 		bool WriteFly(SDK::UObject* obj, const CheatLedger::Entry&, const CheatLedger::Value& value)
 		{
 			const auto* v = std::get_if<std::vector<float>>(&value);
-			if (!obj || !v || v->size() != 3 || !OnGameThread())
+			if (!obj || !v || v->size() != 2 || !OnGameThread())
 				return false;
 			auto* comp = static_cast<SDK::UCharacterMovementComponent*>(obj);
-			const bool    wantFlag      = (*v)[0] != 0.0f;
-			const uint8_t wantMode      = static_cast<uint8_t>((*v)[1]);
-			const uint8_t wantCollision = static_cast<uint8_t>((*v)[2]);
+			const bool    wantFlag = (*v)[0] != 0.0f;
+			const uint8_t wantMode = static_cast<uint8_t>((*v)[1]);
 
-			SDK::UObject* capsule = Capsule_SEH(comp);
-			const std::optional<uint8_t> collision = GetCollision(capsule);
 			bool flag = false;
 			uint8_t mode = 0;
-			if (!collision || !ReadFlyMembers_SEH(comp, &flag, &mode))
+			if (!ReadFlyMembers_SEH(comp, &flag, &mode))
 				return false;
 
-			if (*collision != wantCollision && !SetCollision(capsule, wantCollision))
-				return false;
 			if (flag != wantFlag && !WriteFlag_SEH(comp, wantFlag))
 				return false;
 			if (mode != wantMode && !SetMode(comp, wantMode))
@@ -362,11 +313,10 @@ namespace OpMoveGame
 			if (!comp)
 				return false;
 
-			constexpr uint8_t kFlying     = static_cast<uint8_t>(SDK::EMovementMode::MOVE_Flying);
-			constexpr uint8_t kNoCollision = static_cast<uint8_t>(SDK::ECollisionEnabled::NoCollision);
+			constexpr uint8_t kFlying = static_cast<uint8_t>(SDK::EMovementMode::MOVE_Flying);
 			CheatLedger::Request req = BaseRequest(ctx, reqId, id, OpMove::kSlotFly);
 			req.target = CheatLedgerGame::MakeWeak(static_cast<SDK::UObject*>(comp));
-			req.value  = CheatLedger::Value(std::vector<float>{ 1.0f, static_cast<float>(kFlying), static_cast<float>(kNoCollision) });
+			req.value  = CheatLedger::Value(std::vector<float>{ 1.0f, static_cast<float>(kFlying) });
 			return ledger.Apply(req);
 		}
 
