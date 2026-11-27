@@ -114,6 +114,18 @@ namespace AdminView
 		else if (it != s.mins.end()) s.mins.erase(it);
 	}
 
+	// The size an op names: digits, or "off" = 0. Anything else reads as 0.
+	static int StackSizeOf(const std::string& text)
+	{
+		int n = 0;
+		for (char c : text)
+		{
+			if (c < '0' || c > '9' || n > 9999) return 0;
+			n = n * 10 + (c - '0');
+		}
+		return n > 9999 ? 0 : n;
+	}
+
 	static void ApplyOp(Snapshot& s, const Op& op)
 	{
 		if (OpArgCount(op.name) != static_cast<int>(op.args.size())) return;
@@ -122,6 +134,7 @@ namespace AdminView
 		else if (op.name == "policy.message") s.message = op.args[0];
 		else if (op.name == "min.loader") SetMin(s, std::string(), op.args[0]);
 		else if (op.name == "min.mod") SetMin(s, op.args[0], op.args[1]);
+		else if (op.name == "server.stacksize") { if (s.stackSize >= 0) s.stackSize = StackSizeOf(op.args[0]); }
 		else if (op.name == "player.set")
 		{
 			PlayerInfo* p = FindMutable(s, op.args[0]);
@@ -221,6 +234,7 @@ namespace AdminView
 		if (op.name == "policy.message") return base.message == op.args[0];
 		if (op.name == "min.loader") return MinValue(base, std::string()) == (op.args[0] == "off" ? std::string() : op.args[0]);
 		if (op.name == "min.mod") return MinValue(base, op.args[0]) == (op.args[1] == "off" ? std::string() : op.args[1]);
+		if (op.name == "server.stacksize") return base.stackSize >= 0 && base.stackSize == StackSizeOf(op.args[0]);
 		if (op.name == "player.set")
 		{
 			const PlayerInfo* p = FindPlayer(base, op.args[0]);
@@ -241,6 +255,11 @@ namespace AdminView
 	bool MinChanged(const Snapshot& base, const Snapshot& eff, const std::string& plugin)
 	{
 		return MinValue(base, plugin) != MinValue(eff, plugin);
+	}
+
+	bool ServerChanged(const Snapshot& base, const Snapshot& eff)
+	{
+		return base.stackSize != eff.stackSize;
 	}
 
 	bool PlayerChanged(const Snapshot& base, const Snapshot& eff, const std::string& id)

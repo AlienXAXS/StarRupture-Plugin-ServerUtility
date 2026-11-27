@@ -4,6 +4,7 @@
 #include "player_list.h"
 #include "removal.h"
 #include "../plugin_helpers.h"
+#include "../cheats/op_stack_game.h"
 #include "../admin/admin_gamethread.h"
 
 #include "SDK/Engine_classes.hpp"
@@ -80,6 +81,8 @@ namespace
 			if (!KickGuarded(pc, reason)) { e = "the kick failed"; return false; }
 			return true;
 		};
+		be.getStackSize   = [] { return OpStackGame::Get(); };
+		be.setStackSize   = [](int size, const std::string& source, std::string& e) { return OpStackGame::SetSetting(size, source, e); };
 		be.audit          = [](const std::string& line) { LOG_INFO("%s", line.c_str()); };
 		return be;
 	}

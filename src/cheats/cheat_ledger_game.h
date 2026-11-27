@@ -28,6 +28,9 @@ namespace CheatLedgerGame
 
 	CheatLedger::Ledger& Get();
 
+	// One line in cheats.log, stamped with the local time. For a change that is not a ledger entry.
+	void Log(const std::string& line);
+
 	// From PluginInit and OnEngineShutdown / PluginShutdown. Shutdown puts every entry back.
 	void Init();
 	void Shutdown();

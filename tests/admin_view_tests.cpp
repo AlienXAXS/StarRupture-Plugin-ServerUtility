@@ -240,6 +240,22 @@ int main()
 		CHECK(IsNoop(s, MakeOp("rule.set", { "Alpha.fly", "admins" })) && !IsNoop(s, MakeOp("rule.set", { "Alpha.fly", "deny" })));
 	}
 
+	// Server stack size: -1 means the server sent no record and every op leaves it alone.
+	{
+		Snapshot s = Base();
+		s.stackSize = 500; s.stackAvailable = true;
+		Snapshot big = ApplyStaged(s, { MakeOp("server.stacksize", { "999" }) });
+		CHECK(big.stackSize == 999 && s.stackSize == 500);
+		CHECK(ApplyStaged(s, { MakeOp("server.stacksize", { "off" }) }).stackSize == 0);
+		CHECK(ApplyStaged(s, { MakeOp("server.stacksize", { "-1" }) }).stackSize == 0);
+		CHECK(ServerChanged(s, big) && !ServerChanged(s, s));
+		CHECK(SameTarget(MakeOp("server.stacksize", { "1" }), MakeOp("server.stacksize", { "2" })));
+		CHECK(IsNoop(s, MakeOp("server.stacksize", { "500" })) && !IsNoop(s, MakeOp("server.stacksize", { "501" })));
+		CHECK(!IsNoop(s, MakeOp("server.stacksize", { "off" })));
+		Snapshot none = Base();   // an older server: stackSize stays at its default
+		CHECK(ApplyStaged(none, { MakeOp("server.stacksize", { "999" }) }).stackSize == none.stackSize);
+	}
+
 	// Count labels: singular only for one.
 	CHECK(CountLabel(0, "mod") == "0 mods" && CountLabel(1, "mod") == "1 mod" && CountLabel(2, "mod") == "2 mods");
 

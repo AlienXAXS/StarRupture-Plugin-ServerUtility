@@ -285,6 +285,74 @@ int main()
 		CHECK(Decode(std::string("snap-future") + kUS + "1" + kUS + "P.f1", o) == Decoded::Garbage);
 	}
 
+	// snap-server: round trip, placed after snap-default, absent for mods-only and when the server has no value,
+	// garbage forms refused, the op is known, and a snapshot with it stays under kMaxMessage.
+	{
+		Message in; in.tag = Tag::SnapServer; in.stackSize = 500; in.stackAvailable = true;
+		Message out = RoundTrip(in);
+		CHECK(out.stackSize == 500 && out.stackAvailable);
+		in.stackSize = 0; in.stackAvailable = false;
+		out = RoundTrip(in);
+		CHECK(out.stackSize == 0 && !out.stackAvailable);
+		in.stackSize = 9999; in.stackAvailable = true;
+		out = RoundTrip(in);
+		CHECK(out.stackSize == 9999 && out.stackAvailable);
+		in.stackSize = 10000;
+		std::string enc;
+		CHECK(!Encode(in, enc));
+
+		Snapshot s; s.revision = 3; s.sections = kSectionAll; s.stackSize = 500; s.stackAvailable = true;
+		s.defaults = { "P.f1" };
+		ModInfo mod; mod.plugin = "P"; mod.version = "1"; mod.wire = "1"; s.mods.push_back(mod);
+		auto where = [](const Snapshot& snap, size_t& defAt, size_t& srvAt, size_t& modAt, int& servers, uint32_t& value, bool& avail)
+		{
+			defAt = srvAt = modAt = 0; servers = 0; value = 0; avail = false;
+			size_t i = 0;
+			for (const std::string& e : EncodeSnapshot(snap))
+			{
+				Message o; CHECK(Decode(e, o) == Decoded::Ok);
+				CHECK(e.size() < kMaxMessage);
+				if (o.tag == Tag::SnapDefault) defAt = i;
+				if (o.tag == Tag::SnapServer) { srvAt = i; ++servers; value = o.stackSize; avail = o.stackAvailable; }
+				if (o.tag == Tag::SnapMod) modAt = i;
+				++i;
+			}
+		};
+		size_t defAt, srvAt, modAt; int servers; uint32_t value; bool avail;
+		where(s, defAt, srvAt, modAt, servers, value, avail);
+		CHECK(servers == 1 && value == 500 && avail && defAt < srvAt && srvAt < modAt);
+
+		s.sections = kSectionMods;   // never for a mods-only snapshot
+		where(s, defAt, srvAt, modAt, servers, value, avail);
+		CHECK(servers == 0);
+
+		s.sections = kSectionAll; s.stackSize = -1;   // the server has no value: no record
+		where(s, defAt, srvAt, modAt, servers, value, avail);
+		CHECK(servers == 0);
+		CHECK(Snapshot().stackSize == -1 && !Snapshot().stackAvailable);
+
+		Message o;
+		const std::string head = std::string("snap-server") + kUS + "1";
+		CHECK(Decode(head, o) == Decoded::Garbage);                                  // no fields
+		CHECK(Decode(head + kUS + "500", o) == Decoded::Garbage);                    // missing available
+		CHECK(Decode(head + kUS + "10000" + kUS + "1", o) == Decoded::Garbage);      // too big
+		CHECK(Decode(head + kUS + "500" + kUS + "2", o) == Decoded::Garbage);        // available 2
+		CHECK(Decode(head + kUS + "-1" + kUS + "1", o) == Decoded::Garbage);
+		CHECK(Decode(head + kUS + "abc" + kUS + "1", o) == Decoded::Garbage);
+		CHECK(Decode(head + kUS + "" + kUS + "1", o) == Decoded::Garbage);
+		CHECK(Decode(head + kUS + "500" + kUS + "1" + kUS + "x", o) == Decoded::Garbage);
+		CHECK(Decode(head + kUS + "500" + kUS + "1", o) == Decoded::Ok && o.stackSize == 500 && o.stackAvailable);
+
+		// The op: one argument; it encodes and decodes in an ops message.
+		CHECK(OpArgCount("server.stacksize") == 1);
+		Message ops; ops.tag = Tag::Ops; ops.requestId = 1; ops.baseRevision = 2;
+		ops.ops.push_back({ "server.stacksize", { "500" } });
+		Message back = RoundTrip(ops);
+		CHECK(back.ops.size() == 1 && back.ops[0].name == "server.stacksize" && back.ops[0].args[0] == "500");
+		ops.ops[0].args.clear();
+		CHECK(!Encode(ops, enc));
+	}
+
 	std::printf("%d checks, %d failed\n", g_checks, g_failed);
 	return g_failed ? 1 : 0;
 }

@@ -450,6 +450,7 @@
     <ClInclude Include="host_rules\ini_file.h" />
     <ClInclude Include="host_rules\host_rules.h" />
     <ClInclude Include="rcon\commands\cmd_hostrules.h" />
+    <ClInclude Include="rcon\commands\cmd_stacksize.h" />
     <ClInclude Include="rcon\commands\cmd_args.h" />
     <ClInclude Include="rcon\commands\word_split.h" />
     <ClInclude Include="host_rules\player_ids.h" />
@@ -458,6 +459,7 @@
     <ClInclude Include="admin\endpoints\ep_rules_admin.h" />
     <ClInclude Include="admin\admin_request.h" />
     <ClInclude Include="host_rules\admin_ops.h" />
+    <ClInclude Include="server_settings\stack_size_model.h" />
     <ClInclude Include="host_rules\line_text.h" />
   </ItemGroup>
   <ItemGroup>
@@ -524,12 +526,14 @@
     <ClCompile Include="host_rules\ini_file.cpp" />
     <ClCompile Include="host_rules\host_rules.cpp" />
     <ClCompile Include="rcon\commands\cmd_hostrules.cpp" />
+    <ClCompile Include="rcon\commands\cmd_stacksize.cpp" />
     <ClCompile Include="host_rules\player_ids.cpp" />
     <ClCompile Include="rcon\commands\cmd_player.cpp" />
     <ClCompile Include="admin\endpoints\ep_rules_players.cpp" />
     <ClCompile Include="admin\endpoints\ep_rules_admin.cpp" />
     <ClCompile Include="host_rules\admin_ops.cpp" />
     <ClCompile Include="host_rules\admin_ops_host.cpp" />
+    <ClCompile Include="server_settings\stack_size_model.cpp" />
     <ClCompile Include="admin_wire\admin_wire.cpp" />
     <ClCompile Include="admin_wire\admin_crypto.cpp" />
     <ClCompile Include="admin_wire\wire_info.cpp" />
@@ -539,7 +543,7 @@
     <ClCompile Include="client\admin_window.cpp" Condition="'$(Configuration)' == 'Client Debug' Or '$(Configuration)' == 'Client Release'" />
   </ItemGroup>
   <ItemGroup Condition="'$(Configuration)' == 'Client Debug' Or '$(Configuration)' == 'Client Release'">
-    <ClCompile Remove="hooks\**;rcon\**;admin\**;host_rules\**;plugin.cpp;plugin_config.cpp;$(StarRuptureSDKSourceDir)*.cpp" />
+    <ClCompile Remove="hooks\**;rcon\**;admin\**;host_rules\**;server_settings\**;plugin.cpp;plugin_config.cpp;$(StarRuptureSDKSourceDir)*.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

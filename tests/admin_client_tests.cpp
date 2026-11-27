@@ -992,6 +992,32 @@ int main()
 		CHECK(v.snapshot.revision == 6 && !v.snapshot.adminsOnlySupported && v.snapshot.rules[0].value == "deny");
 	}
 
+	// The snap-server record fills the stack size and availability. A server that never sends it leaves -1,
+	// so the client shows no Server tab.
+	{
+		Rig r;
+		MakeReady(r);
+		Snapshot s;
+		s.revision = 7;
+		s.rules.push_back({ "a", "allow" });
+		s.stackSize = 500; s.stackAvailable = true;
+		bool sawServer = false;
+		for (const std::string& page : EncodeSnapshot(s))
+		{
+			Message m;
+			if (Decode(page, m) == Decoded::Ok && m.tag == Tag::SnapServer) sawServer = true;
+			r.FeedRaw(page);
+		}
+		CHECK(sawServer);
+		AdminClient::View v = r.View();
+		CHECK(v.status == Status::Ready && v.haveSnapshot && v.snapshot.revision == 7 && v.snapshot.rules.size() == 1
+			&& v.snapshot.stackSize == 500 && v.snapshot.stackAvailable && !v.lastResultIsError);
+
+		FeedSnapshot(r, 8);   // no snap-server at all
+		v = r.View();
+		CHECK(v.status == Status::Ready && v.snapshot.revision == 8 && v.snapshot.stackSize == -1 && !v.snapshot.stackAvailable);
+	}
+
 	std::printf("%d checks, %d failed\n", g_checks, g_failed);
 	return g_failed ? 1 : 0;
 }

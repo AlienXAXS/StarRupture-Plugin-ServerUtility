@@ -3,7 +3,9 @@
 #include "cheat_ledger_game.h"
 #include "host_rules/ingame_admin.h"
 #include "host_rules/player_list.h"
+#include "host_rules/ini_file.h"
 #include "plugin_helpers.h"
+#include "server_settings/stack_size_model.h"
 #include "SDK/Engine_classes.hpp"
 #include "SDK/AuItems_classes.hpp"
 #include "item_stack_limits.h"
@@ -12,6 +14,7 @@
 
 #include <Windows.h>
 #include <atomic>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -36,8 +39,11 @@ namespace OpStackGame
 			return feature;
 		}
 
-		std::atomic<int>  g_target{ 0 };       // the wanted size, 0 = the game's own
+		std::atomic<int>  g_ini{ 0 };          // the server's setting: the baseline the put-back returns to
+		std::atomic<int>  g_target{ 0 };       // the wanted size (the setting, or an Override over it), 0 = the game's own
 		std::atomic<bool> g_available{ false };
+		std::atomic<int>  g_trackedNow{ 0 };   // as of the last tick, for readers on other threads
+		std::atomic<int>  g_raisedNow{ 0 };
 
 		// Game thread only from here on.
 		ItemStackLimits::Limits g_limits;
@@ -163,6 +169,9 @@ namespace OpStackGame
 			case OpStack::Action::None:
 				break;
 			}
+
+			g_trackedNow.store(g_limits.Tracked());
+			g_raisedNow.store(g_raised);
 		}
 
 		// The ledger's way to read and write the size: the wanted size, which the tick applies.
@@ -180,7 +189,7 @@ namespace OpStackGame
 			return true;
 		}
 
-		bool Available()
+		bool EnvAvailable()
 		{
 			return FeatureOn();
 		}
@@ -209,11 +218,37 @@ namespace OpStackGame
 			return CheatLedgerGame::Get().Apply(req);
 		}
 
-		// Puts the size back through the ledger, which writes the prior (the game's own sizes).
+		// Puts the size back through the ledger, which writes the prior: the server's setting.
 		bool Clear(const CheatDispatch::Context&, uint32_t)
 		{
 			CheatLedgerGame::Get().Release(CheatLedger::Kind::Override, std::string(), kFeature, kSlot);
-			return g_target.load() == 0;
+			return g_target.load() == g_ini.load();
+		}
+
+		// The saved setting, read once at start. A missing or bad value means the game's own sizes.
+		void LoadSetting()
+		{
+			int size = 0;
+			const std::wstring& path = IniFile::Path();
+			if (!path.empty())
+			{
+				std::lock_guard<std::mutex> fileLock(IniFile::FileMutex());
+				std::vector<std::string> lines;
+				bool exists = false, crlf = true;
+				if (IniFile::ReadLines(path, lines, exists, crlf))
+				{
+					std::string error;
+					size = StackSizeModel::ParseLines(lines, error);
+					if (!error.empty())
+						LOG_WARN("[cheat.stack] %s - using the game's own sizes", error.c_str());
+				}
+				else
+				{
+					LOG_WARN("[cheat.stack] The rules file could not be read - using the game's own sizes");
+				}
+			}
+			g_ini.store(size);
+			g_target.store(size);
 		}
 	}
 
@@ -227,10 +262,11 @@ namespace OpStackGame
 
 	void Init()
 	{
+		LoadSetting();
 		CheatLedgerGame::RegisterAccessor(kFeature, kSlot, { &ReadSize, &WriteSize });
 
 		OpStack::Env env;
-		env.available = &Available;
+		env.available = &EnvAvailable;
 		env.current   = &Current;
 		env.set       = &Set;
 		env.clear     = &Clear;
@@ -259,5 +295,36 @@ namespace OpStackGame
 			Restore();
 		else
 			LOG_WARN("[cheat.stack] Shutdown is not on the game thread - stack sizes left as they are");
+	}
+
+	int Get() { return g_target.load(); }
+	bool Available() { return g_available.load(); }
+	int Tracked() { return g_trackedNow.load(); }
+	int Raised() { return g_raisedNow.load(); }
+
+	bool SetSetting(int size, const std::string& source, std::string& error)
+	{
+		if (size < 0 || size > OpStack::kMaxStack) { error = "the size must be 0 to 9999"; return false; }
+		if (!OnGameThread()) { error = OpStack::kTextFailed; return false; }
+
+		const std::wstring& path = IniFile::Path();
+		if (path.empty()) { error = "the rules file path is unknown"; return false; }
+		{
+			std::lock_guard<std::mutex> fileLock(IniFile::FileMutex());
+			std::vector<std::string> lines;
+			bool exists = false, crlf = true;
+			if (!IniFile::ReadLines(path, lines, exists, crlf)) { error = "the rules file could not be read"; return false; }
+			IniFile::ReplaceSection(lines, StackSizeModel::kSection, StackSizeModel::ComposeBody(size));
+			if (!IniFile::WriteLines(path, lines, crlf)) { error = "could not write the rules file"; return false; }
+		}
+
+		// The setting replaces a cheat.stack Override: the Override ends and the new baseline applies.
+		const int old = g_ini.load();
+		const bool ended = CheatLedgerGame::Get().Release(CheatLedger::Kind::Override, std::string(), kFeature, kSlot);
+		g_ini.store(size);
+		g_target.store(size);
+		CheatLedgerGame::Log("stack-size setting by " + source + ": " + std::to_string(old) + " -> " + std::to_string(size) +
+			(ended ? ", ended the cheat.stack override" : ""));
+		return true;
 	}
 }

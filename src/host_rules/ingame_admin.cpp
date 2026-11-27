@@ -11,6 +11,7 @@
 #include "../plugin_helpers.h"
 #ifdef MODLOADER_SERVER_BUILD
 #include "../cheats/cheat_ledger_game.h"
+#include "../cheats/op_stack_game.h"
 #endif
 
 #include "SDK/Engine_classes.hpp"
@@ -152,6 +153,11 @@ namespace InGameAdmin
 			for (const RulesModel::ModMin& m : model.modMins)
 				snap.mins.push_back({ m.plugin, m.version });
 
+#ifdef MODLOADER_SERVER_BUILD
+			snap.stackSize = OpStackGame::Get();
+			snap.stackAvailable = OpStackGame::Available();
+#endif
+
 			std::map<std::string, size_t> modIndex;   // plugin -> index in snap.mods
 			std::vector<std::vector<KnownFeatures::Entry>> modRows;   // the same order
 			for (const KnownFeatures::Entry& e : KnownFeatures::Snapshot())
@@ -245,6 +251,7 @@ namespace InGameAdmin
 			if (sections & AdminOps::kSectionMins) add("mins");
 			if (sections & AdminOps::kSectionPlayers) add("players");
 			if (sections & AdminOps::kSectionMods) add("mods");
+			if (sections & AdminOps::kSectionServer) add("server");
 			return text.empty() ? std::string(AdminWire::kSectionAll) : text;
 		}
 

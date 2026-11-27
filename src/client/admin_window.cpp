@@ -58,6 +58,9 @@ namespace
 		struct MinBox { char text[64] = {}; std::string synced; bool init = false; };
 		MinBox loaderMin;
 		std::map<std::string, MinBox> modMin;
+
+		// Server tab, filled the same way.
+		MinBox stackSize;
 	};
 	UiState g_ui;
 
@@ -495,6 +498,34 @@ namespace
 		ui->EndTable();
 	}
 
+	void DrawServerTab(Frame& f)
+	{
+		IModLoaderImGui* ui = f.ui;
+		ui->TextWrapped("Raises every stackable item's stack to this size on the server. 0 or Off uses the game's own sizes.");
+		ui->Separator();
+		const bool available = f.view.snapshot.stackAvailable;
+		if (!available) ui->TextDisabled("Not available on this game build.");
+		ui->BeginDisabled(!available);
+		ui->AlignTextToFramePadding();
+		ui->Text(Marked(AdminView::ServerChanged(f.view.snapshot, f.eff), "Stack size").c_str());
+		UiState::MinBox& box = g_ui.stackSize;
+		const std::string eff = f.eff.stackSize > 0 ? std::to_string(f.eff.stackSize) : std::string();
+		if (!box.init || eff != box.synced)
+		{
+			std::snprintf(box.text, sizeof(box.text), "%s", eff.c_str());
+			box.synced = eff;
+			box.init = true;
+		}
+		ui->SetNextItemWidth(-FLT_MIN);
+		ui->InputTextWithHint("##stacksize", "Game default", box.text, sizeof(box.text));
+		ui->BeginDisabled(box.text[0] == '\0');
+		if (ui->SmallButton("Set")) Edit(f, MakeOp("server.stacksize", { box.text }));
+		ui->EndDisabled();
+		ui->SameLine(0, -1);
+		if (ui->SmallButton("Off")) Edit(f, MakeOp("server.stacksize", { "off" }));
+		ui->EndDisabled();
+	}
+
 	void DrawReady(Frame& f)
 	{
 		IModLoaderImGui* ui = f.ui;
@@ -523,6 +554,12 @@ namespace
 			if (ui->BeginTabItem("Versions", nullptr, 0))
 			{
 				if (ui->BeginChild("##versionsbody", 0.0f, -ui->GetFrameHeightWithSpacing(), false)) DrawVersionsTab(f);
+				ui->EndChild();
+				ui->EndTabItem();
+			}
+			if (f.view.snapshot.stackSize >= 0 && ui->BeginTabItem("Server", nullptr, 0))
+			{
+				if (ui->BeginChild("##serverbody", 0.0f, -ui->GetFrameHeightWithSpacing(), false)) DrawServerTab(f);
 				ui->EndChild();
 				ui->EndTabItem();
 			}

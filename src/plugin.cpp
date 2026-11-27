@@ -15,6 +15,7 @@
 #include "rcon/commands/cmd_save.h"
 #include "rcon/commands/cmd_player.h"
 #include "rcon/commands/cmd_hostrules.h"
+#include "rcon/commands/cmd_stacksize.h"
 #include "admin/admin_panel.h"
 #include "host_rules/removal.h"
 #include "host_rules/admin_claim.h"
@@ -194,6 +195,7 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 	Cmd_Player::Register();
 	HostRules::Init();
 	Cmd_HostRules::Register();
+	Cmd_StackSize::Register();
 	Removal::Init();
 	AdminClaim::Init();
 	InGameAdmin::Init();

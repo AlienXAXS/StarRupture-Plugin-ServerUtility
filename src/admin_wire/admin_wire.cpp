@@ -32,6 +32,7 @@ namespace
 		{ Tag::SnapEnd, "snap-end" }, { Tag::Ops, "ops" }, { Tag::Result, "result" }, { Tag::Changed, "changed" },
 		{ Tag::Challenge, "challenge" }, { Tag::Prove, "prove" }, { Tag::Pair, "pair" },
 		{ Tag::SnapDefault, "snap-default" }, { Tag::SnapAdmins, "snap-admins" },
+		{ Tag::SnapServer, "snap-server" },
 	};
 
 	const char* NameOf(Tag t)
@@ -136,6 +137,7 @@ int OpArgCount(const std::string& name)
 	if (name == "player.remove") return 1;
 	if (name == "player.kick") return 2;
 	if (name == "catalog.push") return 1;
+	if (name == "server.stacksize") return 1;
 	return -1;
 }
 
@@ -173,6 +175,10 @@ bool Encode(const Message& m, std::string& out)
 		break;
 	case Tag::SnapDefault: case Tag::SnapAdmins:
 		for (const std::string& k : m.keys) h.push_back(CleanText(k, kMaxName));
+		break;
+	case Tag::SnapServer:
+		if (m.stackSize > static_cast<uint32_t>(kMaxStackSize)) return false;
+		h.push_back(Num(m.stackSize)); h.push_back(m.stackAvailable ? "1" : "0");
 		break;
 	case Tag::SnapMod:
 		h.push_back(CleanText(m.mod.plugin, kMaxName)); h.push_back(CleanText(m.mod.version, kMaxName));
@@ -250,6 +256,15 @@ std::vector<std::string> EncodeSnapshot(const Snapshot& s)
 	items.clear();
 	for (const Rule& r : s.rules) if (r.value == "admins") items.push_back({ CleanText(r.key, kMaxName) });
 	Pack(out, Head(Tag::SnapAdmins), -1, items, true);
+
+	// Append-only: an older client drops this record as unknown, and an older server never sends
+	// it. A mods-only snapshot leaves it out.
+	if (s.stackSize >= 0 && s.sections != kSectionMods)
+	{
+		Message sv; sv.tag = Tag::SnapServer;
+		sv.stackSize = static_cast<uint32_t>(s.stackSize); sv.stackAvailable = s.stackAvailable;
+		if (Encode(sv, enc)) out.push_back(enc);
+	}
 
 	for (const ModInfo& m : s.mods)
 	{
@@ -343,6 +358,10 @@ Decoded Decode(const std::string& data, Message& out)
 			if (f[i].empty()) ok = false;
 			else m.keys.push_back(f[i]);
 		}
+		break;
+	case Tag::SnapServer:
+		ok = n == 4 && ParseNum(f[2], m.stackSize) && m.stackSize <= static_cast<uint32_t>(kMaxStackSize)
+			&& ParseBool(f[3], m.stackAvailable);
 		break;
 	case Tag::SnapMod:
 		ok = n >= 6 && n % 2 == 0 && !f[2].empty() && ParseBool(f[5], m.cont);

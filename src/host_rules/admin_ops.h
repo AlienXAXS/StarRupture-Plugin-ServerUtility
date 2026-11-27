@@ -21,6 +21,7 @@
 //   min.mod <plugin> <version>|wire|off  player.set <id> <flags>
 //   player.remove <id>                   player.kick <id> <reason>
 //   admin.clear                          rules.reload      players.reload
+//   server.stacksize <0..9999|off>
 //
 // admin.clear and the two reloads are for RCON and the panel only.
 namespace AdminOps
@@ -65,6 +66,7 @@ namespace AdminOps
 		kSectionMins    = 2,   // [MinVersions] and the loader minimum
 		kSectionPlayers = 4,   // [Players]
 		kSectionMods    = 8,   // the known-features catalog (not part of the ops revision)
+		kSectionServer  = 16,  // the server-wide stack size
 	};
 
 	// What the dispatcher needs from the host. The server's own set is made by
@@ -85,6 +87,10 @@ namespace AdminOps
 		std::function<bool(const std::string&)>                                  connected;
 		std::function<bool(const std::string&, const std::string&, std::string&)> kick;
 		std::function<void(const std::string&)>                                  audit;
+		// The server-wide stack size (0 = the game's own sizes). A backend with no
+		// setStackSize does not offer it: the op is refused as not available.
+		std::function<int()>                                                     getStackSize;
+		std::function<bool(int, const std::string&, std::string&)>               setStackSize;   // size, source for the log, error
 	};
 
 	// Check the caller, validate every op, then apply them all (nothing is

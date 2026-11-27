@@ -55,6 +55,7 @@ namespace AdminView
 	// Row-changed tests, base against effective.
 	bool RuleChanged(const AdminWire::Snapshot& base, const AdminWire::Snapshot& eff, const std::string& key);
 	bool MinChanged(const AdminWire::Snapshot& base, const AdminWire::Snapshot& eff, const std::string& plugin);
+	bool ServerChanged(const AdminWire::Snapshot& base, const AdminWire::Snapshot& eff);
 	bool PlayerChanged(const AdminWire::Snapshot& base, const AdminWire::Snapshot& eff, const std::string& id);
 	bool ModChanged(const AdminWire::Snapshot& base, const AdminWire::Snapshot& eff, const AdminWire::ModInfo& mod);   // whole mod or any feature rule
 

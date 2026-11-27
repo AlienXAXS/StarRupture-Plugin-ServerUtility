@@ -1660,6 +1660,78 @@ int main()
 			CHECK(Apply(f.be, rcon, { op("rule.set", { "BetterCheats.god", "deny" }) }).ok && !f.model.rules[0].adminsOnly && f.model.rules[1].adminsOnly);
 		}
 
+		// server.stacksize: who may change it, which values, one batch, revision, audit.
+		{
+			Fake f;
+			int stack = 0, sets = 0;
+			std::string lastSource;
+			f.be.getStackSize = [&] { return stack; };
+			f.be.setStackSize = [&](int n, const std::string& src, std::string&) { stack = n; ++sets; lastSource = src; return true; };
+			const Caller panel = Caller::FromPanel();
+
+			// Admin only: a listed player who is not an admin, an unreadable ID and an unlisted ID are refused.
+			CHECK(!Apply(f.be, Caller::FromPlayer("ply1", "Pat"), { op("server.stacksize", { "500" }) }).ok);
+			CHECK(!Apply(f.be, Caller::FromPlayer("", "Pat"), { op("server.stacksize", { "500" }) }).ok);
+			CHECK(!Apply(f.be, Caller::FromPlayer("nobody", "Pat"), { op("server.stacksize", { "500" }) }).ok);
+			CHECK(sets == 0 && stack == 0);
+			CHECK(Apply(f.be, adm, { op("server.stacksize", { "500" }) }).ok && stack == 500 && lastSource == "admin window");
+			CHECK(Apply(f.be, rcon, { op("server.stacksize", { "600" }) }).ok && stack == 600 && lastSource == "rcon");
+			CHECK(Apply(f.be, panel, { op("server.stacksize", { "700" }) }).ok && stack == 700 && lastSource == "panel");
+			CHECK(sets == 3);
+
+			// Values.
+			CHECK(Apply(f.be, rcon, { op("server.stacksize", { "0" }) }).ok && stack == 0);
+			CHECK(Apply(f.be, rcon, { op("server.stacksize", { "1" }) }).ok && stack == 1);
+			CHECK(Apply(f.be, rcon, { op("server.stacksize", { "9999" }) }).ok && stack == 9999);
+			CHECK(Apply(f.be, rcon, { op("server.stacksize", { "off" }) }).ok && stack == 0);
+			CHECK(Apply(f.be, rcon, { op("server.stacksize", { "OFF" }) }).ok && stack == 0);
+			stack = 42;
+			sets = 0;
+			CHECK(!Apply(f.be, rcon, { op("server.stacksize", { "-1" }) }).ok);
+			CHECK(!Apply(f.be, rcon, { op("server.stacksize", { "10000" }) }).ok);
+			CHECK(!Apply(f.be, rcon, { op("server.stacksize", { "abc" }) }).ok);
+			CHECK(!Apply(f.be, rcon, { op("server.stacksize", { "" }) }).ok);
+			CHECK(!Apply(f.be, rcon, { op("server.stacksize", { "5 0" }) }).ok);
+			CHECK(!Apply(f.be, rcon, { op("server.stacksize") }).ok);
+			CHECK(sets == 0 && stack == 42);
+
+			// A batch with one bad op applies nothing.
+			const size_t commits = static_cast<size_t>(f.commits);
+			CHECK(!Apply(f.be, rcon, { op("server.stacksize", { "300" }), op("rule.set", { "Codex.map", "maybe" }) }).ok);
+			CHECK(!Apply(f.be, rcon, { op("rule.set", { "Codex.map", "deny" }), op("server.stacksize", { "x" }) }).ok);
+			CHECK(sets == 0 && stack == 42 && static_cast<size_t>(f.commits) == commits && f.model.rules.empty());
+			// A good batch applies both.
+			CHECK(Apply(f.be, rcon, { op("server.stacksize", { "300" }), op("rule.set", { "Codex.map", "deny" }) }).ok);
+			CHECK(stack == 300 && f.model.rules.size() == 1);
+
+			// The revision goes up once, with the server section bit.
+			int calls = 0; unsigned secs = 0;
+			const int h = AddListener([&](uint64_t, unsigned s) { ++calls; secs = s; });
+			const uint64_t before = Revision();
+			f.audit.clear();
+			CHECK(Apply(f.be, rcon, { op("server.stacksize", { "250" }) }).ok);
+			CHECK(calls == 1 && secs == kSectionServer && Revision() == before + 1);
+			CHECK(f.audit.size() == 1 && f.audit[0] == "[Admin] (RCON) server.stacksize=250");
+			CHECK(Apply(f.be, adm, { op("server.stacksize", { "off" }) }).ok);
+			CHECK(f.audit.size() == 2 && f.audit[1] == "[Admin] 'Boss' (in game) server.stacksize=off");
+			CHECK(!Apply(f.be, adm, { op("server.stacksize", { "99999" }) }).ok && calls == 2);
+			RemoveListener(h);
+
+			// A setter that fails reports its text and bumps nothing.
+			f.be.setStackSize = [](int, const std::string&, std::string& e) { e = "no write"; return false; };
+			const uint64_t rev2 = Revision();
+			const Result bad = Apply(f.be, rcon, { op("server.stacksize", { "10" }) });
+			CHECK(!bad.ok && bad.text == "no write" && Revision() == rev2);
+
+			// No setter: not available on this server.
+			f.be.setStackSize = nullptr;
+			const Result none = Apply(f.be, rcon, { op("server.stacksize", { "10" }) });
+			CHECK(!none.ok && none.text.find("not available") != std::string::npos && Revision() == rev2);
+
+			// The section text and the wire op count.
+			CHECK(kSectionServer == 16 && AdminWire::OpArgCount("server.stacksize") == 1);
+		}
+
 		// Each player op, valid and invalid.
 		{
 			Fake f;

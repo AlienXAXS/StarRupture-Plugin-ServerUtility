@@ -97,6 +97,11 @@ namespace CheatLedgerGame
 		}
 	}
 
+	void Log(const std::string& line)
+	{
+		WriteLog(line);
+	}
+
 	void RegisterAccessor(const std::string& feature, const std::string& slot, Accessor accessor)
 	{
 		g_accessors[feature + "/" + slot] = accessor;

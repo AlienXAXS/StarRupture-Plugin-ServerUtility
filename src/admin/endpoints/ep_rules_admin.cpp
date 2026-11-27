@@ -6,6 +6,7 @@
 #include "../../host_rules/host_rules.h"
 #include "../../host_rules/known_features.h"
 #include "../../host_rules/player_ids.h"
+#include "../../cheats/op_stack_game.h"
 
 #include "SDK/Engine_classes.hpp"
 
@@ -36,7 +37,9 @@ namespace
 			     << "\",\"version\":\"" << Escape(m.modMins[i].version) << "\"}";
 		json << "],\"loader_receives\":" << (HostRules::LoaderReceives() ? "true" : "false")
 		     << ",\"push_status\":\"" << Escape(HostRules::PushStatus()) << "\""
-		     << ",\"minimums_status\":\"" << Escape(HostRules::MinimumsStatus()) << "\"}";
+		     << ",\"minimums_status\":\"" << Escape(HostRules::MinimumsStatus()) << "\""
+		     << ",\"stack_size\":" << OpStackGame::Get()
+		     << ",\"stack_size_available\":" << (OpStackGame::Available() ? "true" : "false") << "}";
 		return json.str();
 	}
 
@@ -196,5 +199,25 @@ namespace Ep_RulesAdmin
 		const std::string plugin = Field(req, "plugin");
 		if (plugin.empty()) { AdminJson::SetError(resp, 400, "plugin required", body); return; }
 		Change(req, resp, body, { AdminOps::Op{ "min.mod", { plugin, Field(req, "version") } } });
+	}
+
+	void StackSize(const PluginHttpRequest* req, PluginHttpResponse* resp)
+	{
+		std::string body;
+		if (!AdminRequest::PostWithSession(req, resp, body)) return;
+
+		if (!AdminJson::Has(req->body, req->bodyLen, "stack_size"))
+		{
+			Get(req, resp);   // no size: read the state
+			return;
+		}
+		// A number or the word off.
+		std::string value = Field(req, "stack_size");
+		if (value.empty())
+		{
+			const int n = AdminJson::ExtractInt(req->body, req->bodyLen, "stack_size", -1);
+			value = n < 0 ? std::string("invalid") : std::to_string(n);
+		}
+		Change(req, resp, body, { AdminOps::Op{ "server.stacksize", { value } } });
 	}
 }

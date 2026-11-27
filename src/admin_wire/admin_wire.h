@@ -39,7 +39,8 @@ namespace AdminWire
 		Ops, Result, Changed,
 		Challenge, Prove, Pair,
 		SnapDefault,  // after Pair: the enum is append-only
-		SnapAdmins    // after SnapDefault
+		SnapAdmins,   // after SnapDefault
+		SnapServer    // after SnapAdmins
 	};
 
 	// Welcome roles, result statuses, section names.
@@ -87,12 +88,18 @@ namespace AdminWire
 		std::vector<std::string> defaults;   // "Plugin.feature" keys the server denies unless a rule names them
 		std::vector<ModInfo> mods;
 		std::vector<PlayerInfo> players;
+		int  stackSize = -1;            // the server-wide stack size, 0 = game default; -1 = the server sent no snap-server
+		bool stackAvailable = false;    // the server's game build supports it
 	};
+
+	// The largest stack size snap-server carries.
+	constexpr int kMaxStackSize = 9999;
 
 	// One decoded message. Which members are set depends on tag:
 	//   Welcome: role, revision      Snap: sections          Changed: revision, sections
 	//   SnapBegin: revision, sections   SnapPolicy: defaultPolicy, text
 	//   SnapRule: rules   SnapMin: mins   SnapDefault: keys   SnapAdmins: keys   SnapMod: mod, cont   SnapPlayer: player, cont
+	//   SnapServer: stackSize, stackAvailable
 	//   SnapEnd: revision, counts      Ops: requestId, baseRevision, ops
 	//   Result: requestId, status, text, revision
 	//   Challenge: serverId, nonce (hex)   Prove: proof (64 hex, or empty)   Pair: code (empty or 8 chars), secret (64 hex)
@@ -110,6 +117,8 @@ namespace AdminWire
 		bool cont = false;   // SnapMod / SnapPlayer: continues the previous message of the same mod or player
 		uint32_t ruleCount = 0, minCount = 0, modCount = 0, playerCount = 0;
 		std::vector<Op> ops;
+		uint32_t stackSize = 0;          // SnapServer
+		bool stackAvailable = false;     // SnapServer
 	};
 
 	enum class Decoded { Ok, Garbage, WrongProtocol };
@@ -119,7 +128,8 @@ namespace AdminWire
 	bool Encode(const Message& m, std::string& out);
 
 	// Encode a snapshot as snap-begin, snap-policy, snap-rule*, snap-min*, snap-default*, snap-mod*,
-	// snap-player*, snap-end. Every message is under kMaxMessage.
+	// snap-player*, snap-end. Every message is under kMaxMessage. snap-server (when
+	// Snapshot::stackSize >= 0) follows snap-admins and is left out of a mods-only snapshot.
 	std::vector<std::string> EncodeSnapshot(const Snapshot& s);
 
 	// Decode. On anything but Ok the output is left empty (WrongProtocol sets only the tag
