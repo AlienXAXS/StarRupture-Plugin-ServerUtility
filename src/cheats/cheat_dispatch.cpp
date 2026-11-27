@@ -2,6 +2,7 @@
 #include "op_give.h"
 #include "op_wave.h"
 #include "op_stack.h"
+#include "op_state.h"
 
 #include <algorithm>
 #include <cstring>
@@ -45,8 +46,8 @@ namespace CheatDispatch
 		// default (admins only) applies.
 		static const std::vector<OpEntry> table = {
 			{ "cheat.give",  1, "item-spawner",   &OpGive::Handle, &OpGive::Available },
-			{ "cheat.wave",  1, "rupture-wave",   &OpWave::Handle, &OpWave::Available },
-			{ "cheat.stack", 1, "stack-size",     &OpStack::Handle, &OpStack::Available },
+			{ "cheat.wave",  1, "rupture-wave",   &OpWave::Handle, &OpWave::Available, &OpWave::StateFields },
+			{ "cheat.stack", 1, "stack-size",     &OpStack::Handle, &OpStack::Available, &OpStack::StateFields },
 			{ "cheat.stat",  1, "player-stats",   &NotYet },
 			{ "cheat.move",  1, "movement",       &NotYet },
 			{ "cheat.skill", 1, "skills",         &NotYet },
@@ -56,6 +57,11 @@ namespace CheatDispatch
 			{ "cheat.build", 1, "build-free",     &NotYet },
 		};
 		return table;
+	}
+
+	bool IsOn(const OpEntry& op)
+	{
+		return op.run != &NotYet && (!op.available || op.available());
 	}
 
 	bool Server::LogOnce(const std::string& playerId, const char* what)
@@ -75,7 +81,8 @@ namespace CheatDispatch
 		std::vector<std::pair<std::string, std::string>> fields;
 		fields.emplace_back("su", m_env.suVersion);
 		for (const OpEntry& op : Ops())
-			fields.emplace_back(op.name, std::to_string(op.version) + (op.run != &NotYet && (!op.available || op.available()) ? ",on" : ",off"));
+			fields.emplace_back(op.name, std::to_string(op.version) + (IsOn(op) ? ",on" : ",off"));
+		fields.emplace_back(OpState::kOp, std::to_string(OpState::kVersion) + ",on");
 		return CheatWire::EncodeReply(id, CheatWire::Status::Ok, "", fields);
 	}
 
@@ -131,6 +138,12 @@ namespace CheatDispatch
 
 		if (req.op == "cap")
 			return Cap(req.id);
+
+		if (req.op == OpState::kOp)
+		{
+			const Result r = OpState::Handle(req, [&](const OpEntry& op) { return m_env.check(controller, playerId, op.feature).allowed; }, playerId);
+			return reply(req.id, r.status, r.reason, &r);
+		}
 
 		const OpEntry* entry = nullptr;
 		for (const OpEntry& op : Ops())

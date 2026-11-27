@@ -104,6 +104,12 @@ namespace CheatLedger
 		// for an Override. False when there is no such entry.
 		bool Release(Kind kind, const std::string& playerId, const std::string& feature, const std::string& slot);
 
+		// Whether there is such an entry (an Override ignores playerId).
+		bool Has(Kind kind, const std::string& playerId, const std::string& feature, const std::string& slot) const
+		{
+			return m_entries.count(KeyOf(kind, playerId, feature, slot)) != 0;
+		}
+
 		// A grant: logged, no entry.
 		void Grant(const std::string& playerId, const std::string& playerName, const std::string& feature,
 		           const std::string& slot, const std::string& what, uint32_t reqId);

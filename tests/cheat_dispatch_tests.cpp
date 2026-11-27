@@ -1,13 +1,15 @@
 // Unit tests of the su.cheat dispatch: the rate bucket, the op table, `cap` and the replies.
 // No project file: from a Visual Studio developer prompt, in the repo root:
-//   cl /nologo /EHsc /std:c++17 /Isrc tests\cheat_dispatch_tests.cpp src\cheats\cheat_dispatch.cpp src\cheats\op_give.cpp src\cheats\op_wave.cpp src\cheats\op_stack.cpp src\cheats\cheat_wire.cpp src\admin_wire\admin_wire.cpp /Fe:cheat_dispatch_tests.exe
+//   cl /nologo /EHsc /std:c++17 /Isrc tests\cheat_dispatch_tests.cpp src\cheats\cheat_dispatch.cpp src\cheats\op_state.cpp src\cheats\op_give.cpp src\cheats\op_wave.cpp src\cheats\op_stack.cpp src\cheats\cheat_wire.cpp src\admin_wire\admin_wire.cpp /Fe:cheat_dispatch_tests.exe
 //   cheat_dispatch_tests.exe
 #include "cheats/cheat_dispatch.h"
 #include "cheats/op_give.h"
 #include "cheats/op_wave.h"
 #include "cheats/op_stack.h"
+#include "cheats/op_state.h"
 
 #include <cstdio>
+#include <optional>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -35,6 +37,7 @@ struct Rig
 	double now = 100;
 	std::vector<std::string> logs;
 	RulesModel::Decision decision;   // what the fake check answers
+	std::string denyFeature;         // this feature is refused for the caller
 	int checks = 0;
 	Server server;
 
@@ -43,7 +46,13 @@ struct Rig
 	Env MakeEnv()
 	{
 		Env e;
-		e.check = [this](void*, const std::string&, const char*) { ++checks; return decision; };
+		e.check = [this](void*, const std::string&, const char* f)
+		{
+			++checks;
+			RulesModel::Decision d = decision;
+			if (!denyFeature.empty() && denyFeature == f) { d.allowed = false; d.why = "denied"; }
+			return d;
+		};
 		e.now = [this] { return now; };
 		e.log = [this](const std::string& l) { logs.push_back(l); };
 		e.suVersion = "0.19.0";
@@ -101,6 +110,7 @@ int main()
 		std::string expect = Res(1, "ok", "", std::string(1, US) + "su=0.19.0");
 		for (const char* op : { "cheat.give", "cheat.wave", "cheat.stack", "cheat.stat", "cheat.move", "cheat.skill", "cheat.corp", "cheat.power", "cheat.enemy", "cheat.build" })
 			expect += std::string(1, US) + op + "=1,off";
+		expect += std::string(1, US) + "cheat.state=1,on";
 		CHECK(r.Send("p1", Req(1, "cap")) == expect);
 		CHECK(r.checks == 0);   // cap needs no authority
 	}
@@ -199,6 +209,98 @@ int main()
 		Rig r;
 		for (uint32_t i = 0; i < 20; ++i) r.Send("p1", Req(1, ""));
 		CHECK(r.Send("p1", Req(2, "")).empty());   // over the rate: silence
+	}
+
+	// cheat.state: with no op on, an ok reply with nothing in it, no authority check and no log.
+	{
+		Rig r;
+		CHECK(r.Send("p1", Req(50, "cheat.state")) == Res(50, "ok", ""));
+		CHECK(r.checks == 0 && r.logs.empty());
+	}
+
+	// cheat.state with wave and stack on in cap.
+	{
+		OpWave::Env we;
+		we.available = [] { return true; };
+		we.state  = [] { return std::optional<OpWave::State>(OpWave::State{ true, true }); };
+		we.start  = [](int) { return true; };
+		we.pause  = [](const Context&, uint32_t) { return true; };
+		we.resume = [](const Context&, uint32_t) { return true; };
+		we.cancel = [](const Context&, uint32_t) { return true; };
+		OpWave::SetEnv(we);
+		OpStack::Env se;
+		bool overridden = true;
+		se.available  = [] { return true; };
+		se.current    = [] { return 500; };
+		se.set        = [](const Context&, uint32_t, int) { return true; };
+		se.clear      = [](const Context&, uint32_t) { return true; };
+		se.overridden = [&overridden] { return overridden; };
+		OpStack::SetEnv(se);
+		const std::string U = std::string(1, US);
+
+		// An allowed caller gets both keys; no Override reads off.
+		{
+			Rig r;
+			CHECK(r.Send("p1", Req(60, "cheat.state")) == Res(60, "ok", "", U + "wave=paused" + U + "stack=500"));
+			CHECK(r.logs.empty());
+			overridden = false;
+			r.now += 10;
+			CHECK(r.Send("p1", Req(61, "cheat.state")) == Res(61, "ok", "", U + "wave=paused" + U + "stack=off"));
+			overridden = true;
+		}
+		// An op the rules do not allow for this caller is left out.
+		{
+			Rig r;
+			r.denyFeature = "stack-size";
+			CHECK(r.Send("p1", Req(62, "cheat.state")) == Res(62, "ok", "", U + "wave=paused"));
+			r.denyFeature = "rupture-wave";
+			r.now += 10;
+			CHECK(r.Send("p1", Req(63, "cheat.state")) == Res(63, "ok", "", U + "stack=500"));
+		}
+		// An op that is off in cap is left out.
+		{
+			Rig r;
+			OpStack::Env off = se;
+			off.available = [] { return false; };
+			OpStack::SetEnv(off);
+			CHECK(r.Send("p1", Req(64, "cheat.state")) == Res(64, "ok", "", U + "wave=paused"));
+			OpStack::SetEnv(se);
+		}
+		// The wave's three states.
+		{
+			Rig r;
+			bool running = false, paused = false;
+			OpWave::Env w = we;
+			w.state = [&] { return std::optional<OpWave::State>(OpWave::State{ running, paused }); };
+			OpWave::SetEnv(w);
+			r.denyFeature = "stack-size";
+			CHECK(r.Send("p1", Req(65, "cheat.state")) == Res(65, "ok", "", U + "wave=none"));
+			running = true; r.now += 10;
+			CHECK(r.Send("p1", Req(66, "cheat.state")) == Res(66, "ok", "", U + "wave=running"));
+			paused = true; r.now += 10;
+			CHECK(r.Send("p1", Req(67, "cheat.state")) == Res(67, "ok", "", U + "wave=paused"));
+			OpWave::SetEnv(we);
+		}
+		// A field on the request is refused as unreadable, with no rules check.
+		{
+			Rig r;
+			CHECK(r.Send("p1", Req(68, "cheat.state") + US + "x=1") == Res(68, "refused", kTextBadRequest));
+			CHECK(r.checks == 0);
+		}
+		// cap lists cheat.state as on.
+		{
+			Rig r;
+			CHECK(r.Send("p1", Req(69, "cap")).find("cheat.state=1,on") != std::string::npos);
+		}
+		OpWave::SetEnv(OpWave::Env());
+		OpStack::SetEnv(OpStack::Env());
+	}
+
+	// The reply with every planned key at its longest fits the 1024-byte limit.
+	{
+		const std::string reply = CheatWire::EncodeReply(2147483647, CheatWire::Status::Ok, "", OpState::WorstCaseFields());
+		CHECK(!reply.empty() && reply.size() <= CheatWire::kMaxMessage);
+		CHECK(OpState::WorstCaseFields().size() == 12);
 	}
 
 	std::printf("cheat_dispatch_tests: %d checks, %d failed\n", g_checks, g_failed);

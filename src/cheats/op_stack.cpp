@@ -47,6 +47,12 @@ namespace OpStack
 		return true;
 	}
 
+	CheatDispatch::Fields StateFields(const std::string&)
+	{
+		if (!g_env.current || !g_env.overridden) return {};
+		return { { "stack", g_env.overridden() ? std::to_string(g_env.current()) : "off" } };
+	}
+
 	CheatDispatch::Result Handle(const CheatDispatch::Context& ctx, const CheatWire::Request& req)
 	{
 		if (!Available())

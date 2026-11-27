@@ -51,6 +51,14 @@ namespace OpWave
 		return g_env.available && g_env.state && g_env.start && g_env.pause && g_env.resume && g_env.cancel && g_env.available();
 	}
 
+	CheatDispatch::Fields StateFields(const std::string&)
+	{
+		if (!g_env.state) return {};
+		const std::optional<State> now = g_env.state();
+		if (!now) return {};
+		return { { "wave", !now->inProgress ? "none" : now->paused ? "paused" : "running" } };
+	}
+
 	CheatDispatch::Result Handle(const CheatDispatch::Context& ctx, const CheatWire::Request& req)
 	{
 		if (!Available())

@@ -59,6 +59,9 @@ namespace CheatDispatch
 	};
 
 	using Handler = Result (*)(const Context&, const CheatWire::Request&);
+	using Fields  = std::vector<std::pair<std::string, std::string>>;
+	// What `cheat.state` asks an op for: its key=value pairs for this player, or none.
+	using StateHook = Fields (*)(const std::string& playerId);
 
 	// What a slice with no executor yet puts in the table.
 	Result NotYet(const Context&, const CheatWire::Request&);
@@ -71,7 +74,12 @@ namespace CheatDispatch
 		Handler     run;
 		// Optional: whether the op can run on this server right now. `cap` reports it off when this says no.
 		bool      (*available)() = nullptr;
+		// Optional: what this op adds to a `cheat.state` reply. Ops without one add nothing.
+		StateHook   state = nullptr;
 	};
+
+	// Whether `cap` reports the op on: it has a handler and its `available` hook (if any) says yes.
+	bool IsOn(const OpEntry& op);
 
 	// The one table. A later slice replaces `NotYet` in its entry.
 	const std::vector<OpEntry>& Ops();

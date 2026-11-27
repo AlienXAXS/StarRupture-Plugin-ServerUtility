@@ -55,4 +55,7 @@ namespace OpWave
 	bool Available();
 
 	CheatDispatch::Result Handle(const CheatDispatch::Context& ctx, const CheatWire::Request& req);
+
+	// The op's `cheat.state` hook: wave=none|running|paused. Nothing with no env or no world.
+	CheatDispatch::Fields StateFields(const std::string& playerId);
 }

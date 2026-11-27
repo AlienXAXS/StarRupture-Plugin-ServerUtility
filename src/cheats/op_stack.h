@@ -29,6 +29,8 @@ namespace OpStack
 		std::function<bool()> available;
 		// The size in effect, 0 = the game's own sizes.
 		std::function<int()> current;
+		// Is a cheat.stack Override in force (the server's own setting is not one).
+		std::function<bool()> overridden;
 		// Make size (1..kMaxStack) the server's stack size through the ledger, or put the game's
 		// sizes back. Each returns false when it failed. reqId is for the audit line.
 		std::function<bool(const CheatDispatch::Context& ctx, uint32_t reqId, int size)> set;
@@ -45,6 +47,9 @@ namespace OpStack
 	bool ParseSize(const std::string& text, int& out);
 
 	CheatDispatch::Result Handle(const CheatDispatch::Context& ctx, const CheatWire::Request& req);
+
+	// The op's `cheat.state` hook: stack=<n>|off. off = no Override in force.
+	CheatDispatch::Fields StateFields(const std::string& playerId);
 
 	enum class Action { None, Rescan, Apply, Restore };
 

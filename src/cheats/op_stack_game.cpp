@@ -199,6 +199,11 @@ namespace OpStackGame
 			return g_target.load();
 		}
 
+		bool Overridden()
+		{
+			return CheatLedgerGame::Get().Has(CheatLedger::Kind::Override, std::string(), kFeature, kSlot);
+		}
+
 		bool Set(const CheatDispatch::Context& ctx, uint32_t reqId, int size)
 		{
 			const std::string id = ctx.playerId ? *ctx.playerId : std::string();
@@ -268,6 +273,7 @@ namespace OpStackGame
 		OpStack::Env env;
 		env.available = &EnvAvailable;
 		env.current   = &Current;
+		env.overridden = &Overridden;
 		env.set       = &Set;
 		env.clear     = &Clear;
 		env.log       = [](const std::string& line) { LOG_INFO("[cheat.stack] %s", line.c_str()); };
