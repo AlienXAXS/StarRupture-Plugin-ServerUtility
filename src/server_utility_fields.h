@@ -4,6 +4,7 @@
 #include "plugin_helpers.h"
 #include "SDK/Engine_classes.hpp"
 #include "SDK/Chimera_classes.hpp"
+#include "SDK/Chimera_parameters.hpp"
 #include "SDK/AuItems_classes.hpp"
 #include "plugin_map.h"
 
@@ -92,6 +93,15 @@ namespace ServerUtilityFields
 	inline auto AuAddedItem_Amount  = SERVER_UTILITY_FIELD(FAuAddedItem, Amount);
 	inline auto AuAddedItem_Size    = SR_SIZE_CHECK(FAuAddedItem);
 
+	// The parameter blocks of the wave subsystem's calls the su.cheat wave op makes, as the running
+	// game lays them out (reflected, so no map row is needed). Pause, resume and cancel take none.
+	inline auto StartWaveSize      = SR_PARAMS_SIZE(CrEnviroWaveSubsystem, StartWave);
+	inline auto StartWaveType      = SR_PARAM(CrEnviroWaveSubsystem, StartWave, WaveType);
+	inline auto IsWaveInProgressSize   = SR_PARAMS_SIZE(CrEnviroWaveSubsystem, IsWaveInProgress);
+	inline auto IsWaveInProgressResult = SR_PARAM(CrEnviroWaveSubsystem, IsWaveInProgress, ReturnValue);
+	inline auto IsWavePausedSize   = SR_PARAMS_SIZE(CrEnviroWaveSubsystem, IsWavePaused);
+	inline auto IsWavePausedResult = SR_PARAM(CrEnviroWaveSubsystem, IsWavePaused, ReturnValue);
+
 	// The engine members that lead from the world to a connected player's
 	// controller and from a controller to its player state (the player lookup).
 	// The player list and the admin player actions read the same game state.
@@ -150,13 +160,18 @@ namespace ServerUtilityFields
 	inline PluginMap::Feature CheatGive{ "cheat-give", "Item giving", PluginMap::KeysOf(
 		AddNewItem, ItemName, InventoryComponent, AuAddedItem_Amount, AuAddedItem_Size) };
 
+	// The su.cheat wave op: the wave subsystem's start call and its two state reads. While it is off
+	// `cap` reports the op off and a request is refused.
+	inline PluginMap::Feature CheatWave{ "cheat-wave", "Wave control", PluginMap::KeysOf(
+		StartWaveSize, StartWaveType, IsWaveInProgressSize, IsWaveInProgressResult, IsWavePausedSize, IsWavePausedResult) };
+
 	// Asks the loader for every member above. False when a key that no feature
 	// lists did not resolve; the loader has then recorded the failure and
 	// refuses the plugin. A miss on a key a feature lists only turns that
 	// feature off.
 	inline bool Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
 	{
-		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand, CheatGive);
+		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand, CheatGive, CheatWave);
 
 		// A miss only turns off the features that list the key. Every row is
 		// asked even after a miss, so the loader's log lists them all.
@@ -164,11 +179,12 @@ namespace ServerUtilityFields
 			WorldGameState, GameStatePlayerArray, ActorOwner, ControllerPlayerState,
 			PlayerStateName, PlayerStatePing,
 			ActorAlwaysRelevant, ObjectClass, ObjectIndex,
-			ItemName, InventoryComponent, AuAddedItem_Amount, AuAddedItem_Size);
+			ItemName, InventoryComponent, AuAddedItem_Amount, AuAddedItem_Size,
+			StartWaveSize, StartWaveType, IsWaveInProgressSize, IsWaveInProgressResult, IsWavePausedSize, IsWavePausedResult);
 
 		// One line per feature the loader switched off, so the text names
 		// exactly what is off and follows the feature's key list.
-		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand, &CheatGive })
+		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand, &CheatGive, &CheatWave })
 		{
 			if (!f->On())
 				LOG_WARN("[%s] The loader has no row for one of its engine members on this game build - %s is off",

@@ -1,5 +1,6 @@
 #include "cheat_dispatch.h"
 #include "op_give.h"
+#include "op_wave.h"
 
 #include <algorithm>
 #include <cstring>
@@ -43,7 +44,7 @@ namespace CheatDispatch
 		// default (admins only) applies.
 		static const std::vector<OpEntry> table = {
 			{ "cheat.give",  1, "item-spawner",   &OpGive::Handle, &OpGive::Available },
-			{ "cheat.wave",  1, "rupture-wave",   &NotYet },
+			{ "cheat.wave",  1, "rupture-wave",   &OpWave::Handle, &OpWave::Available },
 			{ "cheat.stack", 1, "stack-size",     &NotYet },
 			{ "cheat.stat",  1, "player-stats",   &NotYet },
 			{ "cheat.move",  1, "movement",       &NotYet },

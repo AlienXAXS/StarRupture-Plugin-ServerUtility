@@ -25,6 +25,7 @@
 #include "cheats/cheat_net.h"
 #include "cheats/cheat_ledger_game.h"
 #include "cheats/op_give_game.h"
+#include "cheats/op_wave_game.h"
 #endif
 
 // -----------------------------------------------------------------------
@@ -196,6 +197,7 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 #ifdef MODLOADER_SERVER_BUILD
 	CheatLedgerGame::Init();
 	OpGiveGame::Init();
+	OpWaveGame::Init();
 	CheatNet::Init();
 #endif
 

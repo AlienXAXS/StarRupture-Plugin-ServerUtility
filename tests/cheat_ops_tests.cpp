@@ -1,10 +1,12 @@
-// Unit tests of the su.cheat ops apart from the game: cheat.give, with a fake Env.
+// Unit tests of the su.cheat ops apart from the game: cheat.give and cheat.wave, with fake Envs.
 // No project file: from a Visual Studio developer prompt, in the repo root:
-//   cl /nologo /EHsc /std:c++17 /Isrc tests\cheat_ops_tests.cpp src\cheats\op_give.cpp src\cheats\cheat_dispatch.cpp src\cheats\cheat_wire.cpp src\admin_wire\admin_wire.cpp /Fe:cheat_ops_tests.exe
+//   cl /nologo /EHsc /std:c++17 /Isrc tests\cheat_ops_tests.cpp src\cheats\op_give.cpp src\cheats\op_wave.cpp src\cheats\cheat_dispatch.cpp src\cheats\cheat_wire.cpp src\admin_wire\admin_wire.cpp /Fe:cheat_ops_tests.exe
 //   cheat_ops_tests.exe
 #include "cheats/op_give.h"
+#include "cheats/op_wave.h"
 
 #include <cstdio>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -49,9 +51,163 @@ static CheatWire::Request Req(const char* item, const char* count)
 	return r;
 }
 
+struct WaveFake
+{
+	bool available = true;
+	std::optional<OpWave::State> state = OpWave::State();
+	bool callsOk = true;
+	int starts = 0, pauses = 0, resumes = 0, cancels = 0;
+	int lastType = 0;
+	uint32_t lastReq = 0;
+
+	OpWave::Env MakeEnv()
+	{
+		OpWave::Env e;
+		e.available = [this] { return available; };
+		e.state = [this] { return state; };
+		e.start = [this](int type) { ++starts; lastType = type; return callsOk; };
+		e.pause = [this](const Context&, uint32_t id) { ++pauses; lastReq = id; return callsOk; };
+		e.resume = [this](const Context&, uint32_t id) { ++resumes; lastReq = id; return callsOk; };
+		e.cancel = [this](const Context&, uint32_t id) { ++cancels; lastReq = id; return callsOk; };
+		e.log = [](const std::string&) {};
+		return e;
+	}
+	int Total() const { return starts + pauses + resumes + cancels; }
+};
+
+static CheatWire::Request WaveReq(const char* what, const char* type = nullptr)
+{
+	CheatWire::Request r;
+	r.id = 9;
+	r.op = "cheat.wave";
+	if (what) r.fields.emplace_back("do", what);
+	if (type) r.fields.emplace_back("type", type);
+	return r;
+}
+
+static void WaveTests()
+{
+	const Context ctx;
+	WaveFake w;
+	OpWave::SetEnv(w.MakeEnv());
+	CHECK(OpWave::Available());
+
+	// A start with no type is Heat; Cold is accepted in any case; a bad type is refused.
+	{
+		const Result r = OpWave::Handle(ctx, WaveReq("start"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == OpWave::kTextStarted);
+		CHECK(r.fields.size() == 1 && r.fields[0].first == "state" && r.fields[0].second == "running");
+		CHECK(w.starts == 1 && w.lastType == OpWave::kTypeHeat);
+		CHECK(OpWave::Handle(ctx, WaveReq("start", "Cold")).status == CheatWire::Status::Ok && w.lastType == OpWave::kTypeCold);
+		CHECK(OpWave::Handle(ctx, WaveReq("start", "heat")).status == CheatWire::Status::Ok && w.lastType == OpWave::kTypeHeat);
+		const int before = w.starts;
+		const Result bad = OpWave::Handle(ctx, WaveReq("start", "acid"));
+		CHECK(bad.status == CheatWire::Status::Refused && bad.reason == kTextBadRequest && w.starts == before);
+	}
+
+	// A start while a wave runs is refused.
+	{
+		WaveFake g;
+		g.state = OpWave::State{ true, false };
+		OpWave::SetEnv(g.MakeEnv());
+		const Result r = OpWave::Handle(ctx, WaveReq("start"));
+		CHECK(r.status == CheatWire::Status::Refused && r.reason == OpWave::kTextAlreadyWave && g.Total() == 0);
+	}
+
+	// Pause, resume and cancel with no wave running.
+	{
+		WaveFake g;
+		OpWave::SetEnv(g.MakeEnv());
+		for (const char* what : { "pause", "resume", "cancel" })
+		{
+			const Result r = OpWave::Handle(ctx, WaveReq(what));
+			CHECK(r.status == CheatWire::Status::Refused && r.reason == OpWave::kTextNoWave);
+		}
+		CHECK(g.Total() == 0);
+	}
+
+	// Pause, resume and cancel on a running wave.
+	{
+		WaveFake g;
+		g.state = OpWave::State{ true, false };
+		OpWave::SetEnv(g.MakeEnv());
+		const Result p = OpWave::Handle(ctx, WaveReq("pause"));
+		CHECK(p.status == CheatWire::Status::Ok && p.reason == OpWave::kTextPaused && p.fields.size() == 1 && p.fields[0].second == "paused");
+		CHECK(g.pauses == 1 && g.lastReq == 9);
+		const Result nr = OpWave::Handle(ctx, WaveReq("resume"));
+		CHECK(nr.status == CheatWire::Status::Refused && nr.reason == OpWave::kTextNotPaused && g.resumes == 0);
+		const Result c = OpWave::Handle(ctx, WaveReq("cancel"));
+		CHECK(c.status == CheatWire::Status::Ok && c.reason == OpWave::kTextCancelled && c.fields[0].second == "idle");
+		CHECK(g.cancels == 1 && g.lastReq == 9);
+	}
+
+	// Pause on a paused wave is refused; resume goes through.
+	{
+		WaveFake g;
+		g.state = OpWave::State{ true, true };
+		OpWave::SetEnv(g.MakeEnv());
+		const Result a = OpWave::Handle(ctx, WaveReq("pause"));
+		CHECK(a.status == CheatWire::Status::Refused && a.reason == OpWave::kTextAlreadyPause && g.pauses == 0);
+		const Result r = OpWave::Handle(ctx, WaveReq("resume"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == OpWave::kTextResumed && r.fields[0].second == "running");
+		CHECK(g.resumes == 1 && g.lastReq == 9);
+	}
+
+	// A missing or unknown verb is a bad request; skip is not available yet. The game is not asked.
+	{
+		WaveFake g;
+		OpWave::SetEnv(g.MakeEnv());
+		CHECK(OpWave::Handle(ctx, WaveReq(nullptr)).reason == kTextBadRequest);
+		CHECK(OpWave::Handle(ctx, WaveReq("explode")).reason == kTextBadRequest);
+		CHECK(OpWave::Handle(ctx, WaveReq("")).reason == kTextBadRequest);
+		const Result s = OpWave::Handle(ctx, WaveReq("skip"));
+		CHECK(s.status == CheatWire::Status::Refused && s.reason == kTextNotYet);
+		CHECK(g.Total() == 0);
+	}
+
+	// No world: the reply is an error with the no-world text.
+	{
+		WaveFake g;
+		g.state.reset();
+		OpWave::SetEnv(g.MakeEnv());
+		const Result r = OpWave::Handle(ctx, WaveReq("start"));
+		CHECK(r.status == CheatWire::Status::Error && r.reason == OpWave::kTextNoWorld && g.Total() == 0);
+	}
+
+	// A failed game call is an error with the failure text.
+	{
+		WaveFake g;
+		g.callsOk = false;
+		OpWave::SetEnv(g.MakeEnv());
+		const Result r = OpWave::Handle(ctx, WaveReq("start"));
+		CHECK(r.status == CheatWire::Status::Error && r.reason == OpWave::kTextFailed && r.fields.empty());
+	}
+
+	// A key missing on this build: the op is off, checked on each call.
+	{
+		WaveFake g;
+		g.available = false;
+		OpWave::SetEnv(g.MakeEnv());
+		CHECK(!OpWave::Available());
+		const Result r = OpWave::Handle(ctx, WaveReq("start"));
+		CHECK(r.status == CheatWire::Status::Refused && r.reason == "Not available on this server's game build.");
+		CHECK(OpWave::Handle(ctx, WaveReq(nullptr)).reason == OpWave::kTextOff && g.Total() == 0);
+		g.available = true;
+		CHECK(OpWave::Available());
+	}
+
+	// No env at all: off.
+	{
+		OpWave::SetEnv(OpWave::Env());
+		CHECK(!OpWave::Available());
+		CHECK(OpWave::Handle(ctx, WaveReq("start")).reason == OpWave::kTextOff);
+	}
+}
+
 int main()
 {
 	const Context ctx;
+	WaveTests();
 	Fake f;
 	f.result.outcome = OpGive::GiveResult::Outcome::Gave;
 	f.result.name = "Iron Ore";

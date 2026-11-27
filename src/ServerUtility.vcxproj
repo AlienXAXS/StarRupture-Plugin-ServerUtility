@@ -442,6 +442,8 @@
     <ClInclude Include="cheats\cheat_ledger_game.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClInclude Include="cheats\op_give.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClInclude Include="cheats\op_give_game.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
+    <ClInclude Include="cheats\op_wave.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
+    <ClInclude Include="cheats\op_wave_game.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClInclude Include="host_rules\player_list.h" />
     <ClInclude Include="host_rules\ini_file.h" />
     <ClInclude Include="host_rules\host_rules.h" />
@@ -512,6 +514,8 @@
     <ClCompile Include="cheats\cheat_ledger_game.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClCompile Include="cheats\op_give.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClCompile Include="cheats\op_give_game.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
+    <ClCompile Include="cheats\op_wave.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
+    <ClCompile Include="cheats\op_wave_game.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClCompile Include="host_rules\player_list.cpp" />
     <ClCompile Include="host_rules\ini_file.cpp" />
     <ClCompile Include="host_rules\host_rules.cpp" />
