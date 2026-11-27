@@ -218,6 +218,29 @@ namespace ServerUtilityFields
 	inline auto TagCountSize              = SR_PARAMS_SIZE(AbilitySystemComponent, GetGameplayTagCount);
 	inline auto TagCountTag               = SR_PARAM(AbilitySystemComponent, GetGameplayTagCount, GameplayTag);
 	inline auto TagCountResult            = SR_PARAM(AbilitySystemComponent, GetGameplayTagCount, ReturnValue);
+
+	// What the su.cheat stat op reads and writes: the 13 attribute sets on the player character and
+	// each set's Current and Max attribute, plus Min on the seven that have one (the afflictions).
+	// All reflected, so no map row of its own is needed. The lists below (SU_STAT_KEYS_*) name them
+	// in the same order.
+#define SU_STAT_FIELDS_RES(Name) 	inline auto Stat##Name##Set     = SERVER_UTILITY_FIELD(ACrCharacterPlayerBase, Name##Attributes); 	inline auto Stat##Name##Current = SERVER_UTILITY_FIELD(UCr##Name##AttributeSet, Current##Name); 	inline auto Stat##Name##Max     = SERVER_UTILITY_FIELD(UCr##Name##AttributeSet, Max##Name);
+#define SU_STAT_FIELDS_AFF(Name) 	SU_STAT_FIELDS_RES(Name) 	inline auto Stat##Name##Min     = SERVER_UTILITY_FIELD(UCr##Name##AttributeSet, Min##Name);
+#define SU_STAT_KEYS_RES(Name) Stat##Name##Set, Stat##Name##Current, Stat##Name##Max
+#define SU_STAT_KEYS_AFF(Name) SU_STAT_KEYS_RES(Name), Stat##Name##Min
+#define SU_STAT_KEYS_ALL 	SU_STAT_KEYS_RES(Health), SU_STAT_KEYS_RES(Energy), SU_STAT_KEYS_RES(Shield), SU_STAT_KEYS_RES(Hydration), 	SU_STAT_KEYS_RES(Calories), SU_STAT_KEYS_RES(Oxygen), SU_STAT_KEYS_AFF(Toxicity), SU_STAT_KEYS_AFF(Radiation), 	SU_STAT_KEYS_AFF(Heat), SU_STAT_KEYS_AFF(Drain), SU_STAT_KEYS_AFF(Corrosion), SU_STAT_KEYS_AFF(Infection), 	SU_STAT_KEYS_AFF(Temperature)
+	SU_STAT_FIELDS_RES(Health)
+	SU_STAT_FIELDS_RES(Energy)
+	SU_STAT_FIELDS_RES(Shield)
+	SU_STAT_FIELDS_RES(Hydration)
+	SU_STAT_FIELDS_RES(Calories)
+	SU_STAT_FIELDS_RES(Oxygen)
+	SU_STAT_FIELDS_AFF(Toxicity)
+	SU_STAT_FIELDS_AFF(Radiation)
+	SU_STAT_FIELDS_AFF(Heat)
+	SU_STAT_FIELDS_AFF(Drain)
+	SU_STAT_FIELDS_AFF(Corrosion)
+	SU_STAT_FIELDS_AFF(Infection)
+	SU_STAT_FIELDS_AFF(Temperature)
 	inline constexpr const char* WeakObjectPtrAssign       = "FWeakObjectPtr::operator=(FObjectPtr)";
 	inline constexpr const char* GetEntityHandleFromActor  = "UMassActorSubsystem::GetEntityHandleFromActor";
 	inline constexpr const char* InternalGetFragmentDataPtr = "FMassEntityManager::InternalGetFragmentDataPtr";
@@ -325,6 +348,10 @@ namespace ServerUtilityFields
 		AddTagsSize, AddTagsActor, AddTagsTags, AddTagsReplicate, RemoveTagsSize, RemoveTagsActor, RemoveTagsTags,
 		RemoveTagsReplicate, GetAscSize, GetAscActor, GetAscResult, TagCountSize, TagCountTag, TagCountResult) };
 
+	// The su.cheat stat op: the 13 attribute sets and their Current, Max and Min attributes. While it is
+	// off `cap` reports the op off.
+	inline PluginMap::Feature CheatStat{ "cheat-stat", "Player stats", PluginMap::KeysOf(SU_STAT_KEYS_ALL) };
+
 	// The su.cheat build op's unlock rule. While it is off the rule is not in `cap`'s build.rules.
 	inline PluginMap::Feature CheatBuildUnlock{ "cheat-build-unlock", "Building unlock", PluginMap::KeysOf(
 		TechnologyKeeper, UnlockAllBuildings, CheckAvailableBuildings) };
@@ -350,7 +377,7 @@ namespace ServerUtilityFields
 	// feature off.
 	inline bool Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
 	{
-		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand, CheatGive, CheatWave, CheatCorp, CheatPower, CheatEnemy, CheatWeapon, CheatGrid, CheatMine, CheatBuildUnlock, CheatBuildCost, CheatBuildStability, CheatBuildWindows, CheatBuildBenches);
+		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand, CheatGive, CheatWave, CheatCorp, CheatPower, CheatEnemy, CheatWeapon, CheatGrid, CheatMine, CheatStat, CheatBuildUnlock, CheatBuildCost, CheatBuildStability, CheatBuildWindows, CheatBuildBenches);
 
 		// A miss only turns off the features that list the key. Every row is
 		// asked even after a miss, so the loader's log lists them all.
@@ -369,6 +396,7 @@ namespace ServerUtilityFields
 			CharacterMiningBoost, MiningBoostCurrent, MiningBoostMax, GameplayTagSize, GameplayTagName, TagContainerTags,
 			AddTagsSize, AddTagsActor, AddTagsTags, AddTagsReplicate, RemoveTagsSize, RemoveTagsActor, RemoveTagsTags,
 			RemoveTagsReplicate, GetAscSize, GetAscActor, GetAscResult, TagCountSize, TagCountTag, TagCountResult,
+			SU_STAT_KEYS_ALL,
 			MassConfigAssetConfig, MassConfigParent, MassConfigTraits, ElectricityParameters, ElectricityValue,
 			ElectricityType, ElectricityParametersSize, ConstSharedFragmentsContainer,
 			TechnologyKeeper, UnlockAllBuildings, ObjectOuter, CrAPHelperBuildingData, PlacementBuildingID);
@@ -378,7 +406,7 @@ namespace ServerUtilityFields
 
 		// One line per feature the loader switched off, so the text names
 		// exactly what is off and follows the feature's key list.
-		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand, &CheatGive, &CheatWave, &CheatCorp, &CheatPower, &CheatEnemy, &CheatWeapon, &CheatGrid, &CheatMine, &CheatBuildUnlock, &CheatBuildCost, &CheatBuildStability, &CheatBuildWindows, &CheatBuildBenches })
+		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand, &CheatGive, &CheatWave, &CheatCorp, &CheatPower, &CheatEnemy, &CheatWeapon, &CheatGrid, &CheatMine, &CheatStat, &CheatBuildUnlock, &CheatBuildCost, &CheatBuildStability, &CheatBuildWindows, &CheatBuildBenches })
 		{
 			if (!f->On())
 				LOG_WARN("[%s] The loader has no row for one of its engine members on this game build - %s is off",
