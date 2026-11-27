@@ -84,7 +84,10 @@ namespace CheatLedgerGame
 					return s;
 				SDK::UObject* pc = Resolve(e.conn);
 				if (!pc)
+				{
+					s.where = Stance::Where::Gone;
 					return s;
+				}
 				const GameAccess::PlayerPawn p = GameAccess::PawnOf_SEH(pc);
 				if (p.kind == PawnKind::Character)
 				{
@@ -111,10 +114,10 @@ namespace CheatLedgerGame
 				SDK::UObject* obj = e.target.Valid() ? Resolve(e.target) : nullptr;
 				return obj ? a->compose(obj, e, prior) : Value();
 			};
-			env.rebases = [](const Entry& e, size_t member) -> bool
+			env.rebases = [](const Entry& e, const Value& live, size_t member) -> bool
 			{
 				const Accessor* a = AccessorFor(e);
-				return !a || !a->rebases || a->rebases(e, member);
+				return !a || !a->rebases || a->rebases(e, live, member);
 			};
 			env.allowed = [](Entry& e) -> Allowance
 			{

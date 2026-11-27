@@ -85,7 +85,8 @@ namespace CheatLedger
 	// How long a respawned pawn must stand before a follow entry moves onto it.
 	constexpr uint64_t kFollowSettleMs = 1000;
 
-	// A pending write is tried on this many ticks, then given up (logged once).
+	// A pending write is tried this many times, then given up (logged once). Every path that
+	// touches the slot retries it, so a tick can count more than one.
 	constexpr int kPendingMaxTries = 300;
 
 	enum class Kind { Toggle, Override };
@@ -97,6 +98,7 @@ namespace CheatLedger
 		enum class Where
 		{
 			NoPawn,       // no pawn (a spectator pawn counts as none), or a character not reachable yet: the entry waits
+			Gone,         // their controller no longer resolves: the player left and the leave was missed
 			Elsewhere,    // possessing something that is not their character (a vehicle)
 			Character     // their live player character
 		};
@@ -162,8 +164,9 @@ namespace CheatLedger
 		// (set to the one the prior was read from). monostate: the slot has no compose; applied stays.
 		std::function<Value(const Entry&, const Value&)>  compose;
 		// For a composed entry whose value is a list: whether a change of member `i` by something
-		// else counts as the game's change (becomes the prior). Unset: every member does.
-		std::function<bool(const Entry&, size_t)>         rebases;
+		// else counts as the game's change (becomes the prior), given the value read now. Unset: every
+		// member does.
+		std::function<bool(const Entry&, const Value&, size_t)> rebases;
 		// Whether the feature is still allowed for the entry's owner. While the owner is connected
 		// the glue refreshes e.ownerProven; once they are gone it decides from the stored value.
 		std::function<Allowance(Entry&)>                  allowed;

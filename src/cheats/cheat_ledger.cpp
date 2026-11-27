@@ -81,7 +81,7 @@ namespace CheatLedger
 			return false;
 		std::vector<float> mix = *p;
 		for (size_t i = 0; i < mix.size(); ++i)
-			if ((*l)[i] != (*a)[i] && (!m_env.rebases || m_env.rebases(e, i)))
+			if ((*l)[i] != (*a)[i] && (!m_env.rebases || m_env.rebases(e, live, i)))
 				mix[i] = (*l)[i];
 		out = std::move(mix);
 		return true;
@@ -499,9 +499,11 @@ namespace CheatLedger
 		// One read of the pawn per controller per tick: a player with many follow entries (a lock
 		// per stat) is asked once.
 		std::vector<std::pair<Weak, Stance>> stances;
-		for (auto& kv : m_entries)
+		for (auto next = m_entries.begin(); next != m_entries.end();)
 		{
-			Entry& e = kv.second;
+			// Restoring erases only this entry, so the iterator to the next one stays good.
+			const auto it = next++;
+			Entry& e = it->second;
 			if (!e.follow || e.kind != Kind::Toggle)
 				continue;
 			Stance stance;
@@ -519,6 +521,12 @@ namespace CheatLedger
 			{
 				stance = m_env.stance(e);
 				stances.emplace_back(e.conn, stance);
+			}
+			// The controller is gone, not the character: the same as a leave that was missed.
+			if (stance.where == Stance::Where::Gone)
+			{
+				Restore(it, "player left");
+				continue;
 			}
 			// A vehicle gets no write; the character goes back to what it was.
 			if (stance.where == Stance::Where::Elsewhere)
@@ -596,11 +604,13 @@ namespace CheatLedger
 
 	void Ledger::Tick()
 	{
+		// First, so a player who just lost their pawn is marked noPawn and their pendings are forgotten
+		// before anything below writes to the corpse.
+		if (m_followers.load() != 0)
+			FollowTick();
 		if (m_reconcileDue.exchange(false))
 			Reconcile();
 		RetryPending();
-		if (m_followers.load() != 0)
-			FollowTick();
 
 		for (auto it = m_entries.begin(); it != m_entries.end();)
 		{

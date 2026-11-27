@@ -154,12 +154,23 @@ namespace OpMineGame
 			return CheatLedger::Value(std::in_place_type<std::vector<float>>, ComposeBoostValue(p->data(), *value));
 		}
 
-		// Only the max BaseValue is the game's to change. GAS derives every CurrentValue from the
-		// BaseValue SU writes, so a change there (a drain, a recompute) is built on our write, not the
-		// game's own value.
-		bool BoostRebases(const CheatLedger::Entry&, size_t member)
+		// The max is the game's to change unless SU raised it. The current pair is derived from what
+		// SU writes (a drain, a recompute), so it never counts. The max BaseValue counts, and so does
+		// the max CurrentValue (a modifier): when SU did not raise the max (the prior's max was already
+		// at the held value), or when the max BaseValue changed with it (the game recomputes both).
+		bool BoostRebases(const CheatLedger::Entry& e, const CheatLedger::Value& live, size_t member)
 		{
-			return member == 2;
+			if (member == 2)
+				return true;
+			if (member != 3)
+				return false;
+			const auto* l = std::get_if<std::vector<float>>(&live);
+			const auto* a = std::get_if<std::vector<float>>(&e.applied);
+			const auto* p = std::get_if<std::vector<float>>(&e.prior);
+			if (!l || !a || !p || l->size() != 4 || a->size() != 4 || p->size() != 4)
+				return false;
+			const bool suRaised = (*a)[2] != (*p)[2] || (*a)[3] != (*p)[3];
+			return !suRaised || (*l)[2] != (*a)[2];
 		}
 
 		// ---- Heat tag

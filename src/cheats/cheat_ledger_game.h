@@ -28,7 +28,7 @@ namespace CheatLedgerGame
 		// For a composed slot whose value is a list: whether a change of member `i` by the game counts as
 		// the game's change (the new prior). Null: all of them. The game derives some members from the
 		// ones SU writes; a change seen there is SU's own write coming back, not the game's.
-		bool               (*rebases)(const CheatLedger::Entry& e, size_t member) = nullptr;
+		bool               (*rebases)(const CheatLedger::Entry& e, const CheatLedger::Value& live, size_t member) = nullptr;
 	};
 	void RegisterAccessor(const std::string& feature, const std::string& slot, Accessor accessor);
 

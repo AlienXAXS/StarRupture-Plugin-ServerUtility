@@ -65,6 +65,12 @@ struct Rig
 		env.stance = [this](const Entry& e)
 		{
 			++stanceCalls;
+			if (e.conn.Valid() && dead.count(e.conn.index))
+			{
+				Stance gone;
+				gone.where = Stance::Where::Gone;
+				return gone;
+			}
 			const bool inVehicle = vehicle.count(e.playerId) != 0;
 			const bool inSpectator = spectator.count(e.playerId) != 0;
 			const auto it = pawn.find(e.playerId);
@@ -110,8 +116,20 @@ struct Rig
 			}
 			return Value();
 		};
-		// The boost's current pair is derived by the game from what SU writes; only its max BaseValue counts.
-		env.rebases = [](const Entry& e, size_t member) { return e.slot != "boost" || member == 2; };
+		// The boost's current pair is derived by the game from what SU writes; the max counts unless SU raised it.
+		env.rebases = [](const Entry& e, const Value& live, size_t member)
+		{
+			if (e.slot != "boost")
+				return true;
+			if (member == 2)
+				return true;
+			if (member != 3)
+				return false;
+			const auto& l = std::get<std::vector<float>>(live);
+			const auto& a = std::get<std::vector<float>>(e.applied);
+			const auto& p = std::get<std::vector<float>>(e.prior);
+			return (a[2] == p[2] && a[3] == p[3]) || l[2] != a[2];
+		};
 		env.allowed = [this](Entry& e)
 		{
 			// Connected owner: live state, refreshed into the entry. Gone owner: the stored state.
@@ -578,11 +596,46 @@ static void Composed()
 		r.pawn["A"] = 20;
 		r.Respawned();
 		CHECK(r.Live(20, "boost") == Value(std::vector<float>{ 3.0f, 3.0f, 5.0f, 5.0f }));   // a max already above: kept
-		r.live["20|boost"] = Value(std::vector<float>{ 1.0f, 1.0f, 2.0f, 2.0f });             // the game lowered the max BaseValue (its CurrentValues are derived, never rebased)
+		r.live["20|boost"] = Value(std::vector<float>{ 1.0f, 1.0f, 2.0f, 2.0f });             // the game lowered the max (BaseValue and CurrentValue together)
 		r.ledger.Tick();
-		CHECK(r.Live(20, "boost") == Value(std::vector<float>{ 3.0f, 3.0f, 2.0f, 5.0f }));   // composed again from the new max base
+		CHECK(r.Live(20, "boost") == Value(std::vector<float>{ 3.0f, 3.0f, 3.0f, 3.0f }));   // composed again from the new max
 		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "boost"));
-		CHECK(r.Live(20, "boost") == Value(std::vector<float>{ 1.0f, 1.0f, 2.0f, 5.0f }));
+		CHECK(r.Live(20, "boost") == Value(std::vector<float>{ 1.0f, 1.0f, 2.0f, 2.0f }));
+	}
+	{   // held at 3 on a max of 5: the game upgrades the max to 8/8, SU writes nothing over it
+		Rig r; r.Seed(10, "boost", Value(std::vector<float>{ 1.0f, 1.0f, 5.0f, 5.0f })); r.pawn["A"] = 10;
+		Request q = r.Req(Kind::Toggle, "A", "boost", Value(std::vector<float>{ 3.0f, 3.0f, 5.0f, 5.0f }), 10, true);
+		q.pin = true; q.asked = Value(3.0f);
+		CHECK(r.ledger.Apply(q));
+		r.live["10|boost"] = Value(std::vector<float>{ 3.0f, 3.0f, 8.0f, 8.0f });
+		r.ledger.Tick();
+		CHECK(r.Live(10, "boost") == Value(std::vector<float>{ 3.0f, 3.0f, 8.0f, 8.0f }));
+		const Entry* e = r.ledger.Find(Kind::Toggle, "A", "feat", "boost");
+		CHECK(e && e->prior == Value(std::vector<float>{ 1.0f, 1.0f, 8.0f, 8.0f }));
+		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "boost"));
+		CHECK(r.Live(10, "boost") == Value(std::vector<float>{ 1.0f, 1.0f, 8.0f, 8.0f }));
+	}
+	{   // a modifier changes only the max CurrentValue and SU did not raise the max: kept
+		Rig r; r.Seed(10, "boost", Value(std::vector<float>{ 1.0f, 1.0f, 5.0f, 5.0f })); r.pawn["A"] = 10;
+		Request q = r.Req(Kind::Toggle, "A", "boost", Value(std::vector<float>{ 3.0f, 3.0f, 5.0f, 5.0f }), 10, true);
+		q.pin = true; q.asked = Value(3.0f);
+		CHECK(r.ledger.Apply(q));
+		r.live["10|boost"] = Value(std::vector<float>{ 3.0f, 3.0f, 5.0f, 6.0f });
+		r.ledger.Tick();
+		CHECK(r.Live(10, "boost") == Value(std::vector<float>{ 3.0f, 3.0f, 5.0f, 6.0f }));
+		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "boost"));
+		CHECK(r.Live(10, "boost") == Value(std::vector<float>{ 1.0f, 1.0f, 5.0f, 6.0f }));
+	}
+	{   // SU raised the max (true max 2): a max CurrentValue change alone is not the game's, the hold stays
+		Rig r; r.Seed(10, "boost", Value(std::vector<float>{ 1.0f, 1.0f, 2.0f, 2.0f })); r.pawn["A"] = 10;
+		Request q = r.Req(Kind::Toggle, "A", "boost", Value(std::vector<float>{ 3.0f, 3.0f, 3.0f, 3.0f }), 10, true);
+		q.pin = true; q.asked = Value(3.0f);
+		CHECK(r.ledger.Apply(q));
+		r.live["10|boost"] = Value(std::vector<float>{ 3.0f, 3.0f, 3.0f, 4.0f });
+		r.ledger.Tick();
+		CHECK(r.Live(10, "boost") == Value(std::vector<float>{ 3.0f, 3.0f, 3.0f, 3.0f }));
+		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "boost"));
+		CHECK(r.Live(10, "boost") == Value(std::vector<float>{ 1.0f, 1.0f, 2.0f, 2.0f }));
 	}
 	{   // a failed write of the composed value is tried again next tick, from the game's value
 		Rig r; Weapon(r, 1.0f);
@@ -1092,7 +1145,7 @@ static void RebaseMembers()
 		r.ledger.Tick();
 		CHECK(r.Live(10, "boost") == Value(std::vector<float>{ 3.0f, 3.0f, 3.0f, 3.0f }));
 		e = r.ledger.Find(Kind::Toggle, "A", "feat", "boost");
-		CHECK(e && e->prior == Value(std::vector<float>{ 1.0f, 1.0f, 2.0f, 1.0f }));
+		CHECK(e && e->prior == Value(std::vector<float>{ 1.0f, 1.0f, 2.0f, 2.0f }));
 	}
 	{   // an Apply whose put-back fails, then a rebase: the half value is no game change
 		Rig r; Boost(r);
@@ -1263,6 +1316,35 @@ static void PendingWrites()
 		Rig s; Spectating(s);
 		s.ledger.RestoreAll();
 		CHECK(s.writes == before && s.Live(10, "fly") == Value(true) && s.ledger.Size() == 0);
+	}
+	{   // a deny on the first tick with a spectator pawn writes nothing to the corpse
+		Rig r; Setup(r);
+		const int before = r.writes;
+		r.spectator.insert("A");
+		r.denied.insert("A");
+		r.ledger.MarkReconcileDue();
+		r.ledger.Tick();
+		CHECK(r.writes == before && r.Live(10, "fly") == Value(true) && r.ledger.Size() == 0);
+	}
+	{   // a write still pending at death is forgotten before the first tick retries it
+		Rig r; Setup(r);
+		r.live["10|fly"] = Value(false);
+		r.halfWrites = 2;
+		r.ledger.Tick();   // the pin's write and its undo both fail: a pending write
+		const int before = r.writes;
+		r.spectator.insert("A");
+		r.ledger.Tick();
+		CHECK(r.writes == before);
+	}
+	{   // a lost controller with a live character is a missed leave: the character is restored
+		Rig r; Setup(r);
+		r.dead.insert(5);
+		r.ledger.Tick();
+		CHECK(r.Live(10, "fly") == Value(false) && r.ledger.Size() == 0);
+		Rig s; Setup(s);
+		s.dead.insert(5);
+		s.ledger.SweepRejoined("A");
+		CHECK(s.Live(10, "fly") == Value(false) && s.ledger.Size() == 0);
 	}
 	{   // an Apply in the settle window after the respawn leaves the corpse alone
 		Rig r; Spectating(r);
