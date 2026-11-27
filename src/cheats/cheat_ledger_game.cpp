@@ -77,6 +77,14 @@ namespace CheatLedgerGame
 				return a->write(obj, e, v);
 			};
 			env.alive = [](const Weak& w) { return Resolve(w) != nullptr; };
+			env.rebind = [](const Entry& e) -> Weak
+			{
+				const Accessor* a = AccessorFor(e);
+				if (!a || !a->rebind)
+					return Weak();
+				SDK::UObject* pc = Resolve(e.conn);
+				return pc ? a->rebind(pc, e) : Weak();
+			};
 			env.allowed = [](Entry& e) -> Allowance
 			{
 				// The owner is here: ask with the live proof and keep that state. The owner is

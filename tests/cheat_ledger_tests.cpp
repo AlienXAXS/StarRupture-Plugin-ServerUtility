@@ -30,6 +30,7 @@ struct Rig
 	std::set<int32_t> dead;                 // target / conn indexes that no longer exist
 	std::set<std::string> denied;           // player ids the feature is denied for (owner's stored proof is false)
 	std::set<std::string> connected;        // player ids connected now
+	std::map<std::string, int32_t> pawn;    // player id -> the index of the object their pawn has now (none: no pawn)
 	bool gameThread = true;
 	int writes = 0;
 	std::vector<std::string> logs;
@@ -45,6 +46,11 @@ struct Rig
 		env.read = [this](const Entry& e) { auto it = live.find(Key(e)); return it == live.end() ? Value() : it->second; };
 		env.write = [this](const Entry& e, const Value& v) { live[Key(e)] = v; ++writes; return true; };
 		env.alive = [this](const Weak& w) { return !dead.count(w.index); };
+		env.rebind = [this](const Entry& e)
+		{
+			const auto it = pawn.find(e.playerId);
+			return it == pawn.end() ? Weak() : Weak{ it->second, 1, 2, 0x2000 };
+		};
 		env.allowed = [this](Entry& e)
 		{
 			// Connected owner: live state, refreshed into the entry. Gone owner: the stored state.
@@ -58,14 +64,14 @@ struct Rig
 		return env;
 	}
 
-	Request Req(Kind kind, const std::string& player, const std::string& slot, Value v, int32_t target = 10)
+	Request Req(Kind kind, const std::string& player, const std::string& slot, Value v, int32_t target = 10, bool follow = false)
 	{
 		Request r;
 		r.playerId = player; r.playerName = "Name" + player;
 		r.conn = Weak{ 5, 1, 1, 0x1000 };
 		r.feature = "feat"; r.slot = slot; r.kind = kind;
 		r.target = Weak{ target, 1, 2, 0x2000 };
-		r.value = v; r.reqId = 7; r.ownerProven = true;
+		r.follow = follow; r.value = v; r.reqId = 7; r.ownerProven = true;
 		connected.insert(player);
 		return r;
 	}
@@ -130,6 +136,150 @@ static void Toggles()
 		r.ledger.SweepRejoined("A");
 		CHECK(r.ledger.Size() == 0);
 		CHECK(r.Live(10, "fly") == Value(false));
+	}
+}
+
+// A follow Toggle belongs to the player: a respawn moves it to the new pawn's object.
+static void Follow()
+{
+	const auto Setup = [](Rig& r)
+	{
+		r.Seed(10, "fly", false);
+		r.pawn["A"] = 10;
+		Request q = r.Req(Kind::Toggle, "A", "fly", true, 10, true);
+		q.pin = true;
+		CHECK(r.ledger.Apply(q));
+	};
+	{   // the pawn changes: the entry moves, with the new pawn's own prior
+		Rig r; Setup(r);
+		r.Seed(20, "fly", Value(false));
+		r.dead.insert(10);
+		r.pawn["A"] = 20;
+		r.ledger.Tick();
+		CHECK(r.ledger.Size() == 1);
+		CHECK(r.Live(20, "fly") == Value(true));
+		const Entry* e = r.ledger.Find(Kind::Toggle, "A", "feat", "fly");
+		CHECK(e && e->target.index == 20 && e->prior == Value(false) && e->applied == Value(true));
+		CHECK(Has(r.logs, "follow 'NameA' (A) feat/fly"));
+	}
+	{   // the new pawn's prior is its own, not the old pawn's
+		Rig r; Setup(r);
+		r.Seed(20, "fly", Value(false));
+		r.live["10|fly"] = Value(true);
+		r.dead.insert(10);
+		r.pawn["A"] = 20;
+		r.ledger.Tick();
+		r.Seed(20, "fly", Value(true));      // the game or the new pawn's state moved on; applied is the same, so it is ours
+		r.ledger.Release(Kind::Toggle, "A", "feat", "fly");
+		CHECK(r.Live(20, "fly") == Value(false));   // restored to the new pawn's prior
+		CHECK(r.Live(10, "fly") == Value(true));    // the old object was never written to
+	}
+	{   // the old pawn still alive but no longer the player's: the entry moves, the old one is left alone
+		Rig r; Setup(r);
+		r.Seed(20, "fly", Value(false));
+		r.pawn["A"] = 20;
+		const int before = r.writes;
+		r.ledger.Tick();
+		CHECK(r.writes == before + 1);
+		CHECK(r.Live(20, "fly") == Value(true));
+		CHECK(r.Live(10, "fly") == Value(true));
+	}
+	{   // no pawn yet: the entry is held, nothing is written, the pin does not drop it
+		Rig r; Setup(r);
+		r.dead.insert(10);
+		r.pawn.erase("A");
+		const int before = r.writes;
+		for (int i = 0; i < 5; ++i)
+			r.ledger.Tick();
+		CHECK(r.ledger.Size() == 1);
+		CHECK(r.ledger.Has(Kind::Toggle, "A", "feat", "fly"));
+		CHECK(r.writes == before);
+		// the pawn arrives later
+		r.Seed(20, "fly", Value(false));
+		r.pawn["A"] = 20;
+		r.ledger.Tick();
+		CHECK(r.Live(20, "fly") == Value(true));
+	}
+	{   // a new pawn whose value cannot be read yet is retried, and logged once
+		Rig r; Setup(r);
+		r.dead.insert(10);
+		r.pawn["A"] = 20;
+		r.live.erase("20|fly");
+		r.ledger.Tick();
+		r.ledger.Tick();
+		int stuck = 0;
+		for (const auto& l : r.logs)
+			stuck += l.find("retrying") != std::string::npos ? 1 : 0;
+		CHECK(stuck == 1);
+		CHECK(r.ledger.Size() == 1);
+		r.Seed(20, "fly", Value(false));
+		r.ledger.Tick();
+		CHECK(r.Live(20, "fly") == Value(true));
+	}
+	{   // a revert against a dead object is a clean no-op, the old prior is never written to the new pawn
+		Rig r; Setup(r);
+		r.Seed(20, "fly", Value(false));
+		r.dead.insert(10);
+		const int before = r.writes;
+		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "fly"));
+		CHECK(r.ledger.Size() == 0);
+		CHECK(r.writes == before);
+		CHECK(r.Live(20, "fly") == Value(false));
+	}
+	{   // leave, deny and stop still revert a followed toggle after a respawn
+		Rig r; Setup(r);
+		r.Seed(20, "fly", Value(false));
+		r.dead.insert(10);
+		r.pawn["A"] = 20;
+		r.ledger.Tick();
+		r.denied.insert("A");
+		r.ledger.ReconcilePlayer("A");
+		CHECK(r.ledger.Size() == 0);
+		CHECK(r.Live(20, "fly") == Value(false));
+	}
+	{
+		Rig r; Setup(r);
+		r.Seed(20, "fly", Value(false));
+		r.dead.insert(10);
+		r.pawn["A"] = 20;
+		r.ledger.Tick();
+		r.ledger.RestorePlayer("A");
+		CHECK(r.ledger.Size() == 0);
+		CHECK(r.Live(20, "fly") == Value(false));
+	}
+	{
+		Rig r; Setup(r);
+		r.Seed(20, "fly", Value(false));
+		r.dead.insert(10);
+		r.pawn["A"] = 20;
+		r.ledger.Tick();
+		r.ledger.RestoreAll();
+		CHECK(r.ledger.Size() == 0);
+		CHECK(r.Live(20, "fly") == Value(false));
+	}
+	{   // leave, deny and stop while the pawn is gone: a clean drop, nothing written
+		Rig r; Setup(r);
+		r.dead.insert(10);
+		r.pawn.erase("A");
+		const int before = r.writes;
+		r.ledger.RestorePlayer("A");
+		CHECK(r.ledger.Size() == 0);
+		CHECK(r.writes == before);
+	}
+	{   // the pin keeps writing a followed value on the live pawn
+		Rig r; Setup(r);
+		r.Seed(10, "fly", Value(false));     // the game changed it
+		r.ledger.Tick();
+		CHECK(r.Live(10, "fly") == Value(true));
+	}
+	{   // a Toggle without follow is still dropped with its target
+		Rig r; r.Seed(10, "fly", false);
+		Request q = r.Req(Kind::Toggle, "A", "fly", true);
+		q.pin = true;
+		r.ledger.Apply(q);
+		r.dead.insert(10);
+		r.ledger.Tick();
+		CHECK(r.ledger.Size() == 0);
 	}
 }
 
@@ -304,6 +454,7 @@ static void SlotPrefixCut()
 int main()
 {
 	Toggles();
+	Follow();
 	Overrides();
 	Grants();
 	OthersChange();

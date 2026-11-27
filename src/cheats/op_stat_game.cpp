@@ -201,6 +201,16 @@ namespace OpStatGame
 			return WritePair_SEH(obj, *row, (*pair)[0], (*pair)[1]);
 		}
 
+		// The player's current attribute set for a lock's stat, for the ledger to move a held lock onto
+		// after a respawn.
+		CheatLedger::Weak RebindLock(void* controller, const CheatLedger::Entry& e)
+		{
+			const Row* row = RowOfSlot(e.slot);
+			if (!row || !OnGameThread())
+				return {};
+			return CheatLedgerGame::MakeWeak(FindSet_SEH(controller, *row));
+		}
+
 		// ---- OpStat::Env
 
 		bool InWorld() { return World() != nullptr; }
@@ -241,8 +251,9 @@ namespace OpStatGame
 		}
 
 		// A lock is a pinned Toggle of this player on the stat's attribute set; the ledger tick writes
-		// it back, and leave, deny, world end and server stop put the value held before it back (a gone
-		// pawn drops the entry with nothing written). A value for a stat that is already locked moves the
+		// it back, and leave, deny, world end and server stop put the value held before it back. The
+		// lock follows the player: after a respawn the tick moves it to the new pawn's set, with that
+		// set's own value as the prior, and the read-back stays on throughout. A value for a stat that is already locked moves the
 		// lock to that value, so the pin does not undo it. A value without a lock is a one-shot grant
 		// with no entry. A lock off releases the entry first, then a value, if any, is written once.
 		bool Apply(const CheatDispatch::Context& ctx, uint32_t reqId, const std::string& stat,
@@ -294,6 +305,7 @@ namespace OpStatGame
 			req.slot        = slot;
 			req.kind        = CheatLedger::Kind::Toggle;
 			req.pin         = true;
+			req.follow      = true;
 			req.target      = CheatLedgerGame::MakeWeak(set);
 			req.value       = CheatLedger::Value(std::vector<float>{ target, target });
 			req.reqId       = reqId;
@@ -304,7 +316,7 @@ namespace OpStatGame
 
 	void Init()
 	{
-		CheatLedgerGame::RegisterAccessor(OpStat::kFeature, OpStat::kSlotPrefix, { &ReadLock, &WriteLock });
+		CheatLedgerGame::RegisterAccessor(OpStat::kFeature, OpStat::kSlotPrefix, { &ReadLock, &WriteLock, &RebindLock });
 
 		OpStat::Env env;
 		env.available = &Available;

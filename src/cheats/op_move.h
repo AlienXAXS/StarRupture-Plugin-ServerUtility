@@ -4,8 +4,9 @@
 // caller's character in fly mode and/or raise its speed (or put either back), and builds the reply.
 // Each of the two is a personal Toggle in the revert ledger (the glue makes the entries): feature
 // kFeature, slots kSlotFly and kSlotSpeed. They revert when the player leaves, when the feature is
-// denied for them and at server stop. The game side comes in through Env, so this runs in unit
-// tests. Game thread.
+// denied for them and at server stop, and on nothing else: a respawn keeps them (SU moves them to the
+// new pawn). Flying sets the movement mode only and never touches collision. The game side comes in
+// through Env, so this runs in unit tests. Game thread.
 #include "cheat_dispatch.h"
 
 #include <cstdint>

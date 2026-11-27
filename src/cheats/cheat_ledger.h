@@ -6,7 +6,11 @@
 //
 // Two kinds of entry:
 //   Toggle   a player's own switch (fly, a stat lock). Reverts when the player leaves, when the
-//            feature is denied for them and at server stop.
+//            feature is denied for them and at server stop, and on nothing else. A Toggle that
+//            follows the player (follow) belongs to the player, not to the object it is written
+//            on: when that object dies or the player's pawn changes (a respawn), the entry stays
+//            and the next Tick writes its value to the new pawn's object, capturing that object's
+//            own prior value first. Until then the entry is held, so a read-back still says on.
 //   Override a server-wide setting (stack size, a paused wave). Stays when the admin who set it
 //            leaves or at world end; reverts when the feature is denied for that admin (connected or
 //            not: the entry keeps the proof state the owner last had), when an admin or RCON
@@ -57,6 +61,8 @@ namespace CheatLedger
 		std::string feature, slot;               // "movement" / "fly", "stack-size" / "stack"
 		Kind        kind = Kind::Toggle;
 		bool        pin  = false;                // Tick writes `applied` back while it differs
+		bool        follow = false;              // Toggle only: the target is the player's pawn or a part of it; Tick moves it to the new one
+		bool        followStuck = false;         // the last attempt to move it failed (logged once)
 		Weak        target;                      // what the value lives on (an Override may have none)
 		Value       prior, applied;              // prior is captured once, on the first apply
 		uint64_t    appliedAtMs = 0;
@@ -71,6 +77,7 @@ namespace CheatLedger
 		std::string feature, slot;
 		Kind        kind = Kind::Toggle;
 		bool        pin  = false;
+		bool        follow = false;
 		Weak        target;
 		Value       value;                       // what to write
 		uint32_t    reqId = 0;
@@ -86,6 +93,9 @@ namespace CheatLedger
 		// Write a value to the entry's slot; false when it could not be written.
 		std::function<bool(const Entry&, const Value&)>   write;
 		std::function<bool(const Weak&)>                  alive;
+		// For a follow entry: the object the player's value now belongs on (their current pawn's
+		// component or set); an invalid Weak while they have none. Game thread.
+		std::function<Weak(const Entry&)>                 rebind;
 		// Whether the feature is still allowed for the entry's owner. While the owner is connected
 		// the glue refreshes e.ownerProven; once they are gone it decides from the stored value.
 		std::function<Allowance(Entry&)>                  allowed;
@@ -140,8 +150,9 @@ namespace CheatLedger
 		// Any thread: asks for a Reconcile at the next Tick.
 		void MarkReconcileDue() { m_reconcileDue.store(true); }
 
-		// Each game tick: a due Reconcile, then the pins. Writes nothing and logs nothing when
-		// nothing changed.
+		// Each game tick: a due Reconcile, the follow entries moved to the player's new pawn, then
+		// the pins. Writes nothing and logs nothing when nothing changed; with no follow entry the
+		// follow step is one atomic read.
 		void Tick();
 
 		size_t Size() const { return m_entries.size(); }
@@ -157,9 +168,15 @@ namespace CheatLedger
 		// Erase with a log line and no write.
 		Map::iterator Drop(Map::iterator it, const char* why);
 
+		// Move each follow entry whose player now has another pawn (or whose target died) onto the
+		// new object: capture its prior, write the held value.
+		void FollowTick();
+		void CountFollowers();
+
 		Env               m_env;
 		Map               m_entries;
 		uint64_t          m_seq = 0;
 		std::atomic<bool> m_reconcileDue{ false };
+		std::atomic<int>  m_followers{ 0 };       // entries with follow set; lets Tick skip the step
 	};
 }

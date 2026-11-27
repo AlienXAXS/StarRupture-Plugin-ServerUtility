@@ -5,8 +5,9 @@
 // reply. A value alone is a one-shot grant (logged by the glue, no ledger entry). A lock is a
 // personal Toggle in the revert ledger (the glue makes the entry): feature kFeature, slot
 // "lock:<stat>", prior = the value held before the lock. SU's tick pins it from the ledger. It
-// reverts when the player leaves, when the feature is denied for them and at server stop. The game
-// side comes in through Env, so this runs in unit tests. Game thread.
+// reverts when the player leaves, when the feature is denied for them and at server stop, and on nothing
+// else: a respawn keeps it (SU moves it to the new pawn). The game side comes in through Env, so this runs in unit
+// tests. Game thread.
 #include "cheat_dispatch.h"
 
 #include <cstdint>

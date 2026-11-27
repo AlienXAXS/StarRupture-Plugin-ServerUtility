@@ -329,6 +329,26 @@ namespace OpMineGame
 			return state;
 		}
 
+		// The player's current mining boost set, and their current character for the heat tag, for the
+		// ledger to move a held toggle onto after a respawn.
+		CheatLedger::Weak RebindBoost(void* controller, const CheatLedger::Entry&)
+		{
+			PawnRef pawnRef;
+			SetRef setRef;
+			if (!OnGameThread() || !Capture_SEH(controller, &pawnRef, &setRef) || !setRef.Get())
+				return {};
+			return CheatLedgerGame::MakeWeak(static_cast<SDK::UObject*>(setRef.Get()));
+		}
+
+		CheatLedger::Weak RebindHeat(void* controller, const CheatLedger::Entry&)
+		{
+			PawnRef pawnRef;
+			SetRef setRef;
+			if (!OnGameThread() || !Capture_SEH(controller, &pawnRef, &setRef) || !pawnRef.Get())
+				return {};
+			return CheatLedgerGame::MakeWeak(static_cast<SDK::UObject*>(pawnRef.Get()));
+		}
+
 		CheatLedger::Request BaseRequest(const CheatDispatch::Context& ctx, uint32_t reqId, const std::string& id, const char* slot)
 		{
 			PlayerList::Entry who;
@@ -341,14 +361,17 @@ namespace OpMineGame
 			req.feature     = OpMine::kFeature;
 			req.slot        = slot;
 			req.kind        = CheatLedger::Kind::Toggle;
+			req.follow      = true;
 			req.reqId       = reqId;
 			req.ownerProven = InGameAdmin::IsProven(ctx.controller, id);
 			return req;
 		}
 
 		// Overheating off or back, and/or the boost set or back, through the ledger. Both are the
-		// caller's own Toggles. The pawn, its component and the attribute set are fetched again here
-		// and held only as weak references; a pawn that is gone leaves a release a no-op that succeeds.
+		// caller's own Toggles. The pawn and the attribute set are fetched again here and held only as
+		// weak references; a pawn that is gone leaves a release a no-op that succeeds. Both follow the
+		// player: after a respawn the ledger tick moves them to the new pawn with a fresh prior, and the
+		// read-back stays on throughout.
 		bool Apply(const CheatDispatch::Context& ctx, uint32_t reqId, std::optional<bool> heat, std::optional<float> boost)
 		{
 			if (!OnGameThread() || !Available() || !World())
@@ -427,8 +450,8 @@ namespace OpMineGame
 
 	void Init()
 	{
-		CheatLedgerGame::RegisterAccessor(OpMine::kFeature, OpMine::kSlotHeat, { &ReadHeatSlot, &WriteHeatSlot });
-		CheatLedgerGame::RegisterAccessor(OpMine::kFeature, OpMine::kSlotBoost, { &ReadBoostSlot, &WriteBoostSlot });
+		CheatLedgerGame::RegisterAccessor(OpMine::kFeature, OpMine::kSlotHeat, { &ReadHeatSlot, &WriteHeatSlot, &RebindHeat });
+		CheatLedgerGame::RegisterAccessor(OpMine::kFeature, OpMine::kSlotBoost, { &ReadBoostSlot, &WriteBoostSlot, &RebindBoost });
 
 		OpMine::Env env;
 		env.available = &Available;

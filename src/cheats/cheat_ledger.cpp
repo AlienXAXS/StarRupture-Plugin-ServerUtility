@@ -58,7 +58,17 @@ namespace CheatLedger
 	Ledger::Map::iterator Ledger::Drop(Map::iterator it, const char* why)
 	{
 		Log("drop " + Describe(it->second) + ": " + why + ", nothing written");
-		return m_entries.erase(it);
+		it = m_entries.erase(it);
+		CountFollowers();
+		return it;
+	}
+
+	void Ledger::CountFollowers()
+	{
+		int n = 0;
+		for (const auto& kv : m_entries)
+			n += kv.second.follow ? 1 : 0;
+		m_followers.store(n);
 	}
 
 	Ledger::Map::iterator Ledger::Restore(Map::iterator it, const char* why)
@@ -80,7 +90,9 @@ namespace CheatLedger
 			Log("restore " + Describe(e) + ": changed by the game or someone else (now " + ToText(live) + ", SU wrote " +
 				ToText(e.applied) + "), left as is (" + why + ")");
 		}
-		return m_entries.erase(it);
+		it = m_entries.erase(it);
+		CountFollowers();
+		return it;
 	}
 
 	bool Ledger::Apply(const Request& req)
@@ -99,7 +111,7 @@ namespace CheatLedger
 		if (it == m_entries.end())
 		{
 			e.playerId = req.playerId; e.playerName = req.playerName; e.conn = req.conn;
-			e.feature = req.feature; e.slot = req.slot; e.kind = req.kind; e.pin = req.pin;
+			e.feature = req.feature; e.slot = req.slot; e.kind = req.kind; e.pin = req.pin; e.follow = req.follow;
 			e.target = req.target; e.reqId = req.reqId; e.ownerProven = req.ownerProven;
 			e.prior = m_env.read(e);
 			if (std::holds_alternative<std::monostate>(e.prior))
@@ -123,7 +135,7 @@ namespace CheatLedger
 		const bool changed = isNew || !(e.applied == req.value) || e.playerId != req.playerId;
 		// The last admin to set an Override takes it over; the first prior stays.
 		e.playerId = req.playerId; e.playerName = req.playerName; e.conn = req.conn;
-		e.pin = req.pin; e.reqId = req.reqId; e.ownerProven = req.ownerProven;
+		e.pin = req.pin; e.follow = req.follow; e.followStuck = false; e.reqId = req.reqId; e.ownerProven = req.ownerProven;
 		e.applied = req.value;
 		e.appliedAtMs = m_env.nowMs ? m_env.nowMs() : 0;
 		if (isNew)
@@ -134,6 +146,7 @@ namespace CheatLedger
 				" req " + std::to_string(e.reqId));
 
 		m_entries[key] = e;
+		CountFollowers();
 		return true;
 	}
 
@@ -207,10 +220,45 @@ namespace CheatLedger
 			it = Restore(it, "server stop");
 	}
 
+	void Ledger::FollowTick()
+	{
+		if (!m_env.rebind)
+			return;
+		for (auto& kv : m_entries)
+		{
+			Entry& e = kv.second;
+			if (!e.follow || e.kind != Kind::Toggle)
+				continue;
+			const Weak now = m_env.rebind(e);
+			// No pawn yet: the entry waits, still held. Same object: nothing to move.
+			if (!now.Valid() || now == e.target)
+				continue;
+
+			Entry moved = e;
+			moved.target = now;
+			moved.prior = m_env.read(moved);
+			if (std::holds_alternative<std::monostate>(moved.prior) || !m_env.write(moved, e.applied))
+			{
+				if (!e.followStuck)
+				{
+					e.followStuck = true;
+					Log("follow " + Describe(e) + ": the new pawn's value could not be read or written yet, retrying");
+				}
+				continue;
+			}
+			Log("follow " + Describe(e) + ": new pawn, " + ToText(moved.prior) + " -> " + ToText(e.applied));
+			moved.followStuck = false;
+			moved.appliedAtMs = m_env.nowMs ? m_env.nowMs() : 0;
+			e = moved;
+		}
+	}
+
 	void Ledger::Tick()
 	{
 		if (m_reconcileDue.exchange(false))
 			Reconcile();
+		if (m_followers.load() != 0)
+			FollowTick();
 
 		for (auto it = m_entries.begin(); it != m_entries.end();)
 		{
@@ -222,7 +270,11 @@ namespace CheatLedger
 			}
 			if (e.target.Valid() && !m_env.alive(e.target))
 			{
-				it = Drop(it, "its target is gone");
+				// A follow entry waits for the player's next pawn; anything else goes with its target.
+				if (e.follow)
+					++it;
+				else
+					it = Drop(it, "its target is gone");
 				continue;
 			}
 			if (!(m_env.read(e) == e.applied))

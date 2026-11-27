@@ -5,7 +5,8 @@
 // their mining boost multiplier (or put either back), and builds the reply. Each of the two is a
 // personal Toggle in the revert ledger (the glue makes the entries): feature kFeature, slots
 // kSlotHeat and kSlotBoost. They revert when the player leaves, when the feature is denied for them
-// and at server stop. The game side comes in through Env, so this runs in unit tests. Game thread.
+// and at server stop, and on nothing else: a respawn keeps them (SU moves them to the new pawn). The
+// game side comes in through Env, so this runs in unit tests. Game thread.
 #include "cheat_dispatch.h"
 
 #include <cstdint>

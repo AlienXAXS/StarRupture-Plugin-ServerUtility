@@ -246,6 +246,16 @@ namespace OpMoveGame
 			return WriteSpeed_SEH(static_cast<SDK::UCharacterMovementComponent*>(obj), (*v)[0], (*v)[1]);
 		}
 
+		// The player's current movement component, for the ledger to move a held toggle onto after a
+		// respawn.
+		CheatLedger::Weak RebindMove(void* controller, const CheatLedger::Entry&)
+		{
+			MoveRef ref;
+			if (!OnGameThread() || !Capture_SEH(controller, &ref) || !ref.Get())
+				return {};
+			return CheatLedgerGame::MakeWeak(static_cast<SDK::UObject*>(ref.Get()));
+		}
+
 		// ---- OpMove::Env
 
 		bool InWorld() { return World() != nullptr; }
@@ -284,16 +294,18 @@ namespace OpMoveGame
 			req.slot        = slot;
 			req.kind        = CheatLedger::Kind::Toggle;
 			req.pin         = true;
+			req.follow      = true;
 			req.reqId       = reqId;
 			req.ownerProven = InGameAdmin::IsProven(ctx.controller, id);
 			return req;
 		}
 
 		// Flying on or back through the ledger. Both are the caller's own pinned Toggles on the
-		// movement component. Off needs no pawn: a character that is gone has no live target, and the
-		// release then writes nothing, so a respawned pawn never gets the old values. On fetches the
-		// component again and holds it as a weak reference; a new pawn is a new target, so the ledger
-		// takes a fresh prior from it.
+		// movement component, and they follow the player: after a respawn the ledger tick moves them
+		// to the new pawn's component with a fresh prior, and the read-back stays on throughout. Off
+		// needs no pawn: a component that is gone has no live target, and the release then writes
+		// nothing, so a respawned pawn never gets the old values. On fetches the component again and
+		// holds it as a weak reference.
 		bool SetFly(const CheatDispatch::Context& ctx, uint32_t reqId, bool on)
 		{
 			if (!OnGameThread() || !Available() || !World())
@@ -377,8 +389,8 @@ namespace OpMoveGame
 
 	void Init()
 	{
-		CheatLedgerGame::RegisterAccessor(OpMove::kFeature, OpMove::kSlotFly, { &ReadFly, &WriteFly });
-		CheatLedgerGame::RegisterAccessor(OpMove::kFeature, OpMove::kSlotSpeed, { &ReadSpeed, &WriteSpeed });
+		CheatLedgerGame::RegisterAccessor(OpMove::kFeature, OpMove::kSlotFly, { &ReadFly, &WriteFly, &RebindMove });
+		CheatLedgerGame::RegisterAccessor(OpMove::kFeature, OpMove::kSlotSpeed, { &ReadSpeed, &WriteSpeed, &RebindMove });
 
 		OpMove::Env env;
 		env.available    = &Available;
