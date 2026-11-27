@@ -72,23 +72,108 @@ namespace CheatLedger
 		m_followers.store(n);
 	}
 
-	bool Ledger::PutBack(const Entry& e, const char* why, bool quiet)
+	bool Ledger::MixPrior(const Entry& e, const Value& live, Value& out) const
+	{
+		const auto* l = std::get_if<std::vector<float>>(&live);
+		const auto* a = std::get_if<std::vector<float>>(&e.applied);
+		const auto* p = std::get_if<std::vector<float>>(&e.prior);
+		if (!l || !a || !p || l->size() != a->size() || p->size() != a->size())
+			return false;
+		std::vector<float> mix = *p;
+		for (size_t i = 0; i < mix.size(); ++i)
+			if ((*l)[i] != (*a)[i] && (!m_env.rebases || m_env.rebases(e, i)))
+				mix[i] = (*l)[i];
+		out = std::move(mix);
+		return true;
+	}
+
+	void Ledger::Defer(const Entry& e, const Value& restore, const Value& expect)
+	{
+		m_pending.push_back(Pending{ e, restore, expect });
+	}
+
+	bool Ledger::IsPending(const Entry& e) const
+	{
+		for (const auto& p : m_pending)
+			if (p.e.target == e.target && p.e.slot == e.slot)
+				return true;
+		return false;
+	}
+
+	void Ledger::RetryPending()
+	{
+		for (auto it = m_pending.begin(); it != m_pending.end();)
+		{
+			Pending& p = *it;
+			if (!m_env.alive(p.e.target))
+			{
+				it = m_pending.erase(it);
+				continue;
+			}
+			const Value live = m_env.read(p.e);
+			if (!std::holds_alternative<std::monostate>(p.expect) && !(live == p.expect))
+			{
+				Log("restore " + Describe(p.e) + ": changed by the game or someone else (now " + ToText(live) + "), left as is (retry)");
+				it = m_pending.erase(it);
+				continue;
+			}
+			if (m_env.write(p.e, p.restore))
+			{
+				Log("restore " + Describe(p.e) + ": " + ToText(live) + " -> " + ToText(p.restore) + " (retried)");
+				it = m_pending.erase(it);
+				continue;
+			}
+			// A retry that fails part-way: undo it, or stop caring what the slot held and write the value anyway.
+			if (!(m_env.read(p.e) == live) && !m_env.write(p.e, live))
+				p.expect = Value();
+			++it;
+		}
+	}
+
+	bool Ledger::WriteSafe(const Entry& e, const Value& v, bool* undoFailed)
+	{
+		if (undoFailed)
+			*undoFailed = false;
+		const Value before = m_env.read(e);
+		if (m_env.write(e, v))
+			return true;
+		// A write can fail part-way (a slot with several members), which nothing later would put
+		// right: the value read next would be taken for a prior or for the game's change. So when the
+		// slot no longer holds what it held, put that back; when that fails too, keep trying.
+		if (!std::holds_alternative<std::monostate>(before) && !(m_env.read(e) == before) && !m_env.write(e, before))
+		{
+			Defer(e, before, Value());
+			if (undoFailed)
+				*undoFailed = true;
+		}
+		return false;
+	}
+
+	bool Ledger::PutBack(const Entry& e, const char* why, bool quiet, bool retry)
 	{
 		const Value live = m_env.read(e);
-		if (live == e.applied)
+		Value restore = e.prior;
+		if (!(live == e.applied))
 		{
-			if (m_env.write(e, e.prior))
+			// Only a composed list is put back when the live value is not ours: the members the game
+			// changed keep its value, the rest return to the original.
+			if (std::holds_alternative<std::monostate>(e.asked) || !MixPrior(e, live, restore) || restore == live)
 			{
-				Log("restore " + Describe(e) + ": " + ToText(e.applied) + " -> " + ToText(e.prior) + " (" + why + ")");
+				Log("restore " + Describe(e) + ": changed by the game or someone else (now " + ToText(live) + ", SU wrote " +
+					ToText(e.applied) + "), left as is (" + why + ")");
 				return true;
 			}
-			if (!quiet)
-				Log("restore " + Describe(e) + ": could not write " + ToText(e.prior) + ", left as is (" + why + ")");
-			return false;
 		}
-		Log("restore " + Describe(e) + ": changed by the game or someone else (now " + ToText(live) + ", SU wrote " +
-			ToText(e.applied) + "), left as is (" + why + ")");
-		return true;
+		if (WriteSafe(e, restore))
+		{
+			Log("restore " + Describe(e) + ": " + ToText(live) + " -> " + ToText(restore) + " (" + why + ")");
+			return true;
+		}
+		if (!quiet)
+			Log("restore " + Describe(e) + ": could not write " + ToText(restore) + ", left as is (" + why + ")");
+		if (retry)
+			Defer(e, restore, live);
+		return false;
 	}
 
 	Ledger::Map::iterator Ledger::Restore(Map::iterator it, const char* why)
@@ -99,7 +184,7 @@ namespace CheatLedger
 		if (e.target.Valid() && !m_env.alive(e.target))
 			return Drop(it, "its target is gone");
 
-		PutBack(e, why);
+		PutBack(e, why, false, true);
 		it = m_entries.erase(it);
 		CountFollowers();
 		return it;
@@ -118,7 +203,7 @@ namespace CheatLedger
 			// A live old target still holds our value: put it back before the entry moves on.
 			if (!old.parked && old.target.Valid() && m_env.alive(old.target))
 			{
-				PutBack(old, "the target changed");
+				PutBack(old, "the target changed", false, true);
 				m_entries.erase(it);
 			}
 			else
@@ -126,6 +211,7 @@ namespace CheatLedger
 				Drop(it, old.parked ? "the character was already put back" : "the target changed");
 			}
 			it = m_entries.end();
+			CountFollowers();
 		}
 
 		Entry e;
@@ -134,6 +220,24 @@ namespace CheatLedger
 			e.playerId = req.playerId; e.playerName = req.playerName; e.conn = req.conn;
 			e.feature = req.feature; e.slot = req.slot; e.kind = req.kind; e.pin = req.pin; e.follow = req.follow;
 			e.target = req.target; e.reqId = req.reqId; e.ownerProven = req.ownerProven;
+		}
+		else
+		{
+			e = it->second;
+		}
+
+		// A write still waiting on this object and slot (an earlier put-back) leaves its value unreliable.
+		if (IsPending(e))
+		{
+			RetryPending();
+			if (IsPending(e))
+			{
+				Log("refuse " + Describe(e) + ": an earlier write to it is still being put right");
+				return false;
+			}
+		}
+		if (it == m_entries.end())
+		{
 			e.prior = m_env.read(e);
 			if (std::holds_alternative<std::monostate>(e.prior))
 			{
@@ -141,22 +245,12 @@ namespace CheatLedger
 				return false;
 			}
 		}
-		else
-		{
-			e = it->second;
-		}
 
-		// What the slot holds right before the write: the prior just read for a new entry.
-		const Value before = it == m_entries.end() ? e.prior : m_env.read(e);
-		if (!m_env.write(e, req.value))
+		bool undoFailed = false;
+		if (!WriteSafe(e, req.value, &undoFailed))
 		{
-			// A write can fail part-way (a slot with several members), which nothing later would put
-			// right: a new entry does not exist yet, and the release of an existing one leaves a value
-			// that is not the one it wrote. So when the slot no longer holds what it held, put that back.
-			const bool intact = std::holds_alternative<std::monostate>(before) || m_env.read(e) == before;
-			const bool putBack = intact || m_env.write(e, before);
 			Log("refuse " + Describe(e) + ": the value could not be written" +
-				(putBack ? "" : ", and the earlier value could not be put back"));
+				(undoFailed ? ", and the earlier value could not be put back" : ""));
 			return false;
 		}
 
@@ -164,7 +258,7 @@ namespace CheatLedger
 		const bool changed = isNew || !(e.applied == req.value) || e.playerId != req.playerId;
 		// The last admin to set an Override takes it over; the first prior stays.
 		e.playerId = req.playerId; e.playerName = req.playerName; e.conn = req.conn;
-		e.pin = req.pin; e.follow = req.follow; e.followStuck = false; e.settling = Weak(); e.reqId = req.reqId; e.ownerProven = req.ownerProven;
+		e.pin = req.pin; e.follow = req.follow; e.followStuck = false; e.noPawn = false; e.rebaseLogged = false; e.settling = Weak(); e.reqId = req.reqId; e.ownerProven = req.ownerProven;
 		e.applied = req.value;
 		e.asked = req.asked;
 		e.appliedAtMs = m_env.nowMs ? m_env.nowMs() : 0;
@@ -258,7 +352,7 @@ namespace CheatLedger
 		// The character is alive and parked: put it back before letting it go. A dead one has
 		// nothing to put back, and nothing is written to it. A failed write is retried next tick,
 		// so the prior is never lost to a half-reverted character.
-		if (e.target.Valid() && m_env.alive(e.target))
+		if (!e.noPawn && e.target.Valid() && m_env.alive(e.target))
 		{
 			if (!PutBack(e, "possessed a vehicle", e.followStuck))
 			{
@@ -287,21 +381,31 @@ namespace CheatLedger
 	}
 
 	// The pin read something other than what SU wrote. For a composed entry the game recomputed the
-	// value (our own write is applied exactly, so it never lands here): the game's value is the new
-	// prior and applied is composed again from it. True when handled, written or not (a failed write
-	// is tried again next tick, with the same game value). False for an entry that is not composed.
+	// value: its members that differ from applied (our own write is applied exactly, so a member
+	// still at it is ours) become the new prior, and applied is composed again from that. True when
+	// handled, written or not (a failed write is tried again next tick). False when the entry is not
+	// composed, or when no member the game owns changed (the pin writes applied back).
 	bool Ledger::Rebase(Entry& e, const Value& live)
 	{
 		if (std::holds_alternative<std::monostate>(e.asked) || !m_env.compose || std::holds_alternative<std::monostate>(live))
 			return false;
-		const Value next = m_env.compose(e, live);
+		Value prior;
+		if (!MixPrior(e, live, prior))
+			prior = live;
+		else if (prior == e.prior)
+			return false;
+		const Value next = m_env.compose(e, prior);
 		if (std::holds_alternative<std::monostate>(next))
 			return false;
-		if (!(next == live) && !m_env.write(e, next))
+		if (!(next == live) && !WriteSafe(e, next))
 			return true;
-		if (!(live == e.prior))
+		// A value the game changes every tick would log, and so open the file, every tick: once per toggle.
+		if (!(prior == e.prior) && !e.rebaseLogged)
+		{
 			Log("rebase " + Describe(e) + ": the game changed it to " + ToText(live) + ", now " + ToText(next));
-		e.prior = live;
+			e.rebaseLogged = true;
+		}
+		e.prior = prior;
 		e.applied = next;
 		e.appliedAtMs = m_env.nowMs ? m_env.nowMs() : 0;
 		return true;
@@ -341,10 +445,15 @@ namespace CheatLedger
 				Park(e);
 				continue;
 			}
+			// No pawn: the old target is a corpse from here until the entry moves, and is left alone.
+			if (stance.where == Stance::Where::NoPawn)
+				e.noPawn = true;
 			const Weak target = stance.where == Stance::Where::Character ? m_env.rebind(e, stance.character) : Weak();
 			// No pawn yet: the entry waits, still held. Same object, never parked: nothing to move.
 			if (!target.Valid() || (!e.parked && target == e.target))
 			{
+				if (target.Valid())
+					e.noPawn = false;
 				e.settling = Weak();
 				continue;
 			}
@@ -369,10 +478,13 @@ namespace CheatLedger
 
 			Entry moved = e;
 			moved.target = target;
+			// An earlier write to that pawn is still being put right: its value is not a prior yet.
+			if (IsPending(moved))
+				continue;
 			moved.prior = m_env.read(moved);
 			// A composed value is made from this pawn's own prior; any other is carried over.
 			moved.applied = ComposeFor(moved, moved.prior, e.applied);
-			if (std::holds_alternative<std::monostate>(moved.prior) || !m_env.write(moved, moved.applied))
+			if (std::holds_alternative<std::monostate>(moved.prior) || !WriteSafe(moved, moved.applied))
 			{
 				if (!e.followStuck)
 				{
@@ -384,12 +496,14 @@ namespace CheatLedger
 			// The old character, if it is still there, holds our value: put it back before the entry
 			// moves on, so no character is left with a value and no prior (a return to it would capture
 			// our own value as its prior). Done once the new one took the value, so a retry leaves the
-			// old one alone. A parked entry holds nothing; a dead one has nothing to put back.
-			if (!e.parked && e.target.Valid() && m_env.alive(e.target))
-				PutBack(e, "the player moved to another character");
+			// old one alone. A parked entry holds nothing; a dead one or a corpse (no pawn) has nothing to put back.
+			if (!e.parked && !e.noPawn && e.target.Valid() && m_env.alive(e.target))
+				PutBack(e, "the player moved to another character", false, true);
 			Log("follow " + Describe(e) + ": " + (e.parked ? "character again, " : "new pawn, ") + ToText(moved.prior) + " -> " + ToText(moved.applied));
 			moved.followStuck = false;
 			moved.parked = false;
+			moved.noPawn = false;
+			moved.rebaseLogged = false;
 			moved.settling = Weak();
 			moved.appliedAtMs = m_env.nowMs ? m_env.nowMs() : 0;
 			e = moved;
@@ -400,14 +514,16 @@ namespace CheatLedger
 	{
 		if (m_reconcileDue.exchange(false))
 			Reconcile();
+		RetryPending();
 		if (m_followers.load() != 0)
 			FollowTick();
 
 		for (auto it = m_entries.begin(); it != m_entries.end();)
 		{
 			Entry& e = it->second;
-			// A parked entry holds nothing on any object.
-			if (!e.pin || e.parked)
+			// A parked entry holds nothing on any object; a player without a pawn has a corpse for a target;
+			// a write waiting to be put right leaves the value unreliable.
+			if (!e.pin || e.parked || e.noPawn || IsPending(e))
 			{
 				++it;
 				continue;
@@ -425,7 +541,7 @@ namespace CheatLedger
 			if (!(live == e.applied))
 			{
 				if (!Rebase(e, live))
-					m_env.write(e, e.applied);
+					WriteSafe(e, e.applied);
 			}
 			++it;
 		}

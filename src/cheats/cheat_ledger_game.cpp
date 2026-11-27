@@ -111,6 +111,11 @@ namespace CheatLedgerGame
 				SDK::UObject* obj = e.target.Valid() ? Resolve(e.target) : nullptr;
 				return obj ? a->compose(obj, e, prior) : Value();
 			};
+			env.rebases = [](const Entry& e, size_t member) -> bool
+			{
+				const Accessor* a = AccessorFor(e);
+				return !a || !a->rebases || a->rebases(e, member);
+			};
 			env.allowed = [](Entry& e) -> Allowance
 			{
 				// The owner is here: ask with the live proof and keep that state. The owner is

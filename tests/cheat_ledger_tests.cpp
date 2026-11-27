@@ -39,6 +39,7 @@ struct Rig
 	std::set<std::string> spectator;        // player ids who hold a spectator pawn (their character died)
 	int stanceCalls = 0;                    // pawn reads, one per controller per tick expected
 	bool failWrites = false;                // every write fails
+	std::set<int32_t> failTargets;          // writes to these targets fail, nothing written
 	int halfWrites = 0;                     // the next N writes leave a half value (kHalf) and fail
 	bool gameThread = true;
 	uint64_t now = 1000;
@@ -57,7 +58,7 @@ struct Rig
 		env.write = [this](const Entry& e, const Value& v)
 		{
 			if (halfWrites > 0) { --halfWrites; live[Key(e)] = kHalf; return false; }
-			if (failWrites) return false;
+			if (failWrites || failTargets.count(e.target.index)) return false;
 			live[Key(e)] = v; ++writes; return true;
 		};
 		env.alive = [this](const Weak& w) { return !dead.count(w.index); };
@@ -109,6 +110,8 @@ struct Rig
 			}
 			return Value();
 		};
+		// The boost's current pair is derived by the game from what SU writes; only its max counts.
+		env.rebases = [](const Entry& e, size_t member) { return e.slot != "boost" || member >= 2; };
 		env.allowed = [this](Entry& e)
 		{
 			// Connected owner: live state, refreshed into the entry. Gone owner: the stored state.
@@ -1006,6 +1009,181 @@ static void PawnClasses()
 	CHECK(ClassifyPawn(true, false, true) == PawnKind::None);      // a spectator pawn is no pawn
 }
 
+// The game changes only some members of a composed slot, or a write fails part-way, or a put-back
+// fails: SU's own value is never taken for the game's, and nothing is left behind.
+static void RebaseMembers()
+{
+	const Value speedOrig = std::vector<float>{ 600.0f, 2000.0f };
+	const auto Speed = [&](Rig& r)
+	{
+		r.Seed(10, "speed", speedOrig);
+		r.pawn["A"] = 10;
+		Request q = r.Req(Kind::Toggle, "A", "speed", Value(std::vector<float>{ 1200.0f, 4800.0f }), 10, true);
+		q.pin = true;
+		q.asked = Value(2.0f);
+		CHECK(r.ledger.Apply(q));
+	};
+	{   // speed: the game changes only the braking; the top speed prior stays, the multiplier does not compound
+		Rig r; Speed(r);
+		r.live["10|speed"] = Value(std::vector<float>{ 1200.0f, 3000.0f });
+		r.ledger.Tick();
+		CHECK(r.Live(10, "speed") == Value(std::vector<float>{ 1200.0f, 4800.0f }));
+		const Entry* e = r.ledger.Find(Kind::Toggle, "A", "feat", "speed");
+		CHECK(e && e->prior == Value(std::vector<float>{ 600.0f, 3000.0f }) && e->applied == Value(std::vector<float>{ 1200.0f, 4800.0f }));
+		for (int i = 0; i < 3; ++i)
+			r.ledger.Tick();
+		CHECK(r.Live(10, "speed") == Value(std::vector<float>{ 1200.0f, 4800.0f }));
+		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "speed"));
+		CHECK(r.Live(10, "speed") == Value(std::vector<float>{ 600.0f, 3000.0f }));   // the game's braking, the original top speed
+	}
+	{   // the same change seen by a release before the next tick: the same mix
+		Rig r; Speed(r);
+		r.live["10|speed"] = Value(std::vector<float>{ 1200.0f, 3000.0f });
+		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "speed"));
+		CHECK(r.Live(10, "speed") == Value(std::vector<float>{ 600.0f, 3000.0f }));
+	}
+	const Value boostOrig = std::vector<float>{ 1.0f, 1.0f, 1.0f, 1.0f };
+	const auto Boost = [&](Rig& r)
+	{
+		r.Seed(10, "boost", boostOrig);
+		r.pawn["A"] = 10;
+		Request q = r.Req(Kind::Toggle, "A", "boost", Value(std::vector<float>{ 3.0f, 3.0f, 3.0f, 3.0f }), 10, true);
+		q.pin = true;
+		q.asked = Value(3.0f);
+		CHECK(r.ledger.Apply(q));
+	};
+	{   // boost: the game drains only the current pair; it is not rebased, and off puts the original back
+		Rig r; Boost(r);
+		r.live["10|boost"] = Value(std::vector<float>{ 2.0f, 2.0f, 3.0f, 3.0f });
+		r.ledger.Tick();
+		CHECK(r.Live(10, "boost") == Value(std::vector<float>{ 3.0f, 3.0f, 3.0f, 3.0f }));
+		CHECK(!Has(r.logs, "rebase"));
+		const Entry* e = r.ledger.Find(Kind::Toggle, "A", "feat", "boost");
+		CHECK(e && e->prior == boostOrig);
+		r.live["10|boost"] = Value(std::vector<float>{ 2.0f, 2.0f, 3.0f, 3.0f });
+		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "boost"));
+		CHECK(r.Live(10, "boost") == boostOrig);
+	}
+	{   // a value the game changes every tick: one rebase line until the toggle is set again
+		Rig r; r.Seed(10, "weapon", 1.0f);
+		r.pawn["A"] = 10;
+		Request q = r.Req(Kind::Toggle, "A", "weapon", Value(2.0f), 10, true);
+		q.pin = true; q.asked = Value(2.0f);
+		CHECK(r.ledger.Apply(q));
+		for (int i = 0; i < 6; ++i)
+		{
+			r.live["10|weapon"] = Value(1.5f + 0.1f * static_cast<float>(i));
+			r.ledger.Tick();
+		}
+		const auto Lines = [&] { int n = 0; for (const auto& l : r.logs) n += l.find("rebase") != std::string::npos ? 1 : 0; return n; };
+		CHECK(Lines() == 1);
+		CHECK(r.ledger.Apply(q));
+		r.live["10|weapon"] = Value(4.0f);
+		r.ledger.Tick();
+		CHECK(Lines() == 2);
+	}
+	{   // a write that fails part-way in the pin: the half value is undone or waited out, never taken as the game's
+		Rig r; Boost(r);
+		r.live["10|boost"] = Value(std::vector<float>{ 3.0f, 3.0f, 2.0f, 2.0f });
+		r.halfWrites = 2;
+		r.ledger.Tick();
+		const Entry* e = r.ledger.Find(Kind::Toggle, "A", "feat", "boost");
+		CHECK(e && e->prior == boostOrig);
+		r.ledger.Tick();
+		CHECK(r.Live(10, "boost") == Value(std::vector<float>{ 3.0f, 3.0f, 3.0f, 3.0f }));
+		e = r.ledger.Find(Kind::Toggle, "A", "feat", "boost");
+		CHECK(e && e->prior == Value(std::vector<float>{ 1.0f, 1.0f, 2.0f, 2.0f }));
+	}
+	{   // an Apply whose put-back fails, then a rebase: the half value is no game change
+		Rig r; Boost(r);
+		r.halfWrites = 2;
+		CHECK(!r.ledger.Apply(r.Req(Kind::Toggle, "A", "boost", std::vector<float>{ 4.0f, 4.0f, 4.0f, 4.0f }, 10, true)));
+		r.failWrites = true;
+		r.ledger.Tick();
+		const Entry* e = r.ledger.Find(Kind::Toggle, "A", "feat", "boost");
+		CHECK(e && e->prior == boostOrig && !Has(r.logs, "rebase"));
+		r.failWrites = false;
+		r.ledger.Tick();
+		CHECK(r.Live(10, "boost") == Value(std::vector<float>{ 3.0f, 3.0f, 3.0f, 3.0f }));
+		e = r.ledger.Find(Kind::Toggle, "A", "feat", "boost");
+		CHECK(e && e->prior == boostOrig && !Has(r.logs, "rebase"));
+	}
+}
+
+static void DeadCharacter()
+{
+	const auto Setup = [](Rig& r)
+	{
+		r.Seed(10, "fly", false);
+		r.Seed(20, "fly", false);
+		r.pawn["A"] = 10;
+		Request q = r.Req(Kind::Toggle, "A", "fly", true, 10, true);
+		q.pin = true;
+		CHECK(r.ledger.Apply(q));
+	};
+	{   // the character died but its object still resolves: no pin, no put-back, a fresh prior on the next one
+		Rig r; Setup(r);
+		r.spectator.insert("A");
+		r.live["10|fly"] = Value(false);          // the death logic changed it
+		const int before = r.writes;
+		for (int i = 0; i < 3; ++i)
+		{
+			r.now += kFollowSettleMs;
+			r.ledger.Tick();
+		}
+		CHECK(r.writes == before && r.Live(10, "fly") == Value(false));
+		r.spectator.erase("A");
+		r.pawn["A"] = 20;
+		r.live["10|fly"] = Value(true);           // whatever the corpse holds is left alone
+		r.Respawned();
+		CHECK(r.Live(10, "fly") == Value(true));
+		CHECK(r.Live(20, "fly") == Value(true));
+		const Entry* e = r.ledger.Find(Kind::Toggle, "A", "feat", "fly");
+		CHECK(e && e->target.index == 20 && e->prior == Value(false) && !e->noPawn);
+	}
+	{   // a put-back that fails is tried again until it works
+		Rig r; Setup(r);
+		r.failTargets.insert(10);
+		r.pawn["A"] = 20;
+		r.Respawned();
+		CHECK(r.Live(10, "fly") == Value(true));
+		r.failTargets.clear();
+		r.ledger.Tick();
+		CHECK(r.Live(10, "fly") == Value(false));
+		const int after = r.writes;
+		r.ledger.Tick();
+		CHECK(r.writes == after);
+	}
+	{   // a failed release put-back outlives the entry; it stops when the target stops resolving
+		Rig r; Setup(r);
+		r.failTargets.insert(10);
+		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "fly"));
+		CHECK(r.ledger.Size() == 0);
+		r.failTargets.clear();
+		r.ledger.Tick();
+		CHECK(r.Live(10, "fly") == Value(false));
+		Rig q; Setup(q);
+		q.failTargets.insert(10);
+		CHECK(q.ledger.Release(Kind::Toggle, "A", "feat", "fly"));
+		q.failTargets.clear();
+		q.dead.insert(10);
+		const int before = q.writes;
+		q.ledger.Tick();
+		CHECK(q.writes == before);
+	}
+	{   // a write to the new pawn that fails part-way: undone or waited out, never taken as its prior
+		Rig r; Setup(r);
+		r.pawn["A"] = 20;
+		r.halfWrites = 2;
+		r.Respawned();
+		CHECK(r.ledger.Find(Kind::Toggle, "A", "feat", "fly")->target.index == 10);
+		r.Respawned();
+		const Entry* e = r.ledger.Find(Kind::Toggle, "A", "feat", "fly");
+		CHECK(e && e->target.index == 20 && e->prior == Value(false));
+		CHECK(r.Live(20, "fly") == Value(true) && r.Live(10, "fly") == Value(false));
+	}
+}
+
 static void HalfWrite()
 {
 	const Value prior = std::vector<float>{ 1.0f, 1.0f, 5.0f, 5.0f };
@@ -1065,6 +1243,8 @@ int main()
 	ThreadGuard();
 	SlotPrefixCut();
 	HalfWrite();
+	RebaseMembers();
+	DeadCharacter();
 	std::printf("=== cheat_ledger_tests  %d checks, %d failed\n", g_checks, g_failed);
 	return g_failed ? 1 : 0;
 }

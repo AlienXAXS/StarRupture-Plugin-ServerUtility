@@ -25,6 +25,10 @@ namespace CheatLedgerGame
 		// For a slot that composes its value from the game's (Entry::asked set): the value to write for a
 		// given prior, on obj (the entry's target, resolved just now). monostate: nothing to compose.
 		CheatLedger::Value (*compose)(SDK::UObject* obj, const CheatLedger::Entry& e, const CheatLedger::Value& prior) = nullptr;
+		// For a composed slot whose value is a list: whether a change of member `i` by the game counts as
+		// the game's change (the new prior). Null: all of them. The game derives some members from the
+		// ones SU writes; a change seen there is SU's own write coming back, not the game's.
+		bool               (*rebases)(const CheatLedger::Entry& e, size_t member) = nullptr;
 	};
 	void RegisterAccessor(const std::string& feature, const std::string& slot, Accessor accessor);
 

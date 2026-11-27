@@ -28,11 +28,23 @@
 // A composed entry (asked is set) keeps what the player asked for (a multiplier) next to the
 // value SU wrote: applied is compose(prior, asked). On a move to a new object the prior is read
 // afresh and applied composed from it. When the pin reads something other than applied, the game
-// recomputed the value (an attachment, an upgrade): that value becomes the new prior and applied
-// is composed again, instead of the old applied being written over the game's change.
+// recomputed the value (an attachment, an upgrade): the members of the value that differ from
+// applied take the game's value as their prior (the others keep theirs, so SU's own write is
+// never taken for the game's) and applied is composed again, instead of the old applied being
+// written over the game's change. Env::rebases names the members that count (a member the game
+// derives from SU's write does not). A release writes the same mix: the game's value for a member
+// it changed, the original for the rest.
 //
 // When a follow entry moves to another live character, the old character is put back first, as
-// a park does, so no character is left holding a value with no prior to return to.
+// a park does, so no character is left holding a value with no prior to return to. Between the
+// tick the player has no pawn (their character died) and the move to the next one, nothing is
+// written to the old target, neither the pin nor a put-back: it is a corpse.
+//
+// A put-back that fails is kept (a pending write) and tried on each Tick until it works or its
+// target stops resolving, whether the entry is still there or not. A write that fails part-way is
+// undone at once; when that fails too, it is a pending write as well. While a pending write waits on
+// an object and slot, nothing else is read from or written to them, so a half value is never taken
+// as a prior or as the game's change.
 //
 // The ledger keeps no pointer to a game object. A Weak is the object's slot index, serial and
 // class, plus its address as a bare number that is only compared to the slot, never used as a
@@ -94,6 +106,8 @@ namespace CheatLedger
 		bool        pin  = false;                // Tick writes `applied` back while it differs
 		bool        follow = false;              // Toggle only: the target is the player's pawn or a part of it; Tick moves it to the new one
 		bool        followStuck = false;         // the last attempt to move it failed (logged once)
+		bool        noPawn = false;              // follow: the player has no pawn (died); the old target is a corpse and gets no write, until the entry moves
+		bool        rebaseLogged = false;        // a rebase of this entry was logged; no more lines until the toggle is set again or moves
 		bool        parked = false;              // follow: the player is in a vehicle; the character was put back and holds nothing of ours
 		Weak        settling;                    // follow: the new pawn being waited on, until the game has set it up
 		uint64_t    settleSinceMs = 0;           // when `settling` was first seen
@@ -139,6 +153,9 @@ namespace CheatLedger
 		// For a composed entry (asked set): the value to write for a given prior, on the object e.target
 		// (set to the one the prior was read from). monostate: the slot has no compose; applied stays.
 		std::function<Value(const Entry&, const Value&)>  compose;
+		// For a composed entry whose value is a list: whether a change of member `i` by something
+		// else counts as the game's change (becomes the prior). Unset: every member does.
+		std::function<bool(const Entry&, size_t)>         rebases;
 		// Whether the feature is still allowed for the entry's owner. While the owner is connected
 		// the glue refreshes e.ownerProven; once they are gone it decides from the stored value.
 		std::function<Allowance(Entry&)>                  allowed;
@@ -215,8 +232,21 @@ namespace CheatLedger
 		// new object: capture its prior, write the held value. While the player is in a vehicle the
 		// character is put back and the entry is parked until a character settles again.
 		void FollowTick();
-		// Put back the live value if it is still the one SU wrote. False when the write failed.
-		bool PutBack(const Entry& e, const char* why, bool quiet = false);
+		// Put back the live value if it is still the one SU wrote (a composed list: the mix described at the top).
+		// False when the write failed; with retry, that write is kept as a pending write for Tick.
+		bool PutBack(const Entry& e, const char* why, bool quiet = false, bool retry = false);
+		// Write; when it fails part-way, undo it to what the slot held. The undo failing is kept as a
+		// pending write. False when the write failed.
+		bool WriteSafe(const Entry& e, const Value& v, bool* undoFailed = nullptr);
+		// A write to do again on later ticks, for the object and slot of `e`: `restore`, while the live
+		// value is `expect` (monostate: whatever it is, for the undo of a half write).
+		struct Pending { Entry e; Value restore, expect; };
+		void Defer(const Entry& e, const Value& restore, const Value& expect);
+		bool IsPending(const Entry& e) const;
+		void RetryPending();
+		// The prior of a composed list entry after the game changed `live`: the members the game
+		// changed take its value, the rest keep the prior. False when the entry is not a list.
+		bool MixPrior(const Entry& e, const Value& live, Value& out) const;
 		// The player entered a vehicle: put the character back and hold the entry.
 		void Park(Entry& e);
 		// The value to write for a prior: compose(prior, asked) for a composed entry, else the fallback.
@@ -228,6 +258,7 @@ namespace CheatLedger
 
 		Env               m_env;
 		Map               m_entries;
+		std::vector<Pending> m_pending;
 		uint64_t          m_seq = 0;
 		std::atomic<bool> m_reconcileDue{ false };
 		std::atomic<int>  m_followers{ 0 };       // entries with follow set; lets Tick skip the step
