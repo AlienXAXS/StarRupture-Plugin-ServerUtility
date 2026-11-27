@@ -11,9 +11,11 @@
 #include "cheats/op_weapon.h"
 #include "cheats/op_grid.h"
 #include "cheats/op_mine.h"
+#include "cheats/op_stat.h"
 #include "cheats/op_plant.h"
 #include "cheats/op_build.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <map>
 #include <optional>
@@ -1544,6 +1546,175 @@ static void BuildTests()
 		&& std::string(OpBuild::kFeatureUnlock) == "build-unlock");
 }
 
+// A fake stat game: one player, one value and one range per stat, the locks and calls recorded.
+struct StatFake
+{
+	bool available = true;
+	bool world = true;
+	bool callsOk = true;
+	bool haveRange = true;
+	std::map<std::string, float> values;
+	std::map<std::string, OpStat::Range> ranges;
+	std::vector<std::string> locks;
+	int calls = 0;
+	uint32_t lastReq = 0;
+	std::optional<float> lastValue;
+	std::optional<bool> lastLock;
+
+	OpStat::Env MakeEnv()
+	{
+		OpStat::Env e;
+		e.available = [this] { return available; };
+		e.inWorld   = [this] { return world; };
+		e.locked    = [this](const std::string&) { return locks; };
+		e.range     = [this](const Context&, const std::string& s) -> std::optional<OpStat::Range>
+		{
+			if (!haveRange) return std::nullopt;
+			const auto it = ranges.find(s);
+			return it == ranges.end() ? OpStat::Range{ 0.0f, 100.0f } : it->second;
+		};
+		e.read      = [this](const Context&, const std::string& s) -> std::optional<float> { return values[s]; };
+		e.apply     = [this](const Context&, uint32_t id, const std::string& s, std::optional<float> v, std::optional<bool> l)
+		{
+			++calls; lastReq = id; lastValue = v; lastLock = l;
+			if (!callsOk) return false;
+			if (v) values[s] = *v;
+			if (l)
+			{
+				locks.erase(std::remove(locks.begin(), locks.end(), s), locks.end());
+				if (*l) locks.push_back(s);
+			}
+			return true;
+		};
+		e.log       = [](const std::string&) {};
+		return e;
+	}
+};
+
+static CheatWire::Request StatReq(const char* stat, const char* value, const char* lock = nullptr)
+{
+	CheatWire::Request r;
+	r.id = 23;
+	r.op = "cheat.stat";
+	if (stat) r.fields.emplace_back("stat", stat);
+	if (value) r.fields.emplace_back("value", value);
+	if (lock) r.fields.emplace_back("lock", lock);
+	return r;
+}
+
+static void StatTests()
+{
+	const std::string id = "p1";
+	Context ctx;
+	ctx.playerId = &id;
+	StatFake f;
+	f.ranges["health"] = { 0.0f, 100.0f };
+	f.ranges["temperature"] = { -50.0f, 80.0f };
+	OpStat::SetEnv(f.MakeEnv());
+	CHECK(OpStat::Available());
+
+	// The stat table: the thirteen names in the contract's order, and the lock slots.
+	CHECK(OpStat::Stats().size() == 13 && OpStat::Stats().front() == "health" && OpStat::Stats().back() == "temperature");
+	CHECK(OpStat::SlotFor("health") == "lock:health" && std::string(OpStat::kFeature) == "player-stats");
+
+	// A value alone: one-shot, no lock asked, the call carries the request id and the reply has both fields.
+	{
+		const Result r = OpStat::Handle(ctx, StatReq("health", "75"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == "Health set to 75.");
+		CHECK(r.fields == Fields({ { "value", "75" }, { "lock", "off" } }));
+		CHECK(f.calls == 1 && f.lastReq == 23 && f.lastValue && *f.lastValue == 75.0f && !f.lastLock);
+		CHECK(f.locks.empty());
+	}
+	// Clamped to the server's Min..Max, either side; a negative value works where the range allows it.
+	{
+		CHECK(OpStat::Handle(ctx, StatReq("health", "500")).reason == "Health set to 100.");
+		CHECK(*f.lastValue == 100.0f);
+		CHECK(OpStat::Handle(ctx, StatReq("health", "-5")).reason == "Health set to 0.");
+		CHECK(OpStat::Handle(ctx, StatReq("temperature", "-20")).reason == "Temperature set to -20.");
+		CHECK(OpStat::Handle(ctx, StatReq("temperature", "-900")).reason == "Temperature set to -50.");
+		CHECK(OpStat::Handle(ctx, StatReq("temperature", "900")).reason == "Temperature set to 80.");
+	}
+	// Lock on with a value, and the lock shows in the state and the reply.
+	{
+		const Result r = OpStat::Handle(ctx, StatReq("health", "100", "on"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == "Health locked at 100.");
+		CHECK(r.fields == Fields({ { "value", "100" }, { "lock", "on" } }));
+		CHECK(f.lastLock && *f.lastLock);
+		CHECK(OpStat::StateFields("p1") == Fields({ { "lock", "health" } }));
+	}
+	// Lock on without a value: no range lookup needed, the call gets no value.
+	{
+		const Result r = OpStat::Handle(ctx, StatReq("energy", nullptr, "on"));
+		CHECK(r.reason == "Energy locked at 0." && !f.lastValue && f.lastLock && *f.lastLock);
+		CHECK(OpStat::StateFields("p1") == Fields({ { "lock", "health,energy" } }));
+	}
+	// Re-lock (a second lock on the same stat) is passed through; the glue keeps the first prior.
+	{
+		const int before = f.calls;
+		CHECK(OpStat::Handle(ctx, StatReq("health", "90", "on")).reason == "Health locked at 90.");
+		CHECK(f.calls == before + 1 && f.locks.size() == 2);
+	}
+	// Lock off: unlocked, the text says so; with a value it is set and unlocked.
+	{
+		const Result r = OpStat::Handle(ctx, StatReq("energy", nullptr, "off"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == "Energy unlocked.");
+		CHECK(r.fields == Fields({ { "value", "0" }, { "lock", "off" } }));
+		CHECK(OpStat::StateFields("p1") == Fields({ { "lock", "health" } }));
+		CHECK(OpStat::Handle(ctx, StatReq("health", "40", "off")).reason == "Health set to 40.");
+		CHECK(OpStat::StateFields("p1") == Fields({ { "lock", "none" } }));
+	}
+	// Bad requests: no or unknown stat, a value that is not a number, a bad lock. The game is not asked.
+	{
+		const int before = f.calls;
+		CHECK(OpStat::Handle(ctx, StatReq(nullptr, "5")).reason == CheatDispatch::kTextBadRequest);
+		CHECK(OpStat::Handle(ctx, StatReq("luck", "5")).reason == CheatDispatch::kTextBadRequest);
+		CHECK(OpStat::Handle(ctx, StatReq("health", "lots")).reason == CheatDispatch::kTextBadRequest);
+		CHECK(OpStat::Handle(ctx, StatReq("health", "1e3")).reason == CheatDispatch::kTextBadRequest);
+		CHECK(OpStat::Handle(ctx, StatReq("health", nullptr, "maybe")).reason == CheatDispatch::kTextBadRequest);
+		const Result r = OpStat::Handle(ctx, StatReq("health", nullptr));
+		CHECK(r.status == CheatWire::Status::Refused && r.reason == "Pick at least one setting.");
+		CHECK(f.calls == before);
+	}
+	// No world: error, no call.
+	{
+		f.world = false;
+		const int before = f.calls;
+		const Result r = OpStat::Handle(ctx, StatReq("health", "50"));
+		CHECK(r.status == CheatWire::Status::Error && r.reason == "Not in a world right now." && f.calls == before);
+		f.world = true;
+	}
+	// No pawn (no range) and a failed call: error, text from the op.
+	{
+		f.haveRange = false;
+		const int before = f.calls;
+		const Result r = OpStat::Handle(ctx, StatReq("health", "50"));
+		CHECK(r.status == CheatWire::Status::Error && r.reason == "Couldn't change your stats on this server." && f.calls == before);
+		f.haveRange = true;
+		f.callsOk = false;
+		const Result r2 = OpStat::Handle(ctx, StatReq("health", "50", "on"));
+		CHECK(r2.status == CheatWire::Status::Error && r2.reason == OpStat::kTextFailed);
+		f.callsOk = true;
+	}
+	// A value alone makes no entry: the op only asks for a lock when the request carries one.
+	{
+		f.locks.clear();
+		OpStat::Handle(ctx, StatReq("shield", "30"));
+		CHECK(!f.lastLock && f.locks.empty());
+	}
+	// Off in cap: refused with the off text.
+	{
+		f.available = false;
+		CHECK(!OpStat::Available());
+		CHECK(OpStat::Handle(ctx, StatReq("health", "50")).reason == OpStat::kTextOff);
+		f.available = true;
+	}
+
+	// No env at all: off, no state fields.
+	OpStat::SetEnv(OpStat::Env());
+	CHECK(!OpStat::Available());
+	CHECK(OpStat::StateFields("p1").empty());
+}
+
 int main()
 {
 	const Context ctx;
@@ -1552,6 +1723,7 @@ int main()
 	WeaponTests();
 	GridTests();
 	MineTests();
+	StatTests();
 	PlantTests();
 	BuildTests();
 	WaveTests();

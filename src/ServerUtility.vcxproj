@@ -459,6 +459,8 @@
     <ClInclude Include="cheats\op_mine.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClInclude Include="cheats\op_plant.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClInclude Include="cheats\op_mine_game.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
+    <ClInclude Include="cheats\op_stat.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
+    <ClInclude Include="cheats\op_stat_game.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClInclude Include="cheats\op_build.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClInclude Include="cheats\op_build_game.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClInclude Include="cheats\op_plant_game.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
@@ -555,6 +557,8 @@
     <ClCompile Include="cheats\op_mine.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClCompile Include="cheats\op_plant.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClCompile Include="cheats\op_mine_game.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
+    <ClCompile Include="cheats\op_stat.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
+    <ClCompile Include="cheats\op_stat_game.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClCompile Include="cheats\op_build.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClCompile Include="cheats\op_build_game.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClCompile Include="cheats\op_plant_game.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />

@@ -13,6 +13,7 @@
 #include "cheats/op_weapon.h"
 #include "cheats/op_grid.h"
 #include "cheats/op_mine.h"
+#include "cheats/op_stat.h"
 #include "cheats/op_plant.h"
 #include "cheats/op_build.h"
 
@@ -121,6 +122,8 @@ int main()
 				CHECK(op.run == &OpPlant::Handle && op.available == &OpPlant::Available && op.state == &OpPlant::StateFields);
 			else if (std::strcmp(op.name, "cheat.mine") == 0)
 				CHECK(op.run == &OpMine::Handle && op.available == &OpMine::Available && op.state == &OpMine::StateFields);
+			else if (std::strcmp(op.name, "cheat.stat") == 0)
+				CHECK(op.run == &OpStat::Handle && op.available == &OpStat::Available && op.state == &OpStat::StateFields);
 			else if (std::strcmp(op.name, "cheat.build") == 0)
 				CHECK(op.run == &OpBuild::Handle && op.available == &OpBuild::Available && !op.state
 					&& op.stateEx == &OpBuild::StateFieldsFor && op.featureFor == &OpBuild::FeatureFor);
@@ -158,6 +161,7 @@ int main()
 			if (std::strcmp(op.name, "cheat.weapon") == 0) text = OpWeapon::kTextOff;
 			if (std::strcmp(op.name, "cheat.grid") == 0) text = OpGrid::kTextOff;
 			if (std::strcmp(op.name, "cheat.plant") == 0) text = OpPlant::kTextOff;
+			if (std::strcmp(op.name, "cheat.stat") == 0) text = OpStat::kTextOff;
 			if (std::strcmp(op.name, "cheat.mine") == 0) text = OpMine::kTextOff;
 			if (std::strcmp(op.name, "cheat.build") == 0) text = OpBuild::kTextOff;
 			CHECK(r.Send("p1", Req(id, op.name)) == Res(id, "refused", text));
@@ -443,6 +447,27 @@ int main()
 			CHECK(r.Send("p1", Req(103, "cheat.state")) == Res(103, "ok", "", U + "wave=paused" + U + "stack=500"));
 			OpMine::SetEnv(OpMine::Env());
 		}
+		// cheat.stat adds lock=<stats>|none for the caller (in the table order) and drops it when player-stats is denied.
+		{
+			std::vector<std::string> locks = { "energy", "health" };
+			OpStat::Env se;
+			se.available = [] { return true; };
+			se.inWorld   = [] { return true; };
+			se.locked    = [&](const std::string&) { return locks; };
+			se.range     = [](const Context&, const std::string&) { return std::optional<OpStat::Range>(OpStat::Range{ 0.0f, 100.0f }); };
+			se.read      = [](const Context&, const std::string&) { return std::optional<float>(50.0f); };
+			se.apply     = [](const Context&, uint32_t, const std::string&, std::optional<float>, std::optional<bool>) { return true; };
+			OpStat::SetEnv(se);
+			Rig r;
+			CHECK(r.Send("p1", Req(120, "cheat.state")) == Res(120, "ok", "", U + "wave=paused" + U + "stack=500" + U + "lock=health,energy"));
+			locks.clear();
+			r.now += 10;
+			CHECK(r.Send("p1", Req(121, "cheat.state")) == Res(121, "ok", "", U + "wave=paused" + U + "stack=500" + U + "lock=none"));
+			r.denyFeature = "player-stats";
+			r.now += 10;
+			CHECK(r.Send("p1", Req(122, "cheat.state")) == Res(122, "ok", "", U + "wave=paused" + U + "stack=500"));
+			OpStat::SetEnv(OpStat::Env());
+		}
 		// cheat.plant adds plant=<n>|off for the caller and drops it when the inventory feature is denied.
 		{
 			OpPlant::Env pe;
@@ -561,7 +586,7 @@ int main()
 	{
 		const std::string reply = CheatWire::EncodeReply(2147483647, CheatWire::Status::Ok, "", OpState::WorstCaseFields());
 		CHECK(!reply.empty() && reply.size() <= CheatWire::kMaxMessage);
-		CHECK(OpState::WorstCaseFields().size() == 13);
+		CHECK(OpState::WorstCaseFields().size() == 14);
 	}
 
 	std::printf("cheat_dispatch_tests: %d checks, %d failed\n", g_checks, g_failed);

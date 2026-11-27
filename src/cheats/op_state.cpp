@@ -52,6 +52,7 @@ namespace OpState
 			{ "plant",  "2147483647" },
 			{ "mine",   "10" },
 			{ "heat",   "off" },
+			{ "lock",   "health,energy,shield,hydration,calories,oxygen,toxicity,radiation,heat,drain,corrosion,infection,temperature" },
 			{ "build",  "cost,stability,windows,benches" },
 			{ "unlock", "off" },
 		};
