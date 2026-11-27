@@ -2129,7 +2129,7 @@ int main()
 		OpGive::SetEnv(g.MakeEnv());
 		CHECK(!OpGive::Available());
 		const Result r = OpGive::Handle(ctx, Req("DA_IronOre", "5"));
-		CHECK(r.status == CheatWire::Status::Refused && r.reason == "Item giving needs a newer version map on this server.");
+		CHECK(r.status == CheatWire::Status::Refused && r.reason == "Item giving needs a newer version object map on this server.");
 		CHECK(OpGive::Handle(ctx, Req("DA_IronOre", "0")).reason == OpGive::kTextOff);
 		CHECK(g.calls == 0);
 		g.available = true;

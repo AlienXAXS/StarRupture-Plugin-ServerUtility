@@ -16,7 +16,7 @@ namespace OpGive
 
 	constexpr const char* kTextBadCount    = "Count must be 1 to 9999.";
 	constexpr const char* kTextNoItem      = "No such item on this server.";
-	constexpr const char* kTextOff         = "Item giving needs a newer version map on this server.";
+	constexpr const char* kTextOff         = "Item giving needs a newer version object map on this server.";
 	constexpr const char* kTextNoCharacter = "You have no character to give items to.";
 	constexpr const char* kTextNothingAdded = "Nothing could be added. Your inventory may be full.";
 	constexpr const char* kTextFailed      = "The server could not give that item.";

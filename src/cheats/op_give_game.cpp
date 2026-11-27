@@ -84,7 +84,7 @@ namespace OpGiveGame
 
 				SDK::UCrInventoryComponent** invAt = ServerUtilityFields::InventoryComponent.In(character);
 				out->inventory = invAt ? *invAt : nullptr;
-				if (!out->inventory) { out->failure = AddStatus::NoCharacter; return false; }
+				if (!out->inventory) { out->failure = AddStatus::NoInventory; return false; }
 
 				out->grant = GrantObject(entry);
 				CopyName(entry, out->name);
@@ -146,7 +146,8 @@ namespace OpGiveGame
 			{
 			case AddStatus::Added:        break;
 			case AddStatus::NoItem:       r.outcome = Outcome::NoItem;       return r;
-			case AddStatus::NoCharacter:  r.outcome = Outcome::NoCharacter;  return r;
+			case AddStatus::NoCharacter:
+			case AddStatus::NoInventory:  r.outcome = Outcome::NoCharacter;  return r;
 			case AddStatus::NothingAdded: r.outcome = Outcome::NothingAdded; return r;
 			default:                      return r;
 			}

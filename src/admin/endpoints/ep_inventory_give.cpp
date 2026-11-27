@@ -71,11 +71,13 @@ static std::string GiveItem(int playerIndex, const wchar_t* expectedName, const 
 	const OpGiveGame::Added added = OpGiveGame::AddItem(controller, assetPath, count, err, errCap);
 	switch (added.status)
 	{
-	case OpGiveGame::AddStatus::Added:
-	case OpGiveGame::AddStatus::NothingAdded: return R"({"ok":true})";
+	case OpGiveGame::AddStatus::Added:         return R"({"ok":true,"added":)" + std::to_string(added.given) + "}";
+	case OpGiveGame::AddStatus::NothingAdded:
+		return std::string(R"({"ok":false,"error":")") + OpGive::kTextNothingAdded + R"("})";
 	case OpGiveGame::AddStatus::NoItem:       return err;
 	case OpGiveGame::AddStatus::NoSubsystem:  return R"({"ok":false,"error":"item subsystem unavailable"})";
 	case OpGiveGame::AddStatus::NoCharacter:  return R"({"ok":false,"error":"player has no pawn"})";
+	case OpGiveGame::AddStatus::NoInventory:  return R"({"ok":false,"error":"player character has no inventory"})";
 	case OpGiveGame::AddStatus::Unavailable:
 		return std::string(R"({"ok":false,"error":")") + OpGive::kTextOff + R"("})";
 	case OpGiveGame::AddStatus::Fault:        break;

@@ -15,7 +15,8 @@ namespace OpGiveGame
 	// From PluginInit: gives OpGive its game side.
 	void Init();
 
-	enum class AddStatus { Added, Unavailable, NoSubsystem, NoItem, NoCharacter, NothingAdded, Fault };
+	// NoInventory: the character has no inventory component.
+	enum class AddStatus { Added, Unavailable, NoSubsystem, NoItem, NoCharacter, NothingAdded, Fault, NoInventory };
 
 	struct Added
 	{
