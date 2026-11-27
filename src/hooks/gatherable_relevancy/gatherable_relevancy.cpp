@@ -227,6 +227,11 @@ static bool ApplyToLiveGraph()
 	if (actors.empty())
 		return false;   // not spawned yet
 
+	// A fault in the policy walk keeps the patch off until the plugin reloads; the seed resync that
+	// follows never touches the policy map and still runs.
+	if (g_faulted)
+		return true;
+
 	auto graphs = FindInstances<SDK::UCrReplicationGraph>("CrReplicationGraph");
 	if (graphs.empty())
 	{
@@ -401,8 +406,6 @@ static void FinishWorld()
 // ---------------------------------------------------------------------------
 static void OnAnyWorldBeginPlay(SDK::UWorld* /*world*/, const char* worldName)
 {
-	if (g_faulted)
-		return;
 	LOG_DEBUG("[GatherableFix] World '%s' began play - scheduling live graph check", worldName ? worldName : "?");
 	g_worldName   = worldName ? worldName : "";
 	g_livePending = true;
