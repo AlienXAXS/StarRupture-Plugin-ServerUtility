@@ -4,6 +4,7 @@
 #include "host_rules/ingame_admin.h"
 #include "host_rules/player_list.h"
 #include "plugin_helpers.h"
+#include "game_access.h"
 #include "server_utility_fields.h"
 #include "plugin_map.h"
 #include "object_ref.h"
@@ -20,6 +21,9 @@ namespace OpEnemyGame
 {
 	namespace
 	{
+		using GameAccess::OnGameThread;
+		using GameAccess::World;
+
 		using WeakAssignFn = void(__fastcall*)(SDK::FWeakObjectPtr* self, void* const* objectPtrAddr);
 		using GetHandleFn  = SDK::FMassEntityHandle*(__fastcall*)(SDK::UMassActorSubsystem* self, SDK::FMassEntityHandle* result, SDK::FWeakObjectPtr actorKey);
 		using FragmentFn   = void*(__fastcall*)(void* entityManager, SDK::FMassEntityHandle entity, const SDK::UScriptStruct* fragmentType);
@@ -54,20 +58,6 @@ namespace OpEnemyGame
 		std::atomic<bool>                        g_ai{ false };
 		std::atomic<bool>                        g_oneHit{ false };
 		bool                                     g_tickRegistered = false;
-
-		bool OnGameThread()
-		{
-			IPluginHooks* hooks = GetHooks();
-			return hooks && hooks->Engine && hooks->Engine->IsGameThread();
-		}
-
-		// Null off the game thread: every engine and UObject access in this file starts here.
-		SDK::UWorld* World()
-		{
-			if (!OnGameThread())
-				return nullptr;
-			return static_cast<SDK::UWorld*>(PluginSdkRuntime::GetWorld());
-		}
 
 		bool Available()
 		{

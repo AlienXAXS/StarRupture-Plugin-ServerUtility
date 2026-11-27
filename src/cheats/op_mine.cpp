@@ -7,13 +7,7 @@ namespace OpMine
 	{
 		Env g_env;
 
-		CheatDispatch::Result Make(CheatWire::Status status, const std::string& text)
-		{
-			CheatDispatch::Result r;
-			r.status = status;
-			r.reason = text;
-			return r;
-		}
+		using CheatDispatch::Make;
 
 		void Audit(const CheatDispatch::Context& ctx, uint32_t reqId, const std::string& what)
 		{

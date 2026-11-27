@@ -5,6 +5,7 @@
 #include "host_rules/player_list.h"
 #include "host_rules/ini_file.h"
 #include "plugin_helpers.h"
+#include "game_access.h"
 #include "server_settings/stack_size_model.h"
 #include "SDK/Engine_classes.hpp"
 #include "SDK/AuItems_classes.hpp"
@@ -25,6 +26,8 @@ namespace OpStackGame
 {
 	namespace
 	{
+		using GameAccess::OnGameThread;
+
 		constexpr const char* kFeature = "stack-size";
 		constexpr const char* kSlot    = "stack";
 
@@ -55,12 +58,6 @@ namespace OpStackGame
 		bool                    g_tickRegistered = false;
 		int32_t                 g_scanCount = -1;   // length of the game's item list at the last scan
 		bool                    g_warnedEmpty = false;
-
-		bool OnGameThread()
-		{
-			IPluginHooks* hooks = GetHooks();
-			return hooks && hooks->Engine && hooks->Engine->IsGameThread();
-		}
 
 		bool FeatureOn()
 		{

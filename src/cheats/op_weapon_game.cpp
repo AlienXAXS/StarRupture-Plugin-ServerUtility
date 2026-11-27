@@ -4,6 +4,7 @@
 #include "host_rules/ingame_admin.h"
 #include "host_rules/player_list.h"
 #include "plugin_helpers.h"
+#include "game_access.h"
 #include "server_utility_fields.h"
 #include "plugin_map.h"
 
@@ -17,24 +18,13 @@ namespace OpWeaponGame
 {
 	namespace
 	{
+		using GameAccess::OnGameThread;
+		using GameAccess::World;
+
 		// The multiplier each player asked for, by player and slot. Only the value the player sees
 		// in `cheat.state`: the ledger holds the entry and the attribute values, and a stale value
 		// here is never read while the ledger has no entry. Game thread.
 		std::map<std::string, float> g_mult;
-
-		bool OnGameThread()
-		{
-			IPluginHooks* hooks = GetHooks();
-			return hooks && hooks->Engine && hooks->Engine->IsGameThread();
-		}
-
-		// Null off the game thread: every engine and UObject access in this file starts here.
-		SDK::UWorld* World()
-		{
-			if (!OnGameThread())
-				return nullptr;
-			return static_cast<SDK::UWorld*>(PluginSdkRuntime::GetWorld());
-		}
 
 		bool Available()
 		{
@@ -65,13 +55,10 @@ namespace OpWeaponGame
 		{
 			__try
 			{
-				auto* pc = static_cast<SDK::APlayerController*>(controller);
-				if (!pc)
+				SDK::ACrCharacterPlayerBase* character = GameAccess::CharacterOf(controller);
+				if (!character)
 					return nullptr;
-				SDK::APawn* pawn = pc->K2_GetPawn();
-				if (!pawn || !pawn->IsA(SDK::ACrCharacterPlayerBase::StaticClass()))
-					return nullptr;
-				SDK::UCrWeaponAttributeSet** setAt = ServerUtilityFields::CharacterWeaponAttributes.In(pawn);
+				SDK::UCrWeaponAttributeSet** setAt = ServerUtilityFields::CharacterWeaponAttributes.In(character);
 				return setAt ? *setAt : nullptr;
 			}
 			__except (EXCEPTION_EXECUTE_HANDLER)

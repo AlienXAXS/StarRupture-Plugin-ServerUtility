@@ -14,14 +14,14 @@ namespace CheatLedgerGame
 	// A slot the ledger can read and write, registered per "feature/slot". obj is the entry's
 	// target, resolved and validated just now (null for an Override without a target); it is used
 	// inside the call only. rebind is for a slot whose entries follow the player (Request::follow):
-	// given the player's controller, it returns the object the slot lives on for their current pawn
-	// (a weak reference), or an invalid one while they have no usable character. The glue tells a
-	// possessed vehicle from no pawn by itself. Game thread.
+	// given the player's live character (resolved just now; the glue has already told a vehicle or
+	// no pawn apart), it returns the object the slot lives on for that character (a weak reference),
+	// or an invalid one while the character has none yet. Game thread.
 	struct Accessor
 	{
 		CheatLedger::Value (*read)(SDK::UObject* obj, const CheatLedger::Entry& e) = nullptr;
 		bool               (*write)(SDK::UObject* obj, const CheatLedger::Entry& e, const CheatLedger::Value& v) = nullptr;
-		CheatLedger::Weak  (*rebind)(void* controller, const CheatLedger::Entry& e) = nullptr;
+		CheatLedger::Weak  (*rebind)(SDK::UObject* character, const CheatLedger::Entry& e) = nullptr;
 	};
 	void RegisterAccessor(const std::string& feature, const std::string& slot, Accessor accessor);
 

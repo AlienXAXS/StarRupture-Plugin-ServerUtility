@@ -8,13 +8,7 @@ namespace OpWave
 	{
 		Env g_env;
 
-		CheatDispatch::Result Make(CheatWire::Status status, const char* text)
-		{
-			CheatDispatch::Result r;
-			r.status = status;
-			r.reason = text;
-			return r;
-		}
+		using CheatDispatch::Make;
 
 		CheatDispatch::Result Refuse(const char* text) { return Make(CheatWire::Status::Refused, text); }
 		CheatDispatch::Result Failed(const char* text = kTextFailed) { return Make(CheatWire::Status::Error, text); }

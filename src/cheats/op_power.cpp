@@ -9,13 +9,7 @@ namespace OpPower
 	{
 		Env g_env;
 
-		CheatDispatch::Result Make(CheatWire::Status status, const std::string& text)
-		{
-			CheatDispatch::Result r;
-			r.status = status;
-			r.reason = text;
-			return r;
-		}
+		using CheatDispatch::Make;
 
 		bool ValidName(const std::string* name)
 		{

@@ -4,6 +4,7 @@
 #include "host_rules/ingame_admin.h"
 #include "host_rules/player_list.h"
 #include "plugin_helpers.h"
+#include "game_access.h"
 #include "server_utility_fields.h"
 #include "SDK/Engine_classes.hpp"
 #include "SDK/AssetRegistry_classes.hpp"
@@ -24,6 +25,9 @@ namespace OpPowerGame
 {
 	namespace
 	{
+		using GameAccess::OnGameThread;
+		using GameAccess::World;
+
 		using namespace ServerUtilityFields;
 
 		// The engine layout constant: an FConstSharedStruct points at an FStructSharedMemory, which is
@@ -69,12 +73,6 @@ namespace OpPowerGame
 		ULONGLONG                                 g_nextReapply = 0;
 		bool                                      g_tickRegistered = false;
 
-		bool OnGameThread()
-		{
-			IPluginHooks* hooks = GetHooks();
-			return hooks && hooks->Engine && hooks->Engine->IsGameThread();
-		}
-
 		// The four engine lookups, from the loader. Asked again (at most every 5 s) until all four are there.
 		bool EngineLookups()
 		{
@@ -103,14 +101,6 @@ namespace OpPowerGame
 				&& ElectricityParameters.offset >= 0 && ElectricityValue.offset >= 0 && ElectricityType.offset >= 0
 				&& ElectricityParametersSize.offset >= 0 && ConstSharedFragmentsContainer.offset >= 0
 				&& PluginMap::MassEntityManagerField.offset >= 0;
-		}
-
-		// Null off the game thread: every engine and UObject access in this file starts here.
-		SDK::UWorld* World()
-		{
-			if (!OnGameThread())
-				return nullptr;
-			return static_cast<SDK::UWorld*>(PluginSdkRuntime::GetWorld());
 		}
 
 		std::wstring Wide(const std::string& s) { return std::wstring(s.begin(), s.end()); }

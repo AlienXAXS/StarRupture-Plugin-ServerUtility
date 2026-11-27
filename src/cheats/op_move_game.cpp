@@ -4,6 +4,7 @@
 #include "host_rules/ingame_admin.h"
 #include "host_rules/player_list.h"
 #include "plugin_helpers.h"
+#include "game_access.h"
 #include "server_utility_fields.h"
 #include "plugin_map.h"
 #include "object_ref.h"
@@ -20,6 +21,10 @@ namespace OpMoveGame
 {
 	namespace
 	{
+		using GameAccess::OnGameThread;
+		using GameAccess::World;
+		using GameAccess::Invoke;
+
 		constexpr const char* kMoveClass      = "CharacterMovementComponent";
 
 		// UCharacterMovementComponent's own default, in cm/s, for a component that ships with no fly
@@ -36,39 +41,18 @@ namespace OpMoveGame
 		// Game thread.
 		std::map<std::string, float> g_speed;
 
-		bool OnGameThread()
-		{
-			IPluginHooks* hooks = GetHooks();
-			return hooks && hooks->Engine && hooks->Engine->IsGameThread();
-		}
-
-		// Null off the game thread: every engine and UObject access in this file starts here.
-		SDK::UWorld* World()
-		{
-			if (!OnGameThread())
-				return nullptr;
-			return static_cast<SDK::UWorld*>(PluginSdkRuntime::GetWorld());
-		}
-
 		bool Available()
 		{
 			return ServerUtilityFields::CheatMove.On();
 		}
 
-		// The caller's player character's movement component, as a weak reference. False when the
-		// controller has no player character or the character has no component. No C++ objects needing
-		// unwinding in this frame: SEH is legal.
-		bool Capture_SEH(void* controller, MoveRef* out)
+		// A player character's movement component, as a weak reference. False when the character is
+		// null or has no component. No C++ objects needing unwinding in this frame: SEH is legal.
+		bool CaptureFrom_SEH(SDK::UObject* character, MoveRef* out)
 		{
 			__try
 			{
-				auto* pc = static_cast<SDK::APlayerController*>(controller);
-				if (!pc)
-					return false;
-				SDK::APawn* pawn = pc->K2_GetPawn();
-				if (!pawn || !pawn->IsA(SDK::ACrCharacterPlayerBase::StaticClass()))
-					return false;
-				SDK::UCrCharacterMovementComponent** at = ServerUtilityFields::CharacterMovement.In(pawn);
+				SDK::UCrCharacterMovementComponent** at = ServerUtilityFields::CharacterMovement.In(character);
 				if (!at || !*at)
 					return false;
 				out->Set(*at);
@@ -80,31 +64,14 @@ namespace OpMoveGame
 			}
 		}
 
+		// The caller's player character's movement component. False when the controller has no player
+		// character or the character has no component.
+		bool Capture(void* controller, MoveRef* out)
+		{
+			return CaptureFrom_SEH(GameAccess::CharacterOf(controller), out);
+		}
+
 		// ---- Calls through the loader's ProcessEvent path
-
-		// Calls one reflected function. params is the call's parameter block. No C++ objects needing
-		// unwinding in this frame: SEH is legal.
-		bool Invoke_SEH(IPluginHooks* hooks, SDK::UObject* object, const char* cls, const char* function, void* params)
-		{
-			__try
-			{
-				void* resolved = hooks->ObjectWalker->ResolveUFunction(cls, function);
-				return resolved && hooks->ObjectWalker->InvokeResolvedUFunction(object, resolved, params);
-			}
-			__except (EXCEPTION_EXECUTE_HANDLER)
-			{
-				return false;
-			}
-		}
-
-		bool Invoke(SDK::UObject* object, const char* cls, const char* function, void* params)
-		{
-			IPluginHooks* hooks = GetHooks();
-			if (!object || !hooks || !hooks->ObjectWalker || !hooks->ObjectWalker->ResolveUFunction
-				|| !hooks->ObjectWalker->InvokeResolvedUFunction || !OnGameThread())
-				return false;
-			return Invoke_SEH(hooks, object, cls, function, params);
-		}
 
 		bool SetMode(SDK::UCharacterMovementComponent* comp, uint8_t mode)
 		{
@@ -254,10 +221,10 @@ namespace OpMoveGame
 
 		// The player's current movement component, for the ledger to move a held toggle onto after a
 		// respawn.
-		CheatLedger::Weak RebindMove(void* controller, const CheatLedger::Entry&)
+		CheatLedger::Weak RebindMove(SDK::UObject* character, const CheatLedger::Entry&)
 		{
 			MoveRef ref;
-			if (!OnGameThread() || !Capture_SEH(controller, &ref) || !ref.Get())
+			if (!OnGameThread() || !CaptureFrom_SEH(character, &ref) || !ref.Get())
 				return {};
 			return CheatLedgerGame::MakeWeak(static_cast<SDK::UObject*>(ref.Get()));
 		}
@@ -271,7 +238,7 @@ namespace OpMoveGame
 			if (!OnGameThread() || !Available())
 				return false;
 			MoveRef ref;
-			return Capture_SEH(ctx.controller, &ref) && ref.Get() != nullptr;
+			return Capture(ctx.controller, &ref) && ref.Get() != nullptr;
 		}
 
 		bool Flying(const std::string& playerId)
@@ -325,7 +292,7 @@ namespace OpMoveGame
 			}
 
 			MoveRef ref;
-			if (!Capture_SEH(ctx.controller, &ref))
+			if (!Capture(ctx.controller, &ref))
 				return false;
 			SDK::UCharacterMovementComponent* comp = ref.Get();
 			if (!comp)
@@ -356,7 +323,7 @@ namespace OpMoveGame
 			}
 
 			MoveRef ref;
-			if (!Capture_SEH(ctx.controller, &ref))
+			if (!Capture(ctx.controller, &ref))
 				return false;
 			SDK::UCharacterMovementComponent* comp = ref.Get();
 			if (!comp)

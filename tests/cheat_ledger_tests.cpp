@@ -3,6 +3,7 @@
 //   cl /nologo /EHsc /std:c++17 /Isrc tests\cheat_ledger_tests.cpp src\cheats\cheat_ledger.cpp /Fe:cheat_ledger_tests.exe
 //   cheat_ledger_tests.exe
 #include "cheats/cheat_ledger.h"
+#include "pawn_kind.h"
 
 #include <cstdio>
 #include <map>
@@ -32,6 +33,8 @@ struct Rig
 	std::set<std::string> connected;        // player ids connected now
 	std::map<std::string, int32_t> pawn;    // player id -> the index of the object their pawn has now (none: no pawn)
 	std::set<std::string> vehicle;          // player ids who possess something that is not their character
+	std::set<std::string> spectator;        // player ids who hold a spectator pawn (their character died)
+	int stanceCalls = 0;                    // pawn reads, one per controller per tick expected
 	bool failWrites = false;                // every write fails
 	bool gameThread = true;
 	uint64_t now = 1000;
@@ -49,22 +52,30 @@ struct Rig
 		env.read = [this](const Entry& e) { auto it = live.find(Key(e)); return it == live.end() ? Value() : it->second; };
 		env.write = [this](const Entry& e, const Value& v) { if (failWrites) return false; live[Key(e)] = v; ++writes; return true; };
 		env.alive = [this](const Weak& w) { return !dead.count(w.index); };
-		env.rebind = [this](const Entry& e)
+		env.stance = [this](const Entry& e)
 		{
-			Rebound r;
-			if (vehicle.count(e.playerId))
-			{
-				r.where = Rebound::Where::Elsewhere;
-				return r;
-			}
+			++stanceCalls;
+			const bool inVehicle = vehicle.count(e.playerId) != 0;
+			const bool inSpectator = spectator.count(e.playerId) != 0;
 			const auto it = pawn.find(e.playerId);
-			if (it != pawn.end())
+			const bool isCharacter = !inVehicle && !inSpectator && it != pawn.end();
+			Stance st;
+			switch (ClassifyPawn(inVehicle || inSpectator || it != pawn.end(), isCharacter, inSpectator))
 			{
-				r.where = Rebound::Where::Character;
-				r.target = Weak{ it->second, 1, 2, 0x2000 };
+			case PawnKind::Character:
+				st.where = Stance::Where::Character;
+				st.character = Weak{ it->second, 1, 2, 0x2000 };
+				break;
+			case PawnKind::Other:
+				st.where = Stance::Where::Elsewhere;
+				break;
+			case PawnKind::None:
+				break;
 			}
-			return r;
+			return st;
 		};
+		// The rig's character is the object the value lives on.
+		env.rebind = [](const Entry&, const Weak& character) { return character; };
 		env.allowed = [this](Entry& e)
 		{
 			// Connected owner: live state, refreshed into the entry. Gone owner: the stored state.
@@ -689,11 +700,88 @@ static void SlotPrefixCut()
 	CHECK(SlotPrefix("").empty());
 }
 
+// The pawn is read once per controller per tick, however many entries the player has; a spectator
+// pawn (after death) is no pawn: no park, no write, no vehicle line.
+static void FollowStance()
+{
+	{   // three entries of one controller: one pawn read; a second controller: one more
+		Rig r;
+		r.pawn["A"] = 10;
+		for (const char* slot : { "fly", "speed", "boost" })
+		{
+			r.Seed(10, slot, false);
+			CHECK(r.ledger.Apply(r.Req(Kind::Toggle, "A", slot, true, 10, true)));
+		}
+		r.stanceCalls = 0;
+		r.ledger.Tick();
+		CHECK(r.stanceCalls == 1);
+		r.Seed(11, "fly", false);
+		r.pawn["B"] = 11;
+		Request other = r.Req(Kind::Toggle, "B", "fly", true, 11, true);
+		other.conn = Weak{ 6, 1, 1, 0x1001 };
+		CHECK(r.ledger.Apply(other));
+		r.stanceCalls = 0;
+		r.ledger.Tick();
+		CHECK(r.stanceCalls == 2);
+	}
+	{   // an entry that does not follow reads no pawn
+		Rig r;
+		r.Seed(10, "fly", false);
+		CHECK(r.ledger.Apply(r.Req(Kind::Toggle, "A", "fly", true)));
+		r.stanceCalls = 0;
+		r.ledger.Tick();
+		CHECK(r.stanceCalls == 0);
+	}
+	{   // a spectator pawn after death: nothing parked, written or logged; the next character moves
+		Rig r;
+		r.Seed(10, "fly", false);
+		r.Seed(20, "fly", false);
+		r.pawn["A"] = 10;
+		Request q = r.Req(Kind::Toggle, "A", "fly", true, 10, true);
+		q.pin = true;
+		CHECK(r.ledger.Apply(q));
+		const int writesBefore = r.writes;
+		const size_t logsBefore = r.logs.size();
+		r.dead.insert(10);
+		r.spectator.insert("A");
+		for (int i = 0; i < 3; ++i)
+		{
+			r.now += kFollowSettleMs;
+			r.ledger.Tick();
+		}
+		CHECK(r.writes == writesBefore);
+		CHECK(r.logs.size() == logsBefore);
+		CHECK(!Has(r.logs, "vehicle"));
+		const Entry* e = r.ledger.Find(Kind::Toggle, "A", "feat", "fly");
+		CHECK(e && !e->parked && e->applied == Value(true));
+		r.spectator.erase("A");
+		r.pawn["A"] = 20;
+		r.Respawned();
+		CHECK(r.Live(20, "fly") == Value(true));
+		e = r.ledger.Find(Kind::Toggle, "A", "feat", "fly");
+		CHECK(e && !e->parked && e->target.index == 20 && e->prior == Value(false));
+	}
+}
+
+// The pawn classes the cheats and the admin endpoints tell apart.
+static void PawnClasses()
+{
+	CHECK(ClassifyPawn(false, false, false) == PawnKind::None);    // no pawn
+	CHECK(ClassifyPawn(false, true, false) == PawnKind::None);     // no pawn wins over stray flags
+	CHECK(ClassifyPawn(false, false, true) == PawnKind::None);
+	CHECK(ClassifyPawn(true, true, false) == PawnKind::Character); // their character
+	CHECK(ClassifyPawn(true, true, true) == PawnKind::Character);  // a character is never a spectator
+	CHECK(ClassifyPawn(true, false, false) == PawnKind::Other);    // a vehicle
+	CHECK(ClassifyPawn(true, false, true) == PawnKind::None);      // a spectator pawn is no pawn
+}
+
 int main()
 {
 	Toggles();
 	Follow();
 	FollowVehicle();
+	FollowStance();
+	PawnClasses();
 	Overrides();
 	Grants();
 	OthersChange();

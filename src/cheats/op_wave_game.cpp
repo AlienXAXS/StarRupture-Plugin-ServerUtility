@@ -5,6 +5,7 @@
 #include "host_rules/player_list.h"
 #include "admin/endpoints/wave_common.h"
 #include "plugin_helpers.h"
+#include "game_access.h"
 #include "plugin_map.h"
 #include "server_utility_fields.h"
 
@@ -17,15 +18,11 @@ namespace OpWaveGame
 {
 	namespace
 	{
+		using GameAccess::OnGameThread;
+
 		constexpr const char* kFeature = "rupture-wave";
 		constexpr const char* kSlot    = "pause";
 		constexpr const char* kClass   = "CrEnviroWaveSubsystem";
-
-		bool OnGameThread()
-		{
-			IPluginHooks* hooks = GetHooks();
-			return hooks && hooks->Engine && hooks->Engine->IsGameThread();
-		}
 
 		// Looks the wave subsystem up and calls one of its functions by name; params is the call's
 		// parameter block, or null for a function without parameters. The subsystem pointer lives

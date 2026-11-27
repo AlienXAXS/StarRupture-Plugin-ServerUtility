@@ -16,13 +16,7 @@ namespace OpPlant
 		std::map<std::string, int> g_mult;
 		std::atomic<int> g_active{ 0 };
 
-		CheatDispatch::Result Make(CheatWire::Status status, const std::string& text)
-		{
-			CheatDispatch::Result r;
-			r.status = status;
-			r.reason = text;
-			return r;
-		}
+		using CheatDispatch::Make;
 
 		void Audit(const CheatDispatch::Context& ctx, uint32_t reqId, const std::string& what)
 		{

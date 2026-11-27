@@ -4,6 +4,7 @@
 #include "host_rules/ingame_admin.h"
 #include "host_rules/player_list.h"
 #include "plugin_helpers.h"
+#include "game_access.h"
 #include "server_utility_fields.h"
 #include "plugin_map.h"
 #include "object_ref.h"
@@ -21,6 +22,10 @@ namespace OpMineGame
 {
 	namespace
 	{
+		using GameAccess::OnGameThread;
+		using GameAccess::World;
+		using GameAccess::Invoke;
+
 		constexpr const char* kLibraryClass   = "AbilitySystemBlueprintLibrary";
 		constexpr const char* kComponentClass = "AbilitySystemComponent";
 		constexpr const wchar_t* kHeatTag     = L"Cheat.UnlimitedWeaponHeat";
@@ -37,20 +42,6 @@ namespace OpMineGame
 		SDK::FName g_heatName;
 		bool       g_heatNameSet = false;
 
-		bool OnGameThread()
-		{
-			IPluginHooks* hooks = GetHooks();
-			return hooks && hooks->Engine && hooks->Engine->IsGameThread();
-		}
-
-		// Null off the game thread: every engine and UObject access in this file starts here.
-		SDK::UWorld* World()
-		{
-			if (!OnGameThread())
-				return nullptr;
-			return static_cast<SDK::UWorld*>(PluginSdkRuntime::GetWorld());
-		}
-
 		bool Available()
 		{
 			return ServerUtilityFields::CheatMine.On();
@@ -58,23 +49,16 @@ namespace OpMineGame
 
 		// ---- Boost
 
-		// The caller's player character and its mining boost attribute set, as weak references.
-		// False when the controller has no player character or no set. No C++ objects needing
-		// unwinding in this frame: SEH is legal.
-		bool Capture_SEH(void* controller, PawnRef* pawnOut, SetRef* setOut)
+		// A player character and its mining boost attribute set, as weak references. False when the
+		// character is null or has no set. No C++ objects needing unwinding in this frame: SEH is legal.
+		bool CaptureFrom_SEH(SDK::UObject* character, PawnRef* pawnOut, SetRef* setOut)
 		{
 			__try
 			{
-				auto* pc = static_cast<SDK::APlayerController*>(controller);
-				if (!pc)
-					return false;
-				SDK::APawn* pawn = pc->K2_GetPawn();
-				if (!pawn || !pawn->IsA(SDK::ACrCharacterPlayerBase::StaticClass()))
-					return false;
-				SDK::UCrMiningBoostAttributeSet** setAt = ServerUtilityFields::CharacterMiningBoost.In(pawn);
+				SDK::UCrMiningBoostAttributeSet** setAt = ServerUtilityFields::CharacterMiningBoost.In(character);
 				if (!setAt || !*setAt)
 					return false;
-				pawnOut->Set(static_cast<SDK::ACrCharacterPlayerBase*>(pawn));
+				pawnOut->Set(static_cast<SDK::ACrCharacterPlayerBase*>(character));
 				setOut->Set(*setAt);
 				return true;
 			}
@@ -82,6 +66,13 @@ namespace OpMineGame
 			{
 				return false;
 			}
+		}
+
+		// The caller's player character and its mining boost attribute set. False when the controller
+		// has no player character or the character has no set.
+		bool Capture(void* controller, PawnRef* pawnOut, SetRef* setOut)
+		{
+			return CaptureFrom_SEH(GameAccess::CharacterOf(controller), pawnOut, setOut);
 		}
 
 		// The boost's four values: current base, current current, max base, max current.
@@ -144,30 +135,6 @@ namespace OpMineGame
 		}
 
 		// ---- Heat tag
-
-		// Calls one reflected function through the loader's ProcessEvent path. params is the call's
-		// parameter block. No C++ objects needing unwinding in this frame: SEH is legal.
-		bool Invoke_SEH(IPluginHooks* hooks, SDK::UObject* object, const char* cls, const char* function, void* params)
-		{
-			__try
-			{
-				void* resolved = hooks->ObjectWalker->ResolveUFunction(cls, function);
-				return resolved && hooks->ObjectWalker->InvokeResolvedUFunction(object, resolved, params);
-			}
-			__except (EXCEPTION_EXECUTE_HANDLER)
-			{
-				return false;
-			}
-		}
-
-		bool Invoke(SDK::UObject* object, const char* cls, const char* function, void* params)
-		{
-			IPluginHooks* hooks = GetHooks();
-			if (!object || !hooks || !hooks->ObjectWalker || !hooks->ObjectWalker->ResolveUFunction
-				|| !hooks->ObjectWalker->InvokeResolvedUFunction || !OnGameThread())
-				return false;
-			return Invoke_SEH(hooks, object, cls, function, params);
-		}
 
 		// The ability library's default object, which its static functions are called on.
 		SDK::UObject* LibraryObject_SEH()
@@ -331,20 +298,20 @@ namespace OpMineGame
 
 		// The player's current mining boost set, and their current character for the heat tag, for the
 		// ledger to move a held toggle onto after a respawn.
-		CheatLedger::Weak RebindBoost(void* controller, const CheatLedger::Entry&)
+		CheatLedger::Weak RebindBoost(SDK::UObject* character, const CheatLedger::Entry&)
 		{
 			PawnRef pawnRef;
 			SetRef setRef;
-			if (!OnGameThread() || !Capture_SEH(controller, &pawnRef, &setRef) || !setRef.Get())
+			if (!OnGameThread() || !CaptureFrom_SEH(character, &pawnRef, &setRef) || !setRef.Get())
 				return {};
 			return CheatLedgerGame::MakeWeak(static_cast<SDK::UObject*>(setRef.Get()));
 		}
 
-		CheatLedger::Weak RebindHeat(void* controller, const CheatLedger::Entry&)
+		CheatLedger::Weak RebindHeat(SDK::UObject* character, const CheatLedger::Entry&)
 		{
 			PawnRef pawnRef;
 			SetRef setRef;
-			if (!OnGameThread() || !Capture_SEH(controller, &pawnRef, &setRef) || !pawnRef.Get())
+			if (!OnGameThread() || !CaptureFrom_SEH(character, &pawnRef, &setRef) || !pawnRef.Get())
 				return {};
 			return CheatLedgerGame::MakeWeak(static_cast<SDK::UObject*>(pawnRef.Get()));
 		}
@@ -395,7 +362,7 @@ namespace OpMineGame
 
 			PawnRef pawnRef;
 			SetRef setRef;
-			if (!Capture_SEH(ctx.controller, &pawnRef, &setRef))
+			if (!Capture(ctx.controller, &pawnRef, &setRef))
 				return false;
 			SDK::ACrCharacterPlayerBase* pawn = pawnRef.Get();
 			SDK::UCrMiningBoostAttributeSet* set = setRef.Get();

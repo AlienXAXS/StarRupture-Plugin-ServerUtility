@@ -6,13 +6,7 @@ namespace OpEnemy
 	{
 		Env g_env;
 
-		CheatDispatch::Result Make(CheatWire::Status status, const std::string& text)
-		{
-			CheatDispatch::Result r;
-			r.status = status;
-			r.reason = text;
-			return r;
-		}
+		using CheatDispatch::Make;
 
 		// on|off only.
 		bool ParseSwitch(const std::string& text, bool& out)

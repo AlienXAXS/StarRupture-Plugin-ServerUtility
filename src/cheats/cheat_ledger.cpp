@@ -1,6 +1,7 @@
 #include "cheat_ledger.h"
 
 #include <cstdio>
+#include <utility>
 
 namespace CheatLedger
 {
@@ -260,22 +261,41 @@ namespace CheatLedger
 
 	void Ledger::FollowTick()
 	{
-		if (!m_env.rebind)
+		if (!m_env.stance || !m_env.rebind)
 			return;
+		// One read of the pawn per controller per tick: a player with many follow entries (a lock
+		// per stat) is asked once.
+		std::vector<std::pair<Weak, Stance>> stances;
 		for (auto& kv : m_entries)
 		{
 			Entry& e = kv.second;
 			if (!e.follow || e.kind != Kind::Toggle)
 				continue;
-			const Rebound now = m_env.rebind(e);
+			Stance stance;
+			bool known = false;
+			for (const auto& seen : stances)
+			{
+				if (seen.first == e.conn)
+				{
+					stance = seen.second;
+					known = true;
+					break;
+				}
+			}
+			if (!known)
+			{
+				stance = m_env.stance(e);
+				stances.emplace_back(e.conn, stance);
+			}
 			// A vehicle gets no write; the character goes back to what it was.
-			if (now.where == Rebound::Where::Elsewhere)
+			if (stance.where == Stance::Where::Elsewhere)
 			{
 				Park(e);
 				continue;
 			}
+			const Weak target = stance.where == Stance::Where::Character ? m_env.rebind(e, stance.character) : Weak();
 			// No pawn yet: the entry waits, still held. Same object, never parked: nothing to move.
-			if (now.where != Rebound::Where::Character || !now.target.Valid() || (!e.parked && now.target == e.target))
+			if (!target.Valid() || (!e.parked && target == e.target))
 			{
 				e.settling = Weak();
 				continue;
@@ -289,9 +309,9 @@ namespace CheatLedger
 			if (m_env.nowMs)
 			{
 				const uint64_t t = m_env.nowMs();
-				if (!(e.settling == now.target))
+				if (!(e.settling == target))
 				{
-					e.settling = now.target;
+					e.settling = target;
 					e.settleSinceMs = t;
 					continue;
 				}
@@ -300,7 +320,7 @@ namespace CheatLedger
 			}
 
 			Entry moved = e;
-			moved.target = now.target;
+			moved.target = target;
 			moved.prior = m_env.read(moved);
 			if (std::holds_alternative<std::monostate>(moved.prior) || !m_env.write(moved, e.applied))
 			{

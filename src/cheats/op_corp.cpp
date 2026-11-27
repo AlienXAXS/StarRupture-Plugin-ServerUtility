@@ -6,13 +6,7 @@ namespace OpCorp
 	{
 		Env g_env;
 
-		CheatDispatch::Result Make(CheatWire::Status status, const std::string& text)
-		{
-			CheatDispatch::Result r;
-			r.status = status;
-			r.reason = text;
-			return r;
-		}
+		using CheatDispatch::Make;
 	}
 
 	std::string TextSet(int points) { return "Data points set to " + std::to_string(points) + "."; }

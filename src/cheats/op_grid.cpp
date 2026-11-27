@@ -9,13 +9,7 @@ namespace OpGrid
 	{
 		Env g_env;
 
-		CheatDispatch::Result Make(CheatWire::Status status, const std::string& text)
-		{
-			CheatDispatch::Result r;
-			r.status = status;
-			r.reason = text;
-			return r;
-		}
+		using CheatDispatch::Make;
 
 		// A whole number from request text. False for anything else.
 		bool ParseInt(const std::string* text, int& out)

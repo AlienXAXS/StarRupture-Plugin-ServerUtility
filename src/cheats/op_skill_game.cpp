@@ -3,6 +3,7 @@
 #include "cheat_ledger_game.h"
 #include "host_rules/player_list.h"
 #include "plugin_helpers.h"
+#include "game_access.h"
 #include "server_utility_fields.h"
 #include "plugin_map.h"
 
@@ -15,19 +16,8 @@ namespace OpSkillGame
 {
 	namespace
 	{
-		bool OnGameThread()
-		{
-			IPluginHooks* hooks = GetHooks();
-			return hooks && hooks->Engine && hooks->Engine->IsGameThread();
-		}
-
-		// Null off the game thread: every engine and UObject access in this file starts here.
-		SDK::UWorld* World()
-		{
-			if (!OnGameThread())
-				return nullptr;
-			return static_cast<SDK::UWorld*>(PluginSdkRuntime::GetWorld());
-		}
+		using GameAccess::OnGameThread;
+		using GameAccess::World;
 
 		bool Available()
 		{

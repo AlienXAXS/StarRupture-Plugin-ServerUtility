@@ -8,6 +8,7 @@
 #  include "SDK/Chimera_classes.hpp"
 #  include "SDK/AuItems_classes.hpp"
 #  include "server_utility_fields.h"
+#  include "game_access.h"
 #  include "item_lookup.h"
 #  include "../../rcon/listed_players.h"
 #  define INV_HAS_SDK 1
@@ -45,13 +46,12 @@ static const char* GiveItem_SEH(int playerIndex, const wchar_t* expectedName, co
 		SDK::APlayerController* pc = static_cast<SDK::APlayerController*>(ListedPlayers::OwnerOf(ps));
 		if (!pc) return R"({"ok":false,"error":"player has no controller"})";
 
-		SDK::APawn* pawn = pc->K2_GetPawn();
-		if (!pawn) return R"({"ok":false,"error":"player has no pawn"})";
-
-		if (!pawn->IsA(SDK::ACrCharacterPlayerBase::StaticClass()))
+		const GameAccess::PlayerPawn held = GameAccess::PawnOf_SEH(pc);
+		if (held.kind == PawnKind::None) return R"({"ok":false,"error":"player has no pawn"})";
+		if (held.kind != PawnKind::Character)
 			return R"({"ok":false,"error":"player pawn is not a player character"})";
 
-		auto* character = static_cast<SDK::ACrCharacterPlayerBase*>(pawn);
+		auto* character = static_cast<SDK::ACrCharacterPlayerBase*>(held.pawn);
 
 		auto* itemSubsys = static_cast<SDK::UAuItemDataBaseSubsystem*>(
 			SDK::USubsystemBlueprintLibrary::GetWorldSubsystem(

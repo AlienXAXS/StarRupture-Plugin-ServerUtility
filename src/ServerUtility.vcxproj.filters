@@ -141,6 +141,8 @@
     <ClInclude Include="game_signatures.h" />
     <ClInclude Include="scan_helpers.h" />
     <ClInclude Include="server_utility_fields.h" />
+    <ClInclude Include="game_access.h" />
+    <ClInclude Include="pawn_kind.h" />
     <ClInclude Include="plugin_interface.h" />
     <ClInclude Include="hooks\set_password\set_password.h">
       <Filter>hooks\set_password</Filter>

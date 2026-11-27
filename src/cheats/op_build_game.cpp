@@ -5,6 +5,7 @@
 #include "host_rules/player_ids.h"
 #include "host_rules/player_list.h"
 #include "plugin_helpers.h"
+#include "game_access.h"
 #include "SDK/Engine_classes.hpp"
 #include "SDK/Chimera_classes.hpp"
 #include "plugin_map.h"
@@ -20,26 +21,15 @@ namespace OpBuildGame
 {
 	namespace
 	{
+		using GameAccess::OnGameThread;
+		using GameAccess::World;
+
 		constexpr const char* kSlot = "unlock";
 
 		// ACrTechnologyKeeper::CheckAvailableBuildings(keeper, corporation, reputation), as BetterCheats
 		// calls it with no corporation: with the unlock flag set it rebuilds the buildings on offer.
 		using CheckFn = void(__fastcall*)(void* keeper, void* corporation, int64_t reputation);
 		CheckFn g_check = nullptr;
-
-		bool OnGameThread()
-		{
-			IPluginHooks* hooks = GetHooks();
-			return hooks && hooks->Engine && hooks->Engine->IsGameThread();
-		}
-
-		// Null off the game thread: every engine and UObject access in this file starts here.
-		SDK::UWorld* World()
-		{
-			if (!OnGameThread())
-				return nullptr;
-			return static_cast<SDK::UWorld*>(PluginSdkRuntime::GetWorld());
-		}
 
 		bool InWorld() { return World() != nullptr; }
 

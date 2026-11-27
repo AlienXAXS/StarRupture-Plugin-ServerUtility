@@ -19,13 +19,7 @@ namespace OpBuild
 
 		unsigned Bit(Part p) { return 1u << static_cast<int>(p); }
 
-		CheatDispatch::Result Make(CheatWire::Status status, const std::string& text)
-		{
-			CheatDispatch::Result r;
-			r.status = status;
-			r.reason = text;
-			return r;
-		}
+		using CheatDispatch::Make;
 
 		bool PartAvailable(Part p) { return g_env.available && g_env.available(p); }
 

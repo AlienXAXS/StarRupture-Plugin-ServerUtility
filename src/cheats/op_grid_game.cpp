@@ -5,6 +5,7 @@
 #include "host_rules/player_ids.h"
 #include "host_rules/player_list.h"
 #include "plugin_helpers.h"
+#include "game_access.h"
 #include "server_utility_fields.h"
 #include "plugin_map.h"
 #include "object_ref.h"
@@ -18,26 +19,16 @@ namespace OpGridGame
 {
 	namespace
 	{
+		using GameAccess::OnGameThread;
+		using GameAccess::World;
+		using GameAccess::Invoke;
+
 		constexpr const char* kClass    = "CrInventoryComponent";
 		constexpr const char* kFunction = "ServerResizeInventory";
 		constexpr const char* kSlot     = "grid";
 		constexpr int kMaxControllers   = 128;
 
 		using InventoryRef = ObjectRef<SDK::UCrInventoryComponent>;
-
-		bool OnGameThread()
-		{
-			IPluginHooks* hooks = GetHooks();
-			return hooks && hooks->Engine && hooks->Engine->IsGameThread();
-		}
-
-		// Null off the game thread: every engine and UObject access in this file starts here.
-		SDK::UWorld* World()
-		{
-			if (!OnGameThread())
-				return nullptr;
-			return static_cast<SDK::UWorld*>(PluginSdkRuntime::GetWorld());
-		}
 
 		bool Available()
 		{
@@ -51,13 +42,10 @@ namespace OpGridGame
 		{
 			__try
 			{
-				auto* pc = static_cast<SDK::APlayerController*>(controller);
-				if (!pc)
+				SDK::ACrCharacterPlayerBase* character = GameAccess::CharacterOf(controller);
+				if (!character)
 					return false;
-				SDK::APawn* pawn = pc->K2_GetPawn();
-				if (!pawn || !pawn->IsA(SDK::ACrCharacterPlayerBase::StaticClass()))
-					return false;
-				SDK::UCrInventoryComponent** invAt = ServerUtilityFields::InventoryComponent.In(pawn);
+				SDK::UCrInventoryComponent** invAt = ServerUtilityFields::InventoryComponent.In(character);
 				if (!invAt || !*invAt)
 					return false;
 				out->Set(*invAt);
@@ -128,30 +116,10 @@ namespace OpGridGame
 			}
 		}
 
-		// Calls the resize as the server does, with the loader's ProcessEvent path. params is the
-		// call's parameter block. No C++ objects needing unwinding in this frame: SEH is legal.
-		bool CallResize_SEH(IPluginHooks* hooks, SDK::UCrInventoryComponent* inv, void* params)
-		{
-			__try
-			{
-				void* resolved = hooks->ObjectWalker->ResolveUFunction(kClass, kFunction);
-				return resolved && hooks->ObjectWalker->InvokeResolvedUFunction(inv, resolved, params);
-			}
-			__except (EXCEPTION_EXECUTE_HANDLER)
-			{
-				return false;
-			}
-		}
-
 		// Asks the game for one resize. False when the call could not be made; the engine refuses
 		// silently, so a true result says only that the call ran (the caller reads the grid back).
 		bool CallResize(const InventoryRef& ref, int cols, int rows)
 		{
-			IPluginHooks* hooks = GetHooks();
-			if (!hooks || !hooks->ObjectWalker || !hooks->ObjectWalker->ResolveUFunction
-				|| !hooks->ObjectWalker->InvokeResolvedUFunction)
-				return false;
-
 			PluginMap::ParamsBlock block = PluginMap::ParamsBlockOf(ServerUtilityFields::ResizeInventorySize,
 				{ &ServerUtilityFields::ResizeInventoryColumns, &ServerUtilityFields::ResizeInventoryRows });
 			uint8_t* colAt = block.Param("Columns");
@@ -164,7 +132,7 @@ namespace OpGridGame
 			*reinterpret_cast<int32_t*>(rowAt) = rows;
 
 			SDK::UCrInventoryComponent* inv = ref.Get();
-			return inv && CallResize_SEH(hooks, inv, block.Data());
+			return inv && Invoke(inv, kClass, kFunction, block.Data());
 		}
 
 		// The one connected player with this ID, or null. Game thread; the controller is only used in

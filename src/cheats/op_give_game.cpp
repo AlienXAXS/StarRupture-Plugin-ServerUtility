@@ -4,6 +4,7 @@
 #include "host_rules/player_list.h"
 #include "admin/endpoints/item_lookup.h"
 #include "plugin_helpers.h"
+#include "game_access.h"
 #include "plugin_map.h"
 #include "server_utility_fields.h"
 
@@ -78,11 +79,11 @@ namespace OpGiveGame
 				SDK::UAuItemDataBase* entry = FindItemByPath(itemSubsys, assetPath, err, errCap);
 				if (!entry) { out->failure = Outcome::NoItem; return false; }
 
-				SDK::APawn* pawn = pc->K2_GetPawn();
-				if (!pawn || !pawn->IsA(SDK::ACrCharacterPlayerBase::StaticClass()))
+				SDK::ACrCharacterPlayerBase* character = GameAccess::CharacterOf(pc);
+				if (!character)
 				{ out->failure = Outcome::NoCharacter; return false; }
 
-				SDK::UCrInventoryComponent** invAt = ServerUtilityFields::InventoryComponent.In(pawn);
+				SDK::UCrInventoryComponent** invAt = ServerUtilityFields::InventoryComponent.In(character);
 				out->inventory = invAt ? *invAt : nullptr;
 				if (!out->inventory) { out->failure = Outcome::NoCharacter; return false; }
 

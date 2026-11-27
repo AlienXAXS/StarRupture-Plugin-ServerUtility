@@ -61,17 +61,18 @@ namespace CheatLedger
 
 	enum class Kind { Toggle, Override };
 
-	// Where a follow entry's player stands now, as the glue sees it.
-	struct Rebound
+	// Where a follow entry's player stands now, as the glue sees it. Read once per controller per
+	// tick, whatever number of entries the player has.
+	struct Stance
 	{
 		enum class Where
 		{
-			NoPawn,       // no pawn, or a character whose value is not reachable yet: the entry waits
+			NoPawn,       // no pawn (a spectator pawn counts as none), or a character not reachable yet: the entry waits
 			Elsewhere,    // possessing something that is not their character (a vehicle)
-			Character     // their character: target is the object the value lives on
+			Character     // their live player character
 		};
 		Where where = Where::NoPawn;
-		Weak  target;
+		Weak  character;   // Where::Character: that character, for this tick only
 	};
 
 	struct Entry
@@ -117,9 +118,13 @@ namespace CheatLedger
 		// Write a value to the entry's slot; false when it could not be written.
 		std::function<bool(const Entry&, const Value&)>   write;
 		std::function<bool(const Weak&)>                  alive;
-		// For a follow entry: where the player stands and, on their character, the object the
-		// player's value now belongs on (the character's component or set). Game thread.
-		std::function<Rebound(const Entry&)>              rebind;
+		// For a follow entry: where the player stands now. Game thread. The follow step calls it once
+		// per controller per tick and shares the answer between that controller's entries.
+		std::function<Stance(const Entry&)>               stance;
+		// For a follow entry whose player stands on their character: the object the entry's value
+		// belongs on (the character's component or set), as a weak reference; invalid while the
+		// character has none yet. Game thread.
+		std::function<Weak(const Entry&, const Weak&)>    rebind;
 		// Whether the feature is still allowed for the entry's owner. While the owner is connected
 		// the glue refreshes e.ownerProven; once they are gone it decides from the stored value.
 		std::function<Allowance(Entry&)>                  allowed;

@@ -403,6 +403,8 @@
     <ClInclude Include="object_serial.h" />
     <ClInclude Include="policy_map.h" />
     <ClInclude Include="server_utility_fields.h" />
+    <ClInclude Include="game_access.h" />
+    <ClInclude Include="pawn_kind.h" />
     <ClInclude Include="plugin_interface.h" />
     <ClInclude Include="rcon\commands\cmd_save.h" />
     <ClInclude Include="rcon\rcon.h" />

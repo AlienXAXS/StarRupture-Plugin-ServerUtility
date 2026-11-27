@@ -6,13 +6,7 @@ namespace OpStack
 	{
 		Env g_env;
 
-		CheatDispatch::Result Make(CheatWire::Status status, const std::string& text)
-		{
-			CheatDispatch::Result r;
-			r.status = status;
-			r.reason = text;
-			return r;
-		}
+		using CheatDispatch::Make;
 
 		CheatDispatch::Result Done(const std::string& text, int size)
 		{

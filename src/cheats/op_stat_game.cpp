@@ -5,6 +5,7 @@
 #include "host_rules/ingame_admin.h"
 #include "host_rules/player_list.h"
 #include "plugin_helpers.h"
+#include "game_access.h"
 #include "server_utility_fields.h"
 #include "plugin_map.h"
 
@@ -20,19 +21,8 @@ namespace OpStatGame
 {
 	namespace
 	{
-		bool OnGameThread()
-		{
-			IPluginHooks* hooks = GetHooks();
-			return hooks && hooks->Engine && hooks->Engine->IsGameThread();
-		}
-
-		// Null off the game thread: every engine and UObject access in this file starts here.
-		SDK::UWorld* World()
-		{
-			if (!OnGameThread())
-				return nullptr;
-			return static_cast<SDK::UWorld*>(PluginSdkRuntime::GetWorld());
-		}
+		using GameAccess::OnGameThread;
+		using GameAccess::World;
 
 		bool Available()
 		{
@@ -99,25 +89,26 @@ namespace OpStatGame
 			return RowOf(std::string_view(slot).substr(prefix));
 		}
 
-		// The caller's attribute set for a stat: the player character's. Used inside the call that
-		// fetched it, never kept (the ledger holds a weak reference). Null when the caller has no player
-		// character or the member did not resolve. No C++ objects with destructors in this frame: SEH is legal.
-		SDK::UObject* FindSet_SEH(void* controller, const Row& row)
+		// A player character's attribute set for a stat. Used inside the call that fetched it, never
+		// kept (the ledger holds a weak reference). Null when the character is null or the member did
+		// not resolve. No C++ objects with destructors in this frame: SEH is legal.
+		SDK::UObject* SetOf_SEH(SDK::UObject* character, const Row& row)
 		{
 			__try
 			{
-				auto* pc = static_cast<SDK::APlayerController*>(controller);
-				if (!pc)
-					return nullptr;
-				SDK::APawn* pawn = pc->K2_GetPawn();
-				if (!pawn || !pawn->IsA(SDK::ACrCharacterPlayerBase::StaticClass()))
-					return nullptr;
-				return row.set(pawn);
+				return character ? row.set(character) : nullptr;
 			}
 			__except (EXCEPTION_EXECUTE_HANDLER)
 			{
 				return nullptr;
 			}
+		}
+
+		// The caller's attribute set for a stat: their player character's. Null when the caller has no
+		// player character or the member did not resolve.
+		SDK::UObject* FindSet(void* controller, const Row& row)
+		{
+			return SetOf_SEH(GameAccess::CharacterOf(controller), row);
 		}
 
 		// The stat's base and current value. False on a fault or an unresolved member.
@@ -203,12 +194,12 @@ namespace OpStatGame
 
 		// The player's current attribute set for a lock's stat, for the ledger to move a held lock onto
 		// after a respawn.
-		CheatLedger::Weak RebindLock(void* controller, const CheatLedger::Entry& e)
+		CheatLedger::Weak RebindLock(SDK::UObject* character, const CheatLedger::Entry& e)
 		{
 			const Row* row = RowOfSlot(e.slot);
 			if (!row || !OnGameThread())
 				return {};
-			return CheatLedgerGame::MakeWeak(FindSet_SEH(controller, *row));
+			return CheatLedgerGame::MakeWeak(SetOf_SEH(character, *row));
 		}
 
 		// ---- OpStat::Env
@@ -231,7 +222,7 @@ namespace OpStatGame
 			const Row* row = RowOf(stat);
 			if (!row || !World())
 				return std::nullopt;
-			SDK::UObject* set = FindSet_SEH(ctx.controller, *row);
+			SDK::UObject* set = FindSet(ctx.controller, *row);
 			float lo = 0.0f, hi = 0.0f;
 			if (!set || !ReadRange_SEH(set, *row, &lo, &hi))
 				return std::nullopt;
@@ -243,7 +234,7 @@ namespace OpStatGame
 			const Row* row = RowOf(stat);
 			if (!row || !World())
 				return std::nullopt;
-			SDK::UObject* set = FindSet_SEH(ctx.controller, *row);
+			SDK::UObject* set = FindSet(ctx.controller, *row);
 			float base = 0.0f, current = 0.0f;
 			if (!set || !ReadPair_SEH(set, *row, &base, &current))
 				return std::nullopt;
@@ -278,7 +269,7 @@ namespace OpStatGame
 			if (!pinned && !value)
 				return false;
 
-			SDK::UObject* set = FindSet_SEH(ctx.controller, *row);
+			SDK::UObject* set = FindSet(ctx.controller, *row);
 			if (!set)
 				return false;
 			float base = 0.0f, current = 0.0f;

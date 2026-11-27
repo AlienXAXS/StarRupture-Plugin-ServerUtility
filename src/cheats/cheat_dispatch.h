@@ -58,6 +58,15 @@ namespace CheatDispatch
 		std::vector<std::pair<std::string, std::string>> fields;
 	};
 
+	// A reply with a status and a reason, and no fields.
+	inline Result Make(CheatWire::Status status, const std::string& text)
+	{
+		Result r;
+		r.status = status;
+		r.reason = text;
+		return r;
+	}
+
 	using Handler = Result (*)(const Context&, const CheatWire::Request&);
 	using Fields  = std::vector<std::pair<std::string, std::string>>;
 	// What `cheat.state` asks an op for: its key=value pairs for this player, or none.

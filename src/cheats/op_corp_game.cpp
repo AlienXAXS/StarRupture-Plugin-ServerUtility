@@ -3,6 +3,7 @@
 #include "cheat_ledger_game.h"
 #include "host_rules/player_list.h"
 #include "plugin_helpers.h"
+#include "game_access.h"
 #include "SDK/Engine_classes.hpp"
 #include "SDK/Chimera_classes.hpp"
 #include "plugin_map.h"
@@ -17,11 +18,7 @@ namespace OpCorpGame
 {
 	namespace
 	{
-		bool OnGameThread()
-		{
-			IPluginHooks* hooks = GetHooks();
-			return hooks && hooks->Engine && hooks->Engine->IsGameThread();
-		}
+		using GameAccess::OnGameThread;
 
 		// The data points of the world's corporations owner, or written when write is set. The
 		// owner pointer lives only inside this call. No C++ objects with destructors in this frame:

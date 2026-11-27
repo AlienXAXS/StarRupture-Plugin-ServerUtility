@@ -1,5 +1,6 @@
 #include "cheat_ledger_game.h"
 #include "cheat_authority.h"
+#include "game_access.h"
 #include "host_rules/admin_ops.h"
 #include "host_rules/host_rules.h"
 #include "host_rules/ingame_admin.h"
@@ -27,29 +28,7 @@ namespace CheatLedgerGame
 		std::map<std::string, Accessor> g_accessors;   // "feature/slot"
 		int                             g_listener = 0;
 
-		bool OnGameThread()
-		{
-			auto* hooks = GetHooks();
-			return hooks && hooks->Engine && hooks->Engine->IsGameThread();
-		}
-
-		// Whether the controller possesses a pawn that is not a player character (a vehicle). No C++
-		// objects needing unwinding in this frame: SEH is legal.
-		bool PossessesNonCharacter_SEH(void* controller)
-		{
-			__try
-			{
-				auto* pc = static_cast<SDK::APlayerController*>(controller);
-				if (!pc)
-					return false;
-				SDK::APawn* pawn = pc->K2_GetPawn();
-				return pawn && !pawn->IsA(SDK::ACrCharacterPlayerBase::StaticClass());
-			}
-			__except (EXCEPTION_EXECUTE_HANDLER)
-			{
-				return false;
-			}
-		}
+		using GameAccess::OnGameThread;
 
 		const Accessor* AccessorFor(const Entry& e)
 		{
@@ -96,21 +75,33 @@ namespace CheatLedgerGame
 				return a->write(obj, e, v);
 			};
 			env.alive = [](const Weak& w) { return Resolve(w) != nullptr; };
-			env.rebind = [](const Entry& e) -> Rebound
+			// The player's pawn, read once. Game thread. A spectator pawn (what a controller holds after
+			// its character died) is no pawn.
+			env.stance = [](const Entry& e) -> Stance
 			{
-				Rebound r;
-				const Accessor* a = AccessorFor(e);
-				if (!a || !a->rebind || !OnGameThread())
-					return r;
+				Stance s;
+				if (!OnGameThread())
+					return s;
 				SDK::UObject* pc = Resolve(e.conn);
 				if (!pc)
-					return r;
-				r.target = a->rebind(pc, e);
-				if (r.target.Valid())
-					r.where = Rebound::Where::Character;
-				else if (PossessesNonCharacter_SEH(pc))
-					r.where = Rebound::Where::Elsewhere;
-				return r;
+					return s;
+				const GameAccess::PlayerPawn p = GameAccess::PawnOf_SEH(pc);
+				if (p.kind == PawnKind::Character)
+				{
+					s.where = Stance::Where::Character;
+					s.character = MakeWeak(p.pawn);
+				}
+				else if (p.kind == PawnKind::Other)
+					s.where = Stance::Where::Elsewhere;
+				return s;
+			};
+			env.rebind = [](const Entry& e, const Weak& character) -> Weak
+			{
+				const Accessor* a = AccessorFor(e);
+				if (!a || !a->rebind || !OnGameThread())
+					return Weak();
+				SDK::UObject* obj = Resolve(character);
+				return obj ? a->rebind(obj, e) : Weak();
 			};
 			env.allowed = [](Entry& e) -> Allowance
 			{

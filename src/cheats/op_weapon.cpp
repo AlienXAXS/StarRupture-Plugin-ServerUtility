@@ -7,13 +7,7 @@ namespace OpWeapon
 	{
 		Env g_env;
 
-		CheatDispatch::Result Make(CheatWire::Status status, const std::string& text)
-		{
-			CheatDispatch::Result r;
-			r.status = status;
-			r.reason = text;
-			return r;
-		}
+		using CheatDispatch::Make;
 
 		// One slot's request: absent, off ("off" or 1), or a multiplier.
 		enum class Want { Absent, Off, Mult, BadText, OutOfRange };
