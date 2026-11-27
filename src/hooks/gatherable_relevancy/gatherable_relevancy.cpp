@@ -22,6 +22,7 @@ static RepGraphActorFn g_addNetworkActor    = nullptr;
 static RepGraphActorFn g_removeNetworkActor = nullptr;
 
 static bool g_installed   = false;
+static bool g_faulted     = false;   // the policy walk faulted: the fix is off until the plugin reloads
 static bool g_livePending = false;   // a world came up; the live-graph half still has to run
 static int  g_liveTicks   = 0;       // ticks spent waiting for the rep actor to appear
 static bool g_seedResync  = true;    // config: push the loaded seed onto the rep actor
@@ -141,23 +142,14 @@ static int PatchClassPolicy(SDK::UCrReplicationGraph* graph, SDK::UClass* cls, u
 		LOG_ERROR("[GatherableFix] The loader has no usable row for the policy map or its key - policy not patched");
 		return -1;
 	}
-	// The map has to lie inside the block the loader's row sizes.
-	if (static_cast<size_t>(PolicyMap::Map.offset) + sizeof(PluginMap::ScriptSetMemory) > sizeof(ClassRepNodePolicyBlock))
+	// The map has to lie inside the block the loader's row sizes on this build.
+	if (!PolicyMap::FitsInBlock(ServerUtilityFields::ClassRepNodePolicies.resolvedSize))
 	{
-		LOG_ERROR("[GatherableFix] The policy map (offset 0x%X) does not lie inside ClassRepNodePolicies - policy not patched",
-		          static_cast<unsigned>(PolicyMap::Map.offset));
+		LOG_ERROR("[GatherableFix] The policy map (offset 0x%X) does not lie inside ClassRepNodePolicies (0x%X bytes on this build) - policy not patched",
+		          static_cast<unsigned>(PolicyMap::Map.offset), static_cast<unsigned>(ServerUtilityFields::ClassRepNodePolicies.resolvedSize));
 		return -1;
 	}
 	const auto base = policies + PolicyMap::Map.offset;
-
-	const PluginMap::ScriptMapView map(base, layout);
-	if (!map)
-	{
-		LOG_ERROR("[GatherableFix] ClassRepNodePolicies map at graph+0x%zX does not look like a TMap (%s) - "
-		          "the layout needs re-deriving for this build",
-		          static_cast<size_t>(base - reinterpret_cast<uint8_t*>(graph)), map.ReasonText());
-		return -1;
-	}
 
 	const int32_t* indexAt = ServerUtilityFields::ObjectIndex.In(cls);
 	if (!indexAt)
@@ -177,29 +169,30 @@ static int PatchClassPolicy(SDK::UCrReplicationGraph* graph, SDK::UClass* cls, u
 		return -1;
 	}
 
-	int changed = 0;
-	map.ForEach([&](uint8_t* key, uint8_t* valueAt)
+	PolicyMap::RetargetResult result;
+	PolicyMap::Retarget_SEH(base, layout, wantIndex, wantSerial, newValue, &result);
+	if (result.status == PolicyMap::RetargetResult::Status::Fault)
 	{
-		int32_t keyIndex = 0, keySerial = 0;
-		PolicyMap::Value value = 0;
-		std::memcpy(&keyIndex,  key + PolicyMap::KeyIndex.offset,  sizeof(keyIndex));
-		std::memcpy(&keySerial, key + PolicyMap::KeySerial.offset, sizeof(keySerial));
-		std::memcpy(&value,     valueAt,                           sizeof(value));
-
-		if (keyIndex != wantIndex)
-			return;
-		if (keySerial != wantSerial)
-		{
-			LOG_WARN("[GatherableFix] Policy entry for object index %d has serial %d, expected %d - skipping",
-			         keyIndex, keySerial, wantSerial);
-			return;
-		}
-
+		g_faulted = true;
+		LOG_ERROR("[GatherableFix] Reading the policy map at graph+0x%zX faulted - the layout needs re-deriving for this build. "
+		          "The gatherable fix is off",
+		          static_cast<size_t>(base - reinterpret_cast<uint8_t*>(graph)));
+		return -1;
+	}
+	if (result.status == PolicyMap::RetargetResult::Status::NotAMap)
+	{
+		LOG_ERROR("[GatherableFix] ClassRepNodePolicies map at graph+0x%zX does not look like a TMap (%s) - "
+		          "the layout needs re-deriving for this build",
+		          static_cast<size_t>(base - reinterpret_cast<uint8_t*>(graph)), result.reason);
+		return -1;
+	}
+	if (result.mismatched > 0)
+		LOG_WARN("[GatherableFix] Policy entry for object index %d has serial %d, expected %d - skipped (%d entr%s)",
+		         wantIndex, result.mismatchSerial, wantSerial, result.mismatched, result.mismatched == 1 ? "y" : "ies");
+	if (result.changed > 0)
 		LOG_INFO("[GatherableFix] Graph %s: %s policy %u -> %u",
-		         graph->GetName().c_str(), cls->GetName().c_str(), value, newValue);
-		std::memcpy(valueAt, &newValue, sizeof(newValue));
-		++changed;
-	});
+		         graph->GetName().c_str(), cls->GetName().c_str(), result.oldValue, newValue);
+	const int changed = result.changed;
 
 	return changed;
 }
@@ -259,6 +252,8 @@ static bool ApplyToLiveGraph()
 	{
 		const int changed = PatchClassPolicy(graph, cls,
 			static_cast<uint32_t>(SDK::EClassRepNodeMapping::RelevantAllConnections));
+		if (g_faulted)
+			break;
 		if (changed < 0)
 			continue;
 		if (changed == 0)
@@ -403,6 +398,8 @@ static void FinishWorld()
 // ---------------------------------------------------------------------------
 static void OnAnyWorldBeginPlay(SDK::UWorld* /*world*/, const char* worldName)
 {
+	if (g_faulted)
+		return;
 	LOG_DEBUG("[GatherableFix] World '%s' began play - scheduling live graph check", worldName ? worldName : "?");
 	g_worldName   = worldName ? worldName : "";
 	g_livePending = true;
@@ -413,6 +410,9 @@ static void OnAnyWorldBeginPlay(SDK::UWorld* /*world*/, const char* worldName)
 
 static void OnTick(float /*deltaSeconds*/)
 {
+	if (g_faulted)
+		return;
+
 	if (g_resyncTicks >= 0 && g_resyncTicks-- == 0)
 	{
 		if (ResyncSeed())
@@ -427,7 +427,9 @@ static void OnTick(float /*deltaSeconds*/)
 	if (ApplyToLiveGraph())
 	{
 		g_livePending = false;
-		if (g_seedResync)
+		if (g_faulted)
+			FinishWorld();
+		else if (g_seedResync)
 			g_resyncTicks = kResyncDelayTicks;
 		else
 			FinishWorld();
