@@ -11,6 +11,7 @@
 #include "cheats/op_weapon.h"
 #include "cheats/op_grid.h"
 #include "cheats/op_mine.h"
+#include "cheats/op_plant.h"
 
 #include <cstdio>
 #include <map>
@@ -1210,6 +1211,132 @@ static void MineTests()
 	CHECK(std::string(OpMine::kFeature) == "mining-tools" && std::string(OpMine::kSlotHeat) == "heat" && std::string(OpMine::kSlotBoost) == "boost");
 }
 
+// A fake plant game: the calls recorded, the hook installs counted.
+struct PlantFake
+{
+	bool available = true;
+	bool world = true;
+	bool callsOk = true;
+	int calls = 0;
+	int installs = 0, removes = 0;
+	uint32_t lastReq = 0;
+	int lastMult = 0;
+
+	OpPlant::Env MakeEnv()
+	{
+		OpPlant::Env e;
+		e.available   = [this] { return available; };
+		e.inWorld     = [this] { return world; };
+		e.apply       = [this](const Context&, uint32_t id, int mult) { ++calls; lastReq = id; lastMult = mult; return callsOk; };
+		e.installHook = [this] { ++installs; return true; };
+		e.removeHook  = [this] { ++removes; };
+		e.log         = [](const std::string&) {};
+		return e;
+	}
+};
+
+static CheatWire::Request PlantReq(const char* mult)
+{
+	CheatWire::Request r;
+	r.id = 19;
+	r.op = "cheat.plant";
+	if (mult) r.fields.emplace_back("mult", mult);
+	return r;
+}
+
+static void PlantTests()
+{
+	const std::string id = "p1";
+	Context ctx;
+	ctx.playerId = &id;
+	PlantFake f;
+	OpPlant::SetEnv(f.MakeEnv());
+	CHECK(OpPlant::Available());
+	CHECK(OpPlant::MultiplierFor("p1") == 1);
+
+	// On: text 22, the field, the call carries the request id, the hook goes in once.
+	{
+		const Result r = OpPlant::Handle(ctx, PlantReq("3"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == "Plant pickup 3x.");
+		CHECK(r.fields == Fields({ { "mult", "3" } }));
+		CHECK(f.calls == 1 && f.lastReq == 19 && f.lastMult == 3 && f.installs == 1);
+		CHECK(OpPlant::MultiplierFor("p1") == 3 && OpPlant::MultiplierFor("p2") == 1);
+		CHECK(OpPlant::StateFields("p1") == Fields({ { "plant", "3" } }));
+		CHECK(OpPlant::StateFields("p2") == Fields({ { "plant", "off" } }));
+	}
+	// A second player or a changed value does not install the hook again.
+	{
+		CHECK(OpPlant::Handle(ctx, PlantReq("5")).reason == "Plant pickup 5x.");
+		OpPlant::SetMultiplier("p2", 2);
+		CHECK(f.installs == 1 && f.removes == 0);
+		OpPlant::SetMultiplier("p2", 1);
+		CHECK(f.removes == 0 && OpPlant::MultiplierFor("p1") == 5);
+	}
+	// Back: text 23 for 1 and off; the last one going back removes the hook.
+	{
+		const Result r = OpPlant::Handle(ctx, PlantReq("1"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == OpPlant::kTextNormal);
+		CHECK(r.fields == Fields({ { "mult", "1" } }));
+		CHECK(f.removes == 1 && OpPlant::MultiplierFor("p1") == 1);
+		CHECK(OpPlant::StateFields("p1") == Fields({ { "plant", "off" } }));
+		OpPlant::Handle(ctx, PlantReq("2"));
+		CHECK(OpPlant::Handle(ctx, PlantReq("off")).reason == OpPlant::kTextNormal);
+		CHECK(f.installs == 2 && f.removes == 2);
+	}
+	// A revert from the ledger (leave, deny, stop) goes through SetMultiplier.
+	{
+		OpPlant::Handle(ctx, PlantReq("4"));
+		OpPlant::SetMultiplier("p1", 1);
+		CHECK(OpPlant::MultiplierFor("p1") == 1 && f.removes == 3);
+	}
+	// Range: 1 to 5 whole numbers, text 24 outside.
+	{
+		for (const char* bad : { "0", "6", "-1", "2.5", "100" })
+		{
+			const int before = f.calls;
+			const Result r = OpPlant::Handle(ctx, PlantReq(bad));
+			CHECK(r.status == CheatWire::Status::Refused && r.reason == "Plant pickup must be 1 to 5." && f.calls == before);
+		}
+	}
+	// Bad text, nothing to do.
+	{
+		const int before = f.calls;
+		CHECK(OpPlant::Handle(ctx, PlantReq("lots")).reason == CheatDispatch::kTextBadRequest);
+		CHECK(OpPlant::Handle(ctx, PlantReq(nullptr)).reason == CheatDispatch::kTextBadRequest);
+		CHECK(f.calls == before);
+	}
+	// No world: error, no call.
+	{
+		f.world = false;
+		const int before = f.calls;
+		const Result r = OpPlant::Handle(ctx, PlantReq("2"));
+		CHECK(r.status == CheatWire::Status::Error && r.reason == "Not in a world right now." && f.calls == before);
+		f.world = true;
+	}
+	// A failed call: error, the multiplier is not recorded.
+	{
+		f.callsOk = false;
+		const Result r = OpPlant::Handle(ctx, PlantReq("2"));
+		CHECK(r.status == CheatWire::Status::Error && r.reason == "Couldn't change your plant pickup on this server.");
+		CHECK(OpPlant::MultiplierFor("p1") == 1);
+		f.callsOk = true;
+	}
+	// Off in cap: refused with the off text.
+	{
+		f.available = false;
+		CHECK(!OpPlant::Available());
+		CHECK(OpPlant::Handle(ctx, PlantReq("2")).reason == OpPlant::kTextOff);
+		f.available = true;
+	}
+
+	// No env at all: off, no state fields.
+	OpPlant::SetEnv(OpPlant::Env());
+	CHECK(!OpPlant::Available());
+	CHECK(OpPlant::StateFields("p1").empty());
+
+	CHECK(std::string(OpPlant::kFeature) == "inventory" && std::string(OpPlant::kSlot) == "plant");
+}
+
 int main()
 {
 	const Context ctx;
@@ -1218,6 +1345,7 @@ int main()
 	WeaponTests();
 	GridTests();
 	MineTests();
+	PlantTests();
 	WaveTests();
 	StackTests();
 	CorpTests();

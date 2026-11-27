@@ -13,6 +13,7 @@
 #include "cheats/op_weapon.h"
 #include "cheats/op_grid.h"
 #include "cheats/op_mine.h"
+#include "cheats/op_plant.h"
 
 #include <cstdio>
 #include <optional>
@@ -93,9 +94,9 @@ int main()
 		CHECK(fresh.Idle(0));
 	}
 
-	// The op table: thirteen ops. Give, wave, stack, corp, power and enemy have a handler (with an `available` hook); the rest are stubs.
+	// The op table: fourteen ops. Give, wave, stack, corp, power and enemy have a handler (with an `available` hook); the rest are stubs.
 	{
-		CHECK(Ops().size() == 13);
+		CHECK(Ops().size() == 14);
 		for (const OpEntry& op : Ops())
 		{
 			CHECK(op.version == 1 && op.feature && *op.feature);
@@ -115,6 +116,8 @@ int main()
 				CHECK(op.run == &OpWeapon::Handle && op.available == &OpWeapon::Available && op.state == &OpWeapon::StateFields);
 			else if (std::strcmp(op.name, "cheat.grid") == 0)
 				CHECK(op.run == &OpGrid::Handle && op.available == &OpGrid::Available && op.state == &OpGrid::StateFields);
+			else if (std::strcmp(op.name, "cheat.plant") == 0)
+				CHECK(op.run == &OpPlant::Handle && op.available == &OpPlant::Available && op.state == &OpPlant::StateFields);
 			else if (std::strcmp(op.name, "cheat.mine") == 0)
 				CHECK(op.run == &OpMine::Handle && op.available == &OpMine::Available && op.state == &OpMine::StateFields);
 			else
@@ -122,11 +125,11 @@ int main()
 		}
 	}
 
-	// `cap` lists all thirteen ops as off: give, wave and stack have no game glue here, so they are off too.
+	// `cap` lists all fourteen ops as off: give, wave and stack have no game glue here, so they are off too.
 	{
 		Rig r;
 		std::string expect = Res(1, "ok", "", std::string(1, US) + "su=0.19.0");
-		for (const char* op : { "cheat.give", "cheat.wave", "cheat.stack", "cheat.stat", "cheat.move", "cheat.skill", "cheat.corp", "cheat.power", "cheat.enemy", "cheat.weapon", "cheat.grid", "cheat.mine", "cheat.build" })
+		for (const char* op : { "cheat.give", "cheat.wave", "cheat.stack", "cheat.stat", "cheat.move", "cheat.skill", "cheat.corp", "cheat.power", "cheat.enemy", "cheat.weapon", "cheat.grid", "cheat.plant", "cheat.mine", "cheat.build" })
 			expect += std::string(1, US) + op + "=1,off";
 		expect += std::string(1, US) + "cheat.state=1,on";
 		CHECK(r.Send("p1", Req(1, "cap")) == expect);
@@ -150,11 +153,12 @@ int main()
 			if (std::strcmp(op.name, "cheat.enemy") == 0) text = OpEnemy::kTextOff;
 			if (std::strcmp(op.name, "cheat.weapon") == 0) text = OpWeapon::kTextOff;
 			if (std::strcmp(op.name, "cheat.grid") == 0) text = OpGrid::kTextOff;
+			if (std::strcmp(op.name, "cheat.plant") == 0) text = OpPlant::kTextOff;
 			if (std::strcmp(op.name, "cheat.mine") == 0) text = OpMine::kTextOff;
 			CHECK(r.Send("p1", Req(id, op.name)) == Res(id, "refused", text));
 			++id;
 		}
-		CHECK(r.checks == 13);
+		CHECK(r.checks == 14);
 	}
 
 	// The two refusal texts, exact.
@@ -433,6 +437,26 @@ int main()
 			r.now += 10;
 			CHECK(r.Send("p1", Req(103, "cheat.state")) == Res(103, "ok", "", U + "wave=paused" + U + "stack=500"));
 			OpMine::SetEnv(OpMine::Env());
+		}
+		// cheat.plant adds plant=<n>|off for the caller and drops it when the inventory feature is denied.
+		{
+			OpPlant::Env pe;
+			pe.available = [] { return true; };
+			pe.inWorld   = [] { return true; };
+			pe.apply     = [](const Context&, uint32_t, int) { return true; };
+			OpPlant::SetEnv(pe);
+			OpPlant::SetMultiplier("p1", 3);
+			Rig r;
+			CHECK(r.Send("p1", Req(104, "cheat.state")) == Res(104, "ok", "", U + "wave=paused" + U + "stack=500" + U + "plant=3"));
+			OpPlant::SetMultiplier("p1", 1);
+			r.now += 10;
+			CHECK(r.Send("p1", Req(105, "cheat.state")) == Res(105, "ok", "", U + "wave=paused" + U + "stack=500" + U + "plant=off"));
+			OpPlant::SetMultiplier("p1", 3);
+			r.denyFeature = "inventory";
+			r.now += 10;
+			CHECK(r.Send("p1", Req(106, "cheat.state")) == Res(106, "ok", "", U + "wave=paused" + U + "stack=500"));
+			OpPlant::SetMultiplier("p1", 1);
+			OpPlant::SetEnv(OpPlant::Env());
 		}
 		// The wave's three states.
 		{
