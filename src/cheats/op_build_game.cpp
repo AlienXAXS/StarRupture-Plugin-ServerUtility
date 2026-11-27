@@ -12,6 +12,7 @@
 #include "server_utility_fields.h"
 
 #include <Windows.h>
+#include <atomic>
 #include <cstdint>
 #include <string>
 #include <variant>
@@ -141,12 +142,95 @@ namespace OpBuildGame
 		// still see the real result) and the result is then forced for a player who has the part on.
 
 		// UCrBuildingComponent::GetPlacementResourceConditionResult(this): the enum result of the
-		// resource check. 1 is Valid, as BetterCheats forces it.
+		// resource check; forced to Valid.
 		using CostFn = int64_t(__fastcall*)(void* self);
 		// ACrAPHelperActorCustom / ACrAPHelperDynamicPillar::CheckStability(this, placementData).
 		using StabilityFn = bool(__fastcall*)(void* self, const void* placementData);
 
-		constexpr int64_t kPlacementValid = 1;
+		// ---- Enum values. The numbers of a game enum can move in an update, so the placement results
+		// and the building ids are read by name from the running game's UEnum (PluginMap::EnumValue).
+		// That walks every loaded object and is game-thread only, so it runs once, on the first
+		// availability check or hook install on the game thread, and the answer is kept. A part whose
+		// entries did not resolve is off: not in `cap`, and its hook is refused.
+
+		constexpr const char* kPlacementEnum = "EAuAPlacementConditionResult";
+		constexpr const char* kBuildingEnum  = "ECrBuildingID";
+		constexpr const char* kViewportEntries[4] = { "ViewportLeft", "ViewportMiddle", "ViewportRight", "ViewportSingle" };
+		constexpr const char* kBenchEntries[10]   = { "Analyzer", "Armory", "CloningBed", "FoodProcessor", "ItemPrinter",
+			"RecipeTable", "Recycler", "ResearchTerminal", "SuitWorkshop", "UpgradeStation" };
+		constexpr const char* kHabitatEntries[3]  = { "HabitatBig", "HabitatSmall", "Hub" };
+
+		struct BuildEnums
+		{
+			int64_t valid = 0, isColliding = 0, buildingColliding = 0;
+			int64_t viewport[4] = {};
+			int64_t bench[10]   = {};
+			int64_t habitat[3]  = {};
+			bool validOk = false, collisionOk = false, windowsOk = false, benchesOk = false, habitatsOk = false;
+		};
+
+		BuildEnums g_enums;
+		std::atomic<bool> g_enumsDone{ false };
+
+		// One entry. A miss is added to `missing` so the log names it.
+		bool LookupEnum(const char* enumName, const char* entry, int64_t& value, std::string& missing)
+		{
+			if (PluginMap::EnumValue(enumName, entry, value) == PluginMap::EnumLookup::Found)
+				return true;
+			missing += missing.empty() ? "" : ", ";
+			missing += std::string(enumName) + "::" + entry;
+			return false;
+		}
+
+		template <size_t N>
+		bool LookupAll(const char* enumName, const char* const (&entries)[N], int64_t (&values)[N], std::string& missing)
+		{
+			bool all = true;
+			for (size_t i = 0; i < N; ++i)
+				all = LookupEnum(enumName, entries[i], values[i], missing) && all;
+			return all;
+		}
+
+		// The values, looked up on the first call on the game thread. Null before that, off the game
+		// thread: callers there treat the answer as not known yet.
+		const BuildEnums* Enums()
+		{
+			if (g_enumsDone.load(std::memory_order_acquire))
+				return &g_enums;
+			if (!OnGameThread())
+				return nullptr;
+			BuildEnums e;
+			std::string missing;
+			e.validOk = LookupEnum(kPlacementEnum, "Valid", e.valid, missing);
+			const bool colliding = LookupEnum(kPlacementEnum, "IsColliding", e.isColliding, missing);
+			const bool building  = LookupEnum(kPlacementEnum, "BuildingColliding", e.buildingColliding, missing);
+			e.collisionOk = colliding && building;
+			e.windowsOk   = LookupAll(kBuildingEnum, kViewportEntries, e.viewport, missing);
+			e.benchesOk   = LookupAll(kBuildingEnum, kBenchEntries, e.bench, missing);
+			e.habitatsOk  = LookupAll(kBuildingEnum, kHabitatEntries, e.habitat, missing);
+			if (!missing.empty())
+				LOG_WARN("[cheat.build] Not found on this game build: %s; the free-building parts that need them are off", missing.c_str());
+			g_enums = e;
+			g_enumsDone.store(true, std::memory_order_release);
+			return &g_enums;
+		}
+
+		// Does the part have every enum entry it reads. Not known yet (off the game thread, before the
+		// first lookup) counts as yes unless `mustBeKnown`: the lookup then runs at the first install,
+		// which refuses on a miss.
+		bool EnumsFor(OpBuild::Part part, bool mustBeKnown = false)
+		{
+			const BuildEnums* e = Enums();
+			if (!e)
+				return !mustBeKnown;
+			if (part == OpBuild::Part::Cost)
+				return e->validOk;
+			if (part == OpBuild::Part::Windows)
+				return e->validOk && e->collisionOk && e->windowsOk && e->habitatsOk;
+			if (part == OpBuild::Part::Benches)
+				return e->validOk && e->collisionOk && e->benchesOk && e->habitatsOk;
+			return true;
+		}
 
 		uintptr_t g_addrCost = 0, g_addrCustom = 0, g_addrPillar = 0;
 		CostFn      g_origCost   = nullptr;
@@ -154,8 +238,8 @@ namespace OpBuildGame
 		HookHandle  g_hookCost = nullptr, g_hookCustom = nullptr, g_hookPillar = nullptr;
 
 		// The anywhere parts. The placement helper's two collision checks answer with an
-		// EAuAPlacementConditionResult byte, as BetterCheats reads them: 1 Valid, 40 IsColliding,
-		// 43 BuildingColliding. GetSnappedSocket returns the socket pointer and takes ten arguments
+		// EAuAPlacementConditionResult byte (Valid, IsColliding, BuildingColliding; values read by
+		// name, see Enums). GetSnappedSocket returns the socket pointer and takes ten arguments
 		// (the last six on the stack); IsSocketFree is the stability subsystem's slot check.
 		using MainMeshFn   = uint8_t(__fastcall*)(void* self, const void* placementData);
 		using BoxFn        = uint8_t(__fastcall*)(void* self, const void* min, const void* max,
@@ -163,9 +247,6 @@ namespace OpBuildGame
 		using SnappedFn    = void*(__fastcall*)(void* self, const void* data, void* a3, void* a4, void* a5,
 			void* a6, void* a7, void* a8, void* a9, void* a10);
 		using SocketFreeFn = bool(__fastcall*)(void* self, void* building, const void* socket);
-
-		constexpr uint8_t kIsColliding       = 40;
-		constexpr uint8_t kBuildingColliding = 43;
 
 		uintptr_t g_addrMainMesh = 0, g_addrBox = 0, g_addrSnapped = 0, g_addrSocketFree = 0;
 		MainMeshFn   g_origMainMesh   = nullptr;
@@ -248,7 +329,7 @@ namespace OpBuildGame
 		int64_t __fastcall Detour_Cost(void* self)
 		{
 			const int64_t result = g_origCost(self);
-			return OnForOwner(self, OpBuild::Part::Cost) ? kPlacementValid : result;
+			return OnForOwner(self, OpBuild::Part::Cost) ? g_enums.valid : result;
 		}
 
 		bool __fastcall Detour_StabilityCustom(void* self, const void* placementData)
@@ -269,42 +350,28 @@ namespace OpBuildGame
 		// part on, a window or bench snapped to a habitat or the Hub counts as valid after the
 		// collision checks, and a bench's snap counts a habitat's slot as free.
 
-		bool IsWindowId(SDK::ECrBuildingID id)
+		template <size_t N>
+		bool IdIn(SDK::ECrBuildingID id, const int64_t (&values)[N])
 		{
-			return id == SDK::ECrBuildingID::ViewportLeft  || id == SDK::ECrBuildingID::ViewportMiddle
-			    || id == SDK::ECrBuildingID::ViewportRight || id == SDK::ECrBuildingID::ViewportSingle;
+			const int64_t v = static_cast<int64_t>(id);
+			for (size_t i = 0; i < N; ++i)
+				if (v == values[i])
+					return true;
+			return false;
 		}
+
+		bool IsWindowId(SDK::ECrBuildingID id) { return IdIn(id, g_enums.viewport); }
 
 		// The habitat machines, placed into wall slots like windows. Personal storage is a custom
 		// building that registers on its slot, so it is not here.
-		bool IsBenchId(SDK::ECrBuildingID id)
-		{
-			switch (id)
-			{
-			case SDK::ECrBuildingID::Analyzer:
-			case SDK::ECrBuildingID::Armory:
-			case SDK::ECrBuildingID::CloningBed:
-			case SDK::ECrBuildingID::FoodProcessor:
-			case SDK::ECrBuildingID::ItemPrinter:
-			case SDK::ECrBuildingID::RecipeTable:
-			case SDK::ECrBuildingID::Recycler:
-			case SDK::ECrBuildingID::ResearchTerminal:
-			case SDK::ECrBuildingID::SuitWorkshop:
-			case SDK::ECrBuildingID::UpgradeStation:
-				return true;
-			default:
-				return false;
-			}
-		}
+		bool IsBenchId(SDK::ECrBuildingID id) { return IdIn(id, g_enums.bench); }
 
 		// A habitat or the Hub. Calls into the game: inside __try only.
 		bool IsHabitatActor(SDK::AActor* actor)
 		{
 			if (!actor || !actor->IsA(SDK::ACrBuildingActorBase::StaticClass()))
 				return false;
-			const SDK::ECrBuildingID id = static_cast<SDK::ACrBuildingActorBase*>(actor)->GetBuildingID();
-			return id == SDK::ECrBuildingID::HabitatBig || id == SDK::ECrBuildingID::HabitatSmall
-			    || id == SDK::ECrBuildingID::Hub;
+			return IdIn(static_cast<SDK::ACrBuildingActorBase*>(actor)->GetBuildingID(), g_enums.habitat);
 		}
 
 		bool IsHabitat_SEH(void* actor)
@@ -381,7 +448,7 @@ namespace OpBuildGame
 		// two colliding verdicts are touched; anything else the game found stands.
 		uint8_t RelaxCollision(void* helper, uint8_t result)
 		{
-			if ((result != kBuildingColliding && result != kIsColliding) || !OnGameThread())
+			if ((result != g_enums.buildingColliding && result != g_enums.isColliding) || !OnGameThread())
 				return result;
 			SDK::ECrBuildingID piece{};
 			if (!PieceId_SEH(helper, &piece))
@@ -401,7 +468,7 @@ namespace OpBuildGame
 					LOG_WARN("[cheat.build] The placement helper has no snapped-actors member on this game build; windows and benches anywhere leave collision alone");
 				}
 			}
-			return snapped > 0 ? static_cast<uint8_t>(kPlacementValid) : result;
+			return snapped > 0 ? static_cast<uint8_t>(g_enums.valid) : result;
 		}
 
 		uint8_t __fastcall Detour_MainMesh(void* self, const void* placementData)
@@ -515,6 +582,11 @@ namespace OpBuildGame
 		bool InstallHook(OpBuild::Part part)
 		{
 			bool ok = false;
+			if (!EnumsFor(part, true))
+			{
+				LOG_ERROR("[cheat.build] The %s hook was not installed: this game build lacks an enum entry it reads", OpBuild::PartName(part));
+				return false;
+			}
 			if (part == OpBuild::Part::Cost)
 				ok = InstallOne(g_addrCost, reinterpret_cast<void*>(&Detour_Cost), reinterpret_cast<void**>(&g_origCost), g_hookCost);
 			else if (part == OpBuild::Part::Stability)
@@ -552,7 +624,7 @@ namespace OpBuildGame
 		// ID of the player behind a hooked object) is on.
 		bool PartAvailable(OpBuild::Part part)
 		{
-			if (!HookApiPresent() || !ServerUtilityFields::PlayerLookup.On())
+			if (!HookApiPresent() || !ServerUtilityFields::PlayerLookup.On() || !EnumsFor(part))
 				return false;
 			if (part == OpBuild::Part::Cost)
 				return ServerUtilityFields::CheatBuildCost.On() && g_addrCost != 0;
