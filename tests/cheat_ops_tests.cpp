@@ -8,6 +8,7 @@
 #include "cheats/op_corp.h"
 #include "cheats/op_power.h"
 #include "cheats/op_enemy.h"
+#include "cheats/op_weapon.h"
 
 #include <cstdio>
 #include <map>
@@ -816,11 +817,145 @@ static void EnemyTests()
 	CHECK(std::string(OpEnemy::kFeature) == "enemies" && std::string(OpEnemy::kSlotAi) == "ai" && std::string(OpEnemy::kSlotOneHit) == "onehit");
 }
 
+// A fake weapon game: a multiplier per slot for the one player, the calls recorded.
+struct WeaponFake
+{
+	bool available = true;
+	bool world = true;
+	bool weapon = true;
+	bool callsOk = true;
+	float damage = 1.0f, rate = 1.0f;
+	int calls = 0;
+	uint32_t lastReq = 0;
+
+	OpWeapon::Env MakeEnv()
+	{
+		OpWeapon::Env e;
+		e.available = [this] { return available; };
+		e.inWorld   = [this] { return world; };
+		e.hasWeapon = [this](const Context&) { return weapon; };
+		e.current   = [this](const std::string&, OpWeapon::Slot s) { return s == OpWeapon::Slot::Damage ? damage : rate; };
+		e.set       = [this](const Context&, uint32_t id, OpWeapon::Slot s, bool on, float mult)
+		{
+			++calls; lastReq = id;
+			if (!callsOk) return false;
+			(s == OpWeapon::Slot::Damage ? damage : rate) = on ? mult : 1.0f;
+			return true;
+		};
+		e.log       = [](const std::string&) {};
+		return e;
+	}
+};
+
+static CheatWire::Request WeaponReq(const char* damage, const char* rate = nullptr)
+{
+	CheatWire::Request r;
+	r.id = 16;
+	r.op = "cheat.weapon";
+	if (damage) r.fields.emplace_back("damage", damage);
+	if (rate) r.fields.emplace_back("rate", rate);
+	return r;
+}
+
+static void WeaponTests()
+{
+	const std::string id = "p1";
+	Context ctx;
+	ctx.playerId = &id;
+	WeaponFake f;
+	OpWeapon::SetEnv(f.MakeEnv());
+	CHECK(OpWeapon::Available());
+
+	// Both multipliers: the text and the reply fields carry both.
+	{
+		const Result r = OpWeapon::Handle(ctx, WeaponReq("4", "2"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == "Weapon damage 4x, fire rate 2x.");
+		CHECK(r.fields.size() == 2 && *Field(r, "damage") == "4" && *Field(r, "rate") == "2");
+		CHECK(f.calls == 2 && f.lastReq == 16 && f.damage == 4.0f && f.rate == 2.0f);
+		CHECK(OpWeapon::StateFields("p1") == Fields({ { "weapon", "4,2" } }));
+	}
+	// One slot off leaves the other.
+	{
+		const Result r = OpWeapon::Handle(ctx, WeaponReq("off"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == "Weapon damage 1x, fire rate 2x.");
+		CHECK(f.damage == 1.0f && f.rate == 2.0f);
+	}
+	// 1 is off too; with both off the boost is off.
+	{
+		const Result r = OpWeapon::Handle(ctx, WeaponReq(nullptr, "1"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == "Weapon boost turned off.");
+		CHECK(*Field(r, "damage") == "1" && *Field(r, "rate") == "1");
+		CHECK(OpWeapon::StateFields("p1") == Fields({ { "weapon", "off" } }));
+	}
+	// Fractions, and the range ends.
+	{
+		CHECK(OpWeapon::Handle(ctx, WeaponReq("0.5", "5")).reason == "Weapon damage 0.5x, fire rate 5x.");
+		CHECK(OpWeapon::Handle(ctx, WeaponReq("25", "0.1")).reason == "Weapon damage 25x, fire rate 0.1x.");
+		CHECK(OpWeapon::Handle(ctx, WeaponReq("off", "off")).reason == "Weapon boost turned off.");
+	}
+	// Out of range: refused with text 16 and nothing is called, even when the other slot is fine.
+	{
+		f.calls = 0;
+		for (const char* bad : { "0.05", "25.5", "0", "-2" })
+		{
+			const Result r = OpWeapon::Handle(ctx, WeaponReq(bad));
+			CHECK(r.status == CheatWire::Status::Refused && r.reason == "Damage must be 0.1 to 25, and fire rate 0.1 to 5.");
+		}
+		CHECK(OpWeapon::Handle(ctx, WeaponReq("4", "5.5")).reason == OpWeapon::kTextRange);
+		CHECK(OpWeapon::Handle(ctx, WeaponReq("2", "0.01")).status == CheatWire::Status::Refused);
+		CHECK(f.calls == 0);
+	}
+	// Unreadable value; neither field.
+	{
+		CHECK(OpWeapon::Handle(ctx, WeaponReq("big")).reason == CheatDispatch::kTextBadRequest);
+		const Result r = OpWeapon::Handle(ctx, WeaponReq(nullptr));
+		CHECK(r.status == CheatWire::Status::Refused && r.reason == "Pick at least one setting.");
+	}
+	// No world: error, nothing called.
+	{
+		f.world = false;
+		const Result r = OpWeapon::Handle(ctx, WeaponReq("2"));
+		CHECK(r.status == CheatWire::Status::Error && r.reason == "Not in a world right now." && f.calls == 0);
+		f.world = true;
+	}
+	// No weapon: text 17 when turning a boost on; taking one off still works.
+	{
+		f.weapon = false;
+		const Result r = OpWeapon::Handle(ctx, WeaponReq("2"));
+		CHECK(r.status == CheatWire::Status::Refused && r.reason == "No weapon found on you." && f.calls == 0);
+		CHECK(OpWeapon::Handle(ctx, WeaponReq("off")).status == CheatWire::Status::Ok);
+		f.weapon = true;
+	}
+	// A failed call: error, text from the op.
+	{
+		f.callsOk = false;
+		const Result r = OpWeapon::Handle(ctx, WeaponReq("2"));
+		CHECK(r.status == CheatWire::Status::Error && r.reason == "Couldn't change your weapon on this server.");
+		f.callsOk = true;
+	}
+	// Off in cap: refused with the off text, even for a request with no field.
+	{
+		f.available = false;
+		CHECK(!OpWeapon::Available());
+		CHECK(OpWeapon::Handle(ctx, WeaponReq("2")).reason == OpWeapon::kTextOff);
+		CHECK(OpWeapon::Handle(ctx, WeaponReq(nullptr)).reason == OpWeapon::kTextOff);
+		f.available = true;
+	}
+
+	// No env at all: off, no state fields.
+	OpWeapon::SetEnv(OpWeapon::Env());
+	CHECK(!OpWeapon::Available());
+	CHECK(OpWeapon::StateFields("p1").empty());
+
+	CHECK(std::string(OpWeapon::kFeature) == "weapons" && std::string(OpWeapon::kSlotDamage) == "damage" && std::string(OpWeapon::kSlotRate) == "rate");
+}
+
 int main()
 {
 	const Context ctx;
 	PowerTests();
 	EnemyTests();
+	WeaponTests();
 	WaveTests();
 	StackTests();
 	CorpTests();
