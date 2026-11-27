@@ -525,7 +525,7 @@ namespace CheatLedger
 			// The controller is gone, not the character: the same as a leave that was missed.
 			if (stance.where == Stance::Where::Gone)
 			{
-				Restore(it, "player left");
+				Restore(it, "controller gone, the earlier leave was missed");
 				continue;
 			}
 			// A vehicle gets no write; the character goes back to what it was.

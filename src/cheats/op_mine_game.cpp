@@ -154,10 +154,9 @@ namespace OpMineGame
 			return CheatLedger::Value(std::in_place_type<std::vector<float>>, ComposeBoostValue(p->data(), *value));
 		}
 
-		// The max is the game's to change unless SU raised it. The current pair is derived from what
-		// SU writes (a drain, a recompute), so it never counts. The max BaseValue counts, and so does
-		// the max CurrentValue (a modifier): when SU did not raise the max (the prior's max was already
-		// at the held value), or when the max BaseValue changed with it (the game recomputes both).
+		// The rule is OpMine::BoostMemberRebases; this only reads the values off the entry. SU raised the
+		// max when the applied max differs from the prior's, that is when the prior's max was below the
+		// held value (ComposeBoostValue raises it only then).
 		bool BoostRebases(const CheatLedger::Entry& e, const CheatLedger::Value& live, size_t member)
 		{
 			if (member == 2)
@@ -169,8 +168,7 @@ namespace OpMineGame
 			const auto* p = std::get_if<std::vector<float>>(&e.prior);
 			if (!l || !a || !p || l->size() != 4 || a->size() != 4 || p->size() != 4)
 				return false;
-			const bool suRaised = (*a)[2] != (*p)[2] || (*a)[3] != (*p)[3];
-			return !suRaised || (*l)[2] != (*a)[2];
+			return OpMine::BoostMemberRebases(l->data(), a->data(), p->data(), member);
 		}
 
 		// ---- Heat tag

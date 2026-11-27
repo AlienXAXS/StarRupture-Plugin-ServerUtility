@@ -3,6 +3,7 @@
 //   cl /nologo /EHsc /std:c++17 /Isrc tests\cheat_ledger_tests.cpp src\cheats\cheat_ledger.cpp /Fe:cheat_ledger_tests.exe
 //   cheat_ledger_tests.exe
 #include "cheats/cheat_ledger.h"
+#include "cheats/op_mine.h"
 #include "pawn_kind.h"
 
 #include <cstdio>
@@ -116,19 +117,15 @@ struct Rig
 			}
 			return Value();
 		};
-		// The boost's current pair is derived by the game from what SU writes; the max counts unless SU raised it.
+		// The boost's rule is the op's own, the one the glue calls.
 		env.rebases = [](const Entry& e, const Value& live, size_t member)
 		{
 			if (e.slot != "boost")
 				return true;
-			if (member == 2)
-				return true;
-			if (member != 3)
-				return false;
 			const auto& l = std::get<std::vector<float>>(live);
 			const auto& a = std::get<std::vector<float>>(e.applied);
 			const auto& p = std::get<std::vector<float>>(e.prior);
-			return (a[2] == p[2] && a[3] == p[3]) || l[2] != a[2];
+			return OpMine::BoostMemberRebases(l.data(), a.data(), p.data(), member);
 		};
 		env.allowed = [this](Entry& e)
 		{
@@ -636,6 +633,19 @@ static void Composed()
 		CHECK(r.Live(10, "boost") == Value(std::vector<float>{ 3.0f, 3.0f, 3.0f, 3.0f }));
 		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "boost"));
 		CHECK(r.Live(10, "boost") == Value(std::vector<float>{ 1.0f, 1.0f, 2.0f, 2.0f }));
+	}
+	{   // SU raised the max (true max 2), then the game sets the max to 8/8: SU writes nothing over it
+		Rig r; r.Seed(10, "boost", Value(std::vector<float>{ 1.0f, 1.0f, 2.0f, 2.0f })); r.pawn["A"] = 10;
+		Request q = r.Req(Kind::Toggle, "A", "boost", Value(std::vector<float>{ 3.0f, 3.0f, 3.0f, 3.0f }), 10, true);
+		q.pin = true; q.asked = Value(3.0f);
+		CHECK(r.ledger.Apply(q));
+		r.live["10|boost"] = Value(std::vector<float>{ 3.0f, 3.0f, 8.0f, 8.0f });
+		r.ledger.Tick();
+		CHECK(r.Live(10, "boost") == Value(std::vector<float>{ 3.0f, 3.0f, 8.0f, 8.0f }));
+		const Entry* e = r.ledger.Find(Kind::Toggle, "A", "feat", "boost");
+		CHECK(e && e->prior == Value(std::vector<float>{ 1.0f, 1.0f, 8.0f, 8.0f }));
+		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "boost"));
+		CHECK(r.Live(10, "boost") == Value(std::vector<float>{ 1.0f, 1.0f, 8.0f, 8.0f }));
 	}
 	{   // a failed write of the composed value is tried again next tick, from the game's value
 		Rig r; Weapon(r, 1.0f);

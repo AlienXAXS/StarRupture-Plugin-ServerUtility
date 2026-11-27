@@ -86,7 +86,7 @@ namespace CheatLedger
 	constexpr uint64_t kFollowSettleMs = 1000;
 
 	// A pending write is tried this many times, then given up (logged once). Every path that
-	// touches the slot retries it, so a tick can count more than one.
+	// touches any slot (a put-back, an Apply) retries every pending write, so a tick can count more than one.
 	constexpr int kPendingMaxTries = 300;
 
 	enum class Kind { Toggle, Override };
@@ -221,8 +221,8 @@ namespace CheatLedger
 		// Any thread: asks for a Reconcile at the next Tick.
 		void MarkReconcileDue() { m_reconcileDue.store(true); }
 
-		// Each game tick: a due Reconcile, the follow entries moved to the player's new pawn, then
-		// the pins. Writes nothing and logs nothing when nothing changed; with no follow entry the
+		// Each game tick: the follow entries moved to the player's new pawn, a due Reconcile, the
+		// pending writes retried, then the pins. Writes nothing and logs nothing when nothing changed; with no follow entry the
 		// follow step is one atomic read.
 		void Tick();
 

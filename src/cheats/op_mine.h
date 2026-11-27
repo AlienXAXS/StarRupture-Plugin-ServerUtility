@@ -9,6 +9,7 @@
 // game side comes in through Env, so this runs in unit tests. Game thread.
 #include "cheat_dispatch.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -23,6 +24,22 @@ namespace OpMine
 
 	// The boost range (draft; the contract says 1 to 10, BetterCheats' slider goes 0.1 to 10).
 	constexpr double kBoostMin = 1.0, kBoostMax = 10.0;
+
+	// Whether a change the game made to one member of the boost's four values (max BaseValue is
+	// member 2, max CurrentValue member 3) is the game's to keep. live, applied and prior each point
+	// at the four values: what the game holds now, what SU wrote, and what the game held before SU.
+	// The max BaseValue always counts. The max CurrentValue is derived from what SU writes (a drain,
+	// a recompute), so it counts only when SU did not raise the max, or when the max BaseValue
+	// changed with it (the game recomputes both). The current pair (members 0 and 1) never counts.
+	inline bool BoostMemberRebases(const float* live, const float* applied, const float* prior, size_t member)
+	{
+		if (member == 2)
+			return true;
+		if (member != 3)
+			return false;
+		const bool suRaised = applied[2] != prior[2] || applied[3] != prior[3];
+		return !suRaised || live[2] != applied[2];
+	}
 
 	constexpr const char* kTextOff      = "Not available on this server's game build.";
 	constexpr const char* kTextNoWorld  = "Not in a world right now.";
