@@ -2,6 +2,15 @@ name: Build and Release
 
 on:
   workflow_dispatch:
+    inputs:
+      sdk_ref:
+        description: "Plugin SDK branch, tag or sha to build against"
+        type: string
+        default: main
+      game_sdk_ref:
+        description: "Game SDK branch, tag or sha to build against"
+        type: string
+        default: main
 
 jobs:
   build:
@@ -19,12 +28,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: AlienXAXS/StarRupture-Plugin-SDK
+          ref: ${{ inputs.sdk_ref }}
           path: plugin-sdk
 
       - name: Checkout Game SDK
         uses: actions/checkout@v4
         with:
           repository: AlienXAXS/StarRupture-Game-SDK
+          ref: ${{ inputs.game_sdk_ref }}
           path: game-sdk
 
       - name: Add MSBuild to PATH
@@ -132,6 +143,18 @@ jobs:
             /m `
             /v:minimal
 
+      - name: Build Client Release
+        run: |
+          msbuild "ServerUtility.sln" `
+            /p:Configuration="Client Release" `
+            /p:Platform=x64 `
+            /p:PostBuildEventUseInBuild=false `
+            /p:ModLoaderBuildTag="${{ steps.tag.outputs.TAG }}" `
+            /p:GameSDKRoot="${{ github.workspace }}\game-sdk" `
+            /p:PluginSDKInclude="${{ github.workspace }}\plugin-sdk\include" `
+            /m `
+            /v:minimal
+
       - name: Generate release assets
         shell: pwsh
         run: |
@@ -139,8 +162,6 @@ jobs:
           $repo     = "${{ github.repository }}"
           $ws       = $env:GITHUB_WORKSPACE
           $name     = "ServerUtility"
-          $variant  = "Server"
-          $varLower = "server"
 
           # Read interface version range from the checked-out Plugin SDK header.
           $header   = Get-Content "$ws\plugin-sdk\include\plugin_interface.h" -Raw
@@ -152,38 +173,42 @@ jobs:
           $ifaceMax = [int]$matchMax.Groups[1].Value
           Write-Host "Interface version range: [$ifaceMin, $ifaceMax]"
 
-          # Individual DLL
-          $dllSrc = "$ws\build\$variant Release\Plugins\$name.dll"
-          Copy-Item $dllSrc "$ws\$name-$variant.dll"
+          foreach ($variant in @("Server", "Client")) {
+            $varLower = $variant.ToLower()
 
-          # Per-plugin update manifest
-          $manifest = [ordered]@{
-            plugin_name           = $name
-            version               = $tag
-            interface_version_min = $ifaceMin
-            interface_version_max = $ifaceMax
-            download_url          = "https://github.com/$repo/releases/download/$tag/$name-$variant.dll"
+            # Individual DLL
+            $dllSrc = "$ws\build\$variant Release\Plugins\$name.dll"
+            Copy-Item $dllSrc "$ws\$name-$variant.dll"
+
+            # Per-plugin update manifest
+            $manifest = [ordered]@{
+              plugin_name           = $name
+              version               = $tag
+              interface_version_min = $ifaceMin
+              interface_version_max = $ifaceMax
+              download_url          = "https://github.com/$repo/releases/download/$tag/$name-$variant.dll"
+            }
+            $manifest | ConvertTo-Json -Depth 1 | Out-File "$ws\$name-$varLower-manifest.json" -Encoding utf8NoBOM
+            Write-Host "Generated manifest:"
+            Get-Content "$ws\$name-$varLower-manifest.json"
+
+            # Sidecar JSON (goes inside the ZIP alongside the DLL)
+            $sidecar = [ordered]@{
+              manifest_url = "https://github.com/$repo/releases/latest/download/$name-$varLower-manifest.json"
+            }
+
+            # Plugin ZIP: Plugins\Name.dll + Plugins\Name.json
+            $staging = "$ws\staging-$varLower\Plugins"
+            New-Item -ItemType Directory -Force $staging | Out-Null
+            Copy-Item $dllSrc "$staging\$name.dll"
+            $sidecar | ConvertTo-Json -Depth 1 | Out-File "$staging\$name.json" -Encoding utf8NoBOM
+
+            $pdbSrc = [System.IO.Path]::ChangeExtension($dllSrc, ".pdb")
+            if (Test-Path $pdbSrc) { Copy-Item $pdbSrc "$staging\$name.pdb" }
+
+            Compress-Archive -Path "$ws\staging-$varLower\*" -DestinationPath "$ws\$name-$variant-$tag.zip"
+            Write-Host "Created plugin ZIP: $name-$variant-$tag.zip"
           }
-          $manifest | ConvertTo-Json -Depth 1 | Out-File "$ws\$name-$varLower-manifest.json" -Encoding utf8NoBOM
-          Write-Host "Generated manifest:"
-          Get-Content "$ws\$name-$varLower-manifest.json"
-
-          # Sidecar JSON (goes inside the ZIP alongside the DLL)
-          $sidecar = [ordered]@{
-            manifest_url = "https://github.com/$repo/releases/latest/download/$name-$varLower-manifest.json"
-          }
-
-          # Plugin ZIP: Plugins\Name.dll + Plugins\Name.json
-          $staging = "$ws\staging\Plugins"
-          New-Item -ItemType Directory -Force $staging | Out-Null
-          Copy-Item $dllSrc "$staging\$name.dll"
-          $sidecar | ConvertTo-Json -Depth 1 | Out-File "$staging\$name.json" -Encoding utf8NoBOM
-
-          $pdbSrc = [System.IO.Path]::ChangeExtension($dllSrc, ".pdb")
-          if (Test-Path $pdbSrc) { Copy-Item $pdbSrc "$staging\$name.pdb" }
-
-          Compress-Archive -Path "$ws\staging\*" -DestinationPath "$ws\$name-$variant-$tag.zip"
-          Write-Host "Created plugin ZIP: $name-$variant-$tag.zip"
 
       - name: Create GitHub Release
         shell: pwsh
@@ -193,14 +218,13 @@ jobs:
           $tag     = "${{ steps.tag.outputs.TAG }}"
           $ws      = $env:GITHUB_WORKSPACE
           $name    = "ServerUtility"
-          $variant = "Server"
-          $varLow  = "server"
 
-          $assets = @(
-            "$ws\$name-$variant.dll",
-            "$ws\$name-$varLow-manifest.json",
+          $assets = foreach ($variant in @("Server", "Client")) {
+            $varLow = $variant.ToLower()
+            "$ws\$name-$variant.dll"
+            "$ws\$name-$varLow-manifest.json"
             "$ws\$name-$variant-$tag.zip"
-          )
+          }
 
           Write-Host "Uploading $($assets.Count) asset(s):"
           $assets | ForEach-Object { Write-Host "  $_" }
