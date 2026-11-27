@@ -526,7 +526,6 @@ namespace OpEnemyGame
 		g_weakAssign = reinterpret_cast<WeakAssignFn>(fn(ServerUtilityFields::WeakObjectPtrAssign));
 		g_getHandle  = reinterpret_cast<GetHandleFn>(fn(ServerUtilityFields::GetEntityHandleFromActor));
 		g_fragment   = reinterpret_cast<FragmentFn>(fn(ServerUtilityFields::InternalGetFragmentDataPtr));
-		PluginMap::ResolveMassEntityManager(scanner, self);
 	}
 
 	void Init()

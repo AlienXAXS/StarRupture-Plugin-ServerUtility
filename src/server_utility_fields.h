@@ -249,7 +249,12 @@ namespace ServerUtilityFields
 			StartWaveSize, StartWaveType, IsWaveInProgressSize, IsWaveInProgressResult, IsWavePausedSize, IsWavePausedResult,
 			CorporationsOwner, CorporationsDataPoints,
 			EnemyIsInPool, EnemyAllowedAttackDistance, EnemyAllowedAttackConeHalfAngle, EnemyAllowedBuildingAttackDistance,
-			PawnController, AIControllerBrainComponent, EnemyHealthHP);
+			PawnController, AIControllerBrainComponent, EnemyHealthHP,
+			MassConfigAssetConfig, MassConfigParent, MassConfigTraits, ElectricityParameters, ElectricityValue,
+			ElectricityType, ElectricityParametersSize, ConstSharedFragmentsContainer);
+
+		// The entity manager's field is shared by the power and enemy ops; this is the one place it is asked.
+		PluginMap::ResolveMassEntityManager(scanner, self);
 
 		// One line per feature the loader switched off, so the text names
 		// exactly what is off and follows the feature's key list.
