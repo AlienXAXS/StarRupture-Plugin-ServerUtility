@@ -144,6 +144,12 @@ namespace ServerUtilityFields
 	inline auto PawnController               = SERVER_UTILITY_FIELD(APawn, Controller);
 	inline auto AIControllerBrainComponent   = SERVER_UTILITY_FIELD(AAIController, BrainComponent);
 	inline auto EnemyHealthHP                = SERVER_UTILITY_NATIVE(float, FMassEnemyHealthFragment, HP, 0x0);
+
+	// What the su.cheat weapon op reads and writes: the player character's weapon attribute set and the
+	// damage and fire-rate multipliers on it (both FGameplayAttributeData, so Base and Current values).
+	inline auto CharacterWeaponAttributes    = SERVER_UTILITY_FIELD(ACrCharacterPlayerBase, WeaponAttributes);
+	inline auto WeaponDamageMod              = SERVER_UTILITY_FIELD(UCrWeaponAttributeSet, DamageModMultiplier);
+	inline auto WeaponFireRateMod            = SERVER_UTILITY_FIELD(UCrWeaponAttributeSet, FireRateModMultiplier);
 	inline constexpr const char* WeakObjectPtrAssign       = "FWeakObjectPtr::operator=(FObjectPtr)";
 	inline constexpr const char* GetEntityHandleFromActor  = "UMassActorSubsystem::GetEntityHandleFromActor";
 	inline constexpr const char* InternalGetFragmentDataPtr = "FMassEntityManager::InternalGetFragmentDataPtr";
@@ -231,13 +237,18 @@ namespace ServerUtilityFields
 		PawnController, AIControllerBrainComponent, EnemyHealthHP, PluginMap::MassEntityManagerField,
 		WeakObjectPtrAssign, GetEntityHandleFromActor, InternalGetFragmentDataPtr) };
 
+	// The su.cheat weapon op: the character's weapon attribute set and its two multipliers. While it is
+	// off `cap` reports the op off.
+	inline PluginMap::Feature CheatWeapon{ "cheat-weapon", "Weapon cheats", PluginMap::KeysOf(
+		CharacterWeaponAttributes, WeaponDamageMod, WeaponFireRateMod) };
+
 	// Asks the loader for every member above. False when a key that no feature
 	// lists did not resolve; the loader has then recorded the failure and
 	// refuses the plugin. A miss on a key a feature lists only turns that
 	// feature off.
 	inline bool Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
 	{
-		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand, CheatGive, CheatWave, CheatCorp, CheatPower, CheatEnemy);
+		PluginMap::DeclareFeatures(scanner, self, PlayerLookup, PlayerList, PlayerActions, GatherableRelevancy, SaveCommand, CheatGive, CheatWave, CheatCorp, CheatPower, CheatEnemy, CheatWeapon);
 
 		// A miss only turns off the features that list the key. Every row is
 		// asked even after a miss, so the loader's log lists them all.
@@ -250,6 +261,7 @@ namespace ServerUtilityFields
 			CorporationsOwner, CorporationsDataPoints,
 			EnemyIsInPool, EnemyAllowedAttackDistance, EnemyAllowedAttackConeHalfAngle, EnemyAllowedBuildingAttackDistance,
 			PawnController, AIControllerBrainComponent, EnemyHealthHP,
+			CharacterWeaponAttributes, WeaponDamageMod, WeaponFireRateMod,
 			MassConfigAssetConfig, MassConfigParent, MassConfigTraits, ElectricityParameters, ElectricityValue,
 			ElectricityType, ElectricityParametersSize, ConstSharedFragmentsContainer);
 
@@ -258,7 +270,7 @@ namespace ServerUtilityFields
 
 		// One line per feature the loader switched off, so the text names
 		// exactly what is off and follows the feature's key list.
-		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand, &CheatGive, &CheatWave, &CheatCorp, &CheatPower, &CheatEnemy })
+		for (const PluginMap::Feature* f : { &PlayerLookup, &PlayerList, &PlayerActions, &GatherableRelevancy, &SaveCommand, &CheatGive, &CheatWave, &CheatCorp, &CheatPower, &CheatEnemy, &CheatWeapon })
 		{
 			if (!f->On())
 				LOG_WARN("[%s] The loader has no row for one of its engine members on this game build - %s is off",
