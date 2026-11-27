@@ -73,7 +73,7 @@ static std::string GiveItem(int playerIndex, const wchar_t* expectedName, const 
 	{
 	case OpGiveGame::AddStatus::Added:         return R"({"ok":true,"added":)" + std::to_string(added.given) + "}";
 	case OpGiveGame::AddStatus::NothingAdded:
-		return R"({"ok":false,"error":"Nothing could be added. The player's inventory may be full."})";
+		return R"({"ok":false,"error":"nothing could be added; the player's inventory may be full"})";
 	case OpGiveGame::AddStatus::NoItem:       return err;
 	case OpGiveGame::AddStatus::NoSubsystem:  return R"({"ok":false,"error":"item subsystem unavailable"})";
 	case OpGiveGame::AddStatus::NoCharacter:  return R"({"ok":false,"error":"player has no pawn"})";
