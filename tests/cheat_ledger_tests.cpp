@@ -32,6 +32,7 @@ struct Rig
 	std::set<std::string> connected;        // player ids connected now
 	std::map<std::string, int32_t> pawn;    // player id -> the index of the object their pawn has now (none: no pawn)
 	bool gameThread = true;
+	uint64_t now = 1000;
 	int writes = 0;
 	std::vector<std::string> logs;
 	Ledger ledger;
@@ -58,7 +59,7 @@ struct Rig
 				e.ownerProven = !denied.count(e.playerId);
 			return e.ownerProven ? Allowance::Allowed : Allowance::Denied;
 		};
-		env.nowMs = [] { return uint64_t(1000); };
+		env.nowMs = [this] { return now; };
 		env.isGameThread = [this] { return gameThread; };
 		env.log = [this](const std::string& s) { logs.push_back(s); };
 		return env;
@@ -75,6 +76,8 @@ struct Rig
 		connected.insert(player);
 		return r;
 	}
+	// A tick that first sees the new pawn, then one after the settle period: the entry has moved.
+	void Respawned() { ledger.Tick(); now += kFollowSettleMs; ledger.Tick(); }
 	void Seed(int32_t target, const std::string& slot, Value v) { live[std::to_string(target) + "|" + slot] = v; }
 	Value Live(int32_t target, const std::string& slot) { return live[std::to_string(target) + "|" + slot]; }
 };
@@ -155,7 +158,7 @@ static void Follow()
 		r.Seed(20, "fly", Value(false));
 		r.dead.insert(10);
 		r.pawn["A"] = 20;
-		r.ledger.Tick();
+		r.Respawned();
 		CHECK(r.ledger.Size() == 1);
 		CHECK(r.Live(20, "fly") == Value(true));
 		const Entry* e = r.ledger.Find(Kind::Toggle, "A", "feat", "fly");
@@ -168,7 +171,7 @@ static void Follow()
 		r.live["10|fly"] = Value(true);
 		r.dead.insert(10);
 		r.pawn["A"] = 20;
-		r.ledger.Tick();
+		r.Respawned();
 		r.Seed(20, "fly", Value(true));      // the game or the new pawn's state moved on; applied is the same, so it is ours
 		r.ledger.Release(Kind::Toggle, "A", "feat", "fly");
 		CHECK(r.Live(20, "fly") == Value(false));   // restored to the new pawn's prior
@@ -179,7 +182,7 @@ static void Follow()
 		r.Seed(20, "fly", Value(false));
 		r.pawn["A"] = 20;
 		const int before = r.writes;
-		r.ledger.Tick();
+		r.Respawned();
 		CHECK(r.writes == before + 1);
 		CHECK(r.Live(20, "fly") == Value(true));
 		CHECK(r.Live(10, "fly") == Value(true));
@@ -197,7 +200,7 @@ static void Follow()
 		// the pawn arrives later
 		r.Seed(20, "fly", Value(false));
 		r.pawn["A"] = 20;
-		r.ledger.Tick();
+		r.Respawned();
 		CHECK(r.Live(20, "fly") == Value(true));
 	}
 	{   // a new pawn whose value cannot be read yet is retried, and logged once
@@ -205,7 +208,7 @@ static void Follow()
 		r.dead.insert(10);
 		r.pawn["A"] = 20;
 		r.live.erase("20|fly");
-		r.ledger.Tick();
+		r.Respawned();
 		r.ledger.Tick();
 		int stuck = 0;
 		for (const auto& l : r.logs)
@@ -213,8 +216,58 @@ static void Follow()
 		CHECK(stuck == 1);
 		CHECK(r.ledger.Size() == 1);
 		r.Seed(20, "fly", Value(false));
-		r.ledger.Tick();
+		r.Respawned();
 		CHECK(r.Live(20, "fly") == Value(true));
+	}
+	{   // a new pawn settles first: nothing is read or written until it has stood for the settle period
+		Rig r; Setup(r);
+		r.Seed(20, "fly", Value(0));         // a pawn the game has not set up yet; zero is a real value, not a signal
+		r.dead.insert(10);
+		r.pawn["A"] = 20;
+		const int before = r.writes;
+		r.ledger.Tick();
+		r.now += kFollowSettleMs - 1;
+		r.ledger.Tick();
+		CHECK(r.writes == before);
+		CHECK(r.Live(20, "fly") == Value(0));
+		const Entry* e = r.ledger.Find(Kind::Toggle, "A", "feat", "fly");
+		CHECK(e && e->target.index == 10);
+		r.now += 1;
+		r.ledger.Tick();
+		CHECK(r.writes == before + 1);
+		CHECK(r.Live(20, "fly") == Value(true));
+		e = r.ledger.Find(Kind::Toggle, "A", "feat", "fly");
+		CHECK(e && e->target.index == 20 && e->prior == Value(0));
+	}
+	{   // a revert during the settle period writes nothing to the new pawn
+		Rig r; Setup(r);
+		r.Seed(20, "fly", Value(false));
+		r.dead.insert(10);
+		r.pawn["A"] = 20;
+		r.ledger.Tick();
+		const int before = r.writes;
+		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "fly"));
+		CHECK(r.ledger.Size() == 0);
+		CHECK(r.writes == before);
+		CHECK(r.Live(20, "fly") == Value(false));
+	}
+	{   // a pawn that changes again restarts the settle period
+		Rig r; Setup(r);
+		r.Seed(20, "fly", Value(false));
+		r.Seed(30, "fly", Value(false));
+		r.dead.insert(10);
+		r.pawn["A"] = 20;
+		r.ledger.Tick();
+		r.now += kFollowSettleMs - 1;
+		r.pawn["A"] = 30;
+		r.ledger.Tick();
+		r.now += 1;
+		r.ledger.Tick();
+		CHECK(r.Live(30, "fly") == Value(false));
+		r.now += kFollowSettleMs;
+		r.ledger.Tick();
+		CHECK(r.Live(30, "fly") == Value(true));
+		CHECK(r.Live(20, "fly") == Value(false));
 	}
 	{   // a revert against a dead object is a clean no-op, the old prior is never written to the new pawn
 		Rig r; Setup(r);
@@ -231,7 +284,7 @@ static void Follow()
 		r.Seed(20, "fly", Value(false));
 		r.dead.insert(10);
 		r.pawn["A"] = 20;
-		r.ledger.Tick();
+		r.Respawned();
 		r.denied.insert("A");
 		r.ledger.ReconcilePlayer("A");
 		CHECK(r.ledger.Size() == 0);
@@ -242,7 +295,7 @@ static void Follow()
 		r.Seed(20, "fly", Value(false));
 		r.dead.insert(10);
 		r.pawn["A"] = 20;
-		r.ledger.Tick();
+		r.Respawned();
 		r.ledger.RestorePlayer("A");
 		CHECK(r.ledger.Size() == 0);
 		CHECK(r.Live(20, "fly") == Value(false));
@@ -252,7 +305,7 @@ static void Follow()
 		r.Seed(20, "fly", Value(false));
 		r.dead.insert(10);
 		r.pawn["A"] = 20;
-		r.ledger.Tick();
+		r.Respawned();
 		r.ledger.RestoreAll();
 		CHECK(r.ledger.Size() == 0);
 		CHECK(r.Live(20, "fly") == Value(false));

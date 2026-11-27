@@ -51,6 +51,9 @@ namespace CheatLedger
 	// including the first ':' ("power:"). A slot without a ':' has no prefix; returns it whole.
 	std::string SlotPrefix(const std::string& slot);
 
+	// How long a respawned pawn must stand before a follow entry moves onto it.
+	constexpr uint64_t kFollowSettleMs = 1000;
+
 	enum class Kind { Toggle, Override };
 
 	struct Entry
@@ -63,6 +66,8 @@ namespace CheatLedger
 		bool        pin  = false;                // Tick writes `applied` back while it differs
 		bool        follow = false;              // Toggle only: the target is the player's pawn or a part of it; Tick moves it to the new one
 		bool        followStuck = false;         // the last attempt to move it failed (logged once)
+		Weak        settling;                    // follow: the new pawn being waited on, until the game has set it up
+		uint64_t    settleSinceMs = 0;           // when `settling` was first seen
 		Weak        target;                      // what the value lives on (an Override may have none)
 		Value       prior, applied;              // prior is captured once, on the first apply
 		uint64_t    appliedAtMs = 0;

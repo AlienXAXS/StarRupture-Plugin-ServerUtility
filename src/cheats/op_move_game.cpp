@@ -223,7 +223,13 @@ namespace OpMoveGame
 			if (flag != wantFlag && !WriteFlag_SEH(comp, wantFlag))
 				return false;
 			if (mode != wantMode && !SetMode(comp, wantMode))
+			{
+				// Do not leave a half-applied flag behind: no ledger entry would revert it, and a
+				// follow retry would capture it as the new pawn's prior.
+				if (flag != wantFlag)
+					WriteFlag_SEH(comp, flag);
 				return false;
+			}
 			return true;
 		}
 

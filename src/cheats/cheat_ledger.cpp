@@ -135,7 +135,7 @@ namespace CheatLedger
 		const bool changed = isNew || !(e.applied == req.value) || e.playerId != req.playerId;
 		// The last admin to set an Override takes it over; the first prior stays.
 		e.playerId = req.playerId; e.playerName = req.playerName; e.conn = req.conn;
-		e.pin = req.pin; e.follow = req.follow; e.followStuck = false; e.reqId = req.reqId; e.ownerProven = req.ownerProven;
+		e.pin = req.pin; e.follow = req.follow; e.followStuck = false; e.settling = Weak(); e.reqId = req.reqId; e.ownerProven = req.ownerProven;
 		e.applied = req.value;
 		e.appliedAtMs = m_env.nowMs ? m_env.nowMs() : 0;
 		if (isNew)
@@ -232,7 +232,27 @@ namespace CheatLedger
 			const Weak now = m_env.rebind(e);
 			// No pawn yet: the entry waits, still held. Same object: nothing to move.
 			if (!now.Valid() || now == e.target)
+			{
+				e.settling = Weak();
 				continue;
+			}
+
+			// A new pawn's attribute and movement data may not be initialised on the first tick it
+			// is seen, and zero is a real value for many stats, so there is no telling a blank pawn
+			// from a set-up one by its values. Rebind only once the same pawn has stood for a settle
+			// period; until then nothing is read from or written to it.
+			if (m_env.nowMs)
+			{
+				const uint64_t t = m_env.nowMs();
+				if (!(e.settling == now))
+				{
+					e.settling = now;
+					e.settleSinceMs = t;
+					continue;
+				}
+				if (t - e.settleSinceMs < kFollowSettleMs)
+					continue;
+			}
 
 			Entry moved = e;
 			moved.target = now;
@@ -248,6 +268,7 @@ namespace CheatLedger
 			}
 			Log("follow " + Describe(e) + ": new pawn, " + ToText(moved.prior) + " -> " + ToText(e.applied));
 			moved.followStuck = false;
+			moved.settling = Weak();
 			moved.appliedAtMs = m_env.nowMs ? m_env.nowMs() : 0;
 			e = moved;
 		}
