@@ -273,6 +273,9 @@ static bool ApplyToLiveGraph()
 		}
 	}
 
+	if (g_faulted)
+		return true;
+
 	LOG_INFO("[GatherableFix] Live graph patched - verify with 'CrRepGraph.PrintRouting'");
 	return true;
 }
@@ -410,9 +413,6 @@ static void OnAnyWorldBeginPlay(SDK::UWorld* /*world*/, const char* worldName)
 
 static void OnTick(float /*deltaSeconds*/)
 {
-	if (g_faulted)
-		return;
-
 	if (g_resyncTicks >= 0 && g_resyncTicks-- == 0)
 	{
 		if (ResyncSeed())
@@ -427,9 +427,7 @@ static void OnTick(float /*deltaSeconds*/)
 	if (ApplyToLiveGraph())
 	{
 		g_livePending = false;
-		if (g_faulted)
-			FinishWorld();
-		else if (g_seedResync)
+		if (g_seedResync)
 			g_resyncTicks = kResyncDelayTicks;
 		else
 			FinishWorld();
