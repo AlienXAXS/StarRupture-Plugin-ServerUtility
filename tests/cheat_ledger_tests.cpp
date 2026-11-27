@@ -9,6 +9,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <variant>
 #include <vector>
 
 static int g_checks = 0, g_failed = 0;
@@ -76,6 +77,30 @@ struct Rig
 		};
 		// The rig's character is the object the value lives on.
 		env.rebind = [](const Entry&, const Weak& character) { return character; };
+		// The three composed shapes of the game side: a weapon multiplier (float), a speed
+		// ({top, braking}) and a boost ({cur base, cur, max base, max}).
+		env.compose = [](const Entry& e, const Value& prior) -> Value
+		{
+			const float* m = std::get_if<float>(&e.asked);
+			if (!m)
+				return Value();
+			if (e.slot == "weapon")
+			{
+				const float* p = std::get_if<float>(&prior);
+				return p ? Value(*p * *m) : Value();
+			}
+			const auto* v = std::get_if<std::vector<float>>(&prior);
+			if (e.slot == "speed" && v && v->size() == 2)
+				return Value(std::vector<float>{ (*v)[0] * *m, (*v)[0] * *m * 4.0f });
+			if (e.slot == "boost" && v && v->size() == 4)
+			{
+				std::vector<float> a = { *m, *m, (*v)[2], (*v)[3] };
+				if ((*v)[3] < *m)
+					a[2] = a[3] = *m;
+				return Value(a);
+			}
+			return Value();
+		};
 		env.allowed = [this](Entry& e)
 		{
 			// Connected owner: live state, refreshed into the entry. Gone owner: the stored state.
@@ -201,15 +226,16 @@ static void Follow()
 		CHECK(r.Live(20, "fly") == Value(false));   // restored to the new pawn's prior
 		CHECK(r.Live(10, "fly") == Value(true));    // the old object was never written to
 	}
-	{   // the old pawn still alive but no longer the player's: the entry moves, the old one is left alone
+	{   // the old pawn still alive but no longer the player's: the entry moves, the old one is put back
 		Rig r; Setup(r);
 		r.Seed(20, "fly", Value(false));
 		r.pawn["A"] = 20;
 		const int before = r.writes;
 		r.Respawned();
-		CHECK(r.writes == before + 1);
+		CHECK(r.writes == before + 2);              // the new pawn's value, the old pawn's prior
 		CHECK(r.Live(20, "fly") == Value(true));
-		CHECK(r.Live(10, "fly") == Value(true));
+		CHECK(r.Live(10, "fly") == Value(false));
+		CHECK(Has(r.logs, "(the player moved to another character)"));
 	}
 	{   // no pawn yet: the entry is held, nothing is written, the pin does not drop it
 		Rig r; Setup(r);
@@ -362,6 +388,203 @@ static void Follow()
 
 // A follow Toggle while the player possesses a vehicle: the character is put back and nothing is
 // written to the vehicle; back in the character, it settles, captures the originals and writes.
+// A player who moves between two live characters leaves neither holding a value with no prior.
+static void FollowBack()
+{
+	const auto Setup = [](Rig& r)
+	{
+		r.Seed(10, "fly", false);
+		r.Seed(20, "fly", false);
+		r.pawn["A"] = 10;
+		Request q = r.Req(Kind::Toggle, "A", "fly", true, 10, true);
+		q.pin = true;
+		CHECK(r.ledger.Apply(q));
+	};
+	{   // A -> B -> A: A is clean while the player is on B, and its prior is its true value on return
+		Rig r; Setup(r);
+		r.pawn["A"] = 20;
+		r.Respawned();
+		CHECK(r.Live(10, "fly") == Value(false));
+		CHECK(r.Live(20, "fly") == Value(true));
+		r.pawn["A"] = 10;
+		r.Respawned();
+		CHECK(r.Live(10, "fly") == Value(true));
+		CHECK(r.Live(20, "fly") == Value(false));
+		const Entry* e = r.ledger.Find(Kind::Toggle, "A", "feat", "fly");
+		CHECK(e && e->target.index == 10 && e->prior == Value(false) && e->applied == Value(true));
+		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "fly"));
+		CHECK(r.Live(10, "fly") == Value(false));   // a release leaves both clean
+		CHECK(r.Live(20, "fly") == Value(false));
+		CHECK(r.ledger.Size() == 0);
+	}
+	{   // a new pawn that cannot take the value yet: the old one is left holding it until the move happens
+		Rig r; Setup(r);
+		r.live.erase("20|fly");
+		r.pawn["A"] = 20;
+		r.Respawned();
+		CHECK(r.Live(10, "fly") == Value(true));
+		r.Seed(20, "fly", false);
+		r.Respawned();
+		CHECK(r.Live(10, "fly") == Value(false));
+		CHECK(r.Live(20, "fly") == Value(true));
+	}
+	{   // Apply for another character: the old one is put back before the entry moves
+		Rig r; Setup(r);
+		Request q = r.Req(Kind::Toggle, "A", "fly", true, 20, true);
+		q.pin = true;
+		CHECK(r.ledger.Apply(q));
+		CHECK(r.Live(10, "fly") == Value(false));
+		CHECK(r.Live(20, "fly") == Value(true));
+		const Entry* e = r.ledger.Find(Kind::Toggle, "A", "feat", "fly");
+		CHECK(e && e->target.index == 20 && e->prior == Value(false));
+		CHECK(Has(r.logs, "(the target changed)"));
+		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "fly"));
+		CHECK(r.Live(20, "fly") == Value(false));
+	}
+	{   // Apply for another character when the old one is gone: nothing is written to it
+		Rig r; Setup(r);
+		r.dead.insert(10);
+		const int before = r.writes;
+		Request q = r.Req(Kind::Toggle, "A", "fly", true, 20, true);
+		q.pin = true;
+		CHECK(r.ledger.Apply(q));
+		CHECK(r.writes == before + 1);
+		CHECK(r.Live(10, "fly") == Value(true));
+	}
+}
+
+// A composed entry keeps what the player asked for, follows them, and takes the game's own change as its new prior.
+static void Composed()
+{
+	const auto Weapon = [](Rig& r, float start)
+	{
+		r.Seed(10, "weapon", start);
+		r.pawn["A"] = 10;
+		Request q = r.Req(Kind::Toggle, "A", "weapon", Value(start * 2.0f), 10, true);
+		q.pin = true;
+		q.asked = Value(2.0f);
+		CHECK(r.ledger.Apply(q));
+	};
+	{   // the toggle survives a respawn and a vehicle, and reads on all the while (cheat.state)
+		Rig r; Weapon(r, 1.0f);
+		CHECK(r.Live(10, "weapon") == Value(2.0f));
+		r.dead.insert(10);
+		r.pawn.erase("A");
+		for (int i = 0; i < 5; ++i)
+			r.ledger.Tick();
+		CHECK(r.ledger.Size() == 1);
+		CHECK(r.ledger.Has(Kind::Toggle, "A", "feat", "weapon"));
+		CHECK(!Has(r.logs, "its target is gone"));
+		r.Seed(20, "weapon", 1.0f);
+		r.pawn["A"] = 20;
+		r.Respawned();
+		CHECK(r.Live(20, "weapon") == Value(2.0f));
+		CHECK(r.ledger.Has(Kind::Toggle, "A", "feat", "weapon"));
+		r.vehicle.insert("A");
+		r.ledger.Tick();
+		CHECK(r.Live(20, "weapon") == Value(1.0f));   // parked: the character is put back
+		CHECK(r.ledger.Has(Kind::Toggle, "A", "feat", "weapon"));
+	}
+	{   // a new pawn: a fresh prior, composed with the multiplier asked for
+		Rig r; Weapon(r, 1.0f);
+		r.Seed(20, "weapon", 3.0f);
+		r.dead.insert(10);
+		r.pawn["A"] = 20;
+		r.Respawned();
+		CHECK(r.Live(20, "weapon") == Value(6.0f));
+		const Entry* e = r.ledger.Find(Kind::Toggle, "A", "feat", "weapon");
+		CHECK(e && e->prior == Value(3.0f) && e->applied == Value(6.0f) && e->asked == Value(2.0f));
+		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "weapon"));
+		CHECK(r.Live(20, "weapon") == Value(3.0f));
+	}
+	{   // the game recomputes it (an attachment): its value is the new prior, composed again; our own write is not mistaken for that
+		Rig r; Weapon(r, 1.0f);
+		const int before = r.writes;
+		for (int i = 0; i < 5; ++i)
+			r.ledger.Tick();
+		CHECK(r.writes == before);                    // held at the applied value: nothing to do
+		CHECK(!Has(r.logs, "rebase"));
+		r.live["10|weapon"] = Value(1.5f);            // the game recomputed
+		r.ledger.Tick();
+		CHECK(r.Live(10, "weapon") == Value(3.0f));
+		const Entry* e = r.ledger.Find(Kind::Toggle, "A", "feat", "weapon");
+		CHECK(e && e->prior == Value(1.5f) && e->applied == Value(3.0f));
+		CHECK(Has(r.logs, "rebase 'NameA' (A) feat/weapon"));
+		const int after = r.writes;
+		for (int i = 0; i < 5; ++i)
+			r.ledger.Tick();
+		CHECK(r.writes == after);                     // our write is held, not taken for a game change
+		int lines = 0;
+		for (const auto& l : r.logs)
+			lines += l.find("rebase") != std::string::npos ? 1 : 0;
+		CHECK(lines == 1);
+		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "weapon"));
+		CHECK(r.Live(10, "weapon") == Value(1.5f));   // off writes the current prior
+	}
+	{   // the game sets the value back to the prior it had: no change of prior, written again, no new line
+		Rig r; Weapon(r, 1.0f);
+		r.live["10|weapon"] = Value(1.0f);
+		r.ledger.Tick();
+		CHECK(r.Live(10, "weapon") == Value(2.0f));
+		CHECK(!Has(r.logs, "rebase"));
+	}
+	{   // a changed multiplier on a held entry is composed from the same prior (the op passes it)
+		Rig r; Weapon(r, 1.0f);
+		Request q = r.Req(Kind::Toggle, "A", "weapon", Value(3.0f), 10, true);
+		q.pin = true;
+		q.asked = Value(3.0f);
+		CHECK(r.ledger.Apply(q));
+		const Entry* e = r.ledger.Find(Kind::Toggle, "A", "feat", "weapon");
+		CHECK(e && e->prior == Value(1.0f) && e->applied == Value(3.0f) && e->asked == Value(3.0f));
+	}
+	{   // speed: {top, braking}
+		Rig r; r.Seed(10, "speed", Value(std::vector<float>{ 600.0f, 2000.0f }));
+		r.pawn["A"] = 10;
+		Request q = r.Req(Kind::Toggle, "A", "speed", Value(std::vector<float>{ 1200.0f, 4800.0f }), 10, true);
+		q.pin = true;
+		q.asked = Value(2.0f);
+		CHECK(r.ledger.Apply(q));
+		r.Seed(20, "speed", Value(std::vector<float>{ 500.0f, 1500.0f }));
+		r.dead.insert(10);
+		r.pawn["A"] = 20;
+		r.Respawned();
+		CHECK(r.Live(20, "speed") == Value(std::vector<float>{ 1000.0f, 4000.0f }));
+		r.live["20|speed"] = Value(std::vector<float>{ 700.0f, 1500.0f });   // the game changed the top speed
+		r.ledger.Tick();
+		CHECK(r.Live(20, "speed") == Value(std::vector<float>{ 1400.0f, 5600.0f }));
+		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "speed"));
+		CHECK(r.Live(20, "speed") == Value(std::vector<float>{ 700.0f, 1500.0f }));
+	}
+	{   // boost: the four values, with the max raised to the value when it is below it
+		Rig r; r.Seed(10, "boost", Value(std::vector<float>{ 1.0f, 1.0f, 1.0f, 1.0f }));
+		r.pawn["A"] = 10;
+		Request q = r.Req(Kind::Toggle, "A", "boost", Value(std::vector<float>{ 3.0f, 3.0f, 3.0f, 3.0f }), 10, true);
+		q.pin = true;
+		q.asked = Value(3.0f);
+		CHECK(r.ledger.Apply(q));
+		r.Seed(20, "boost", Value(std::vector<float>{ 1.0f, 1.0f, 5.0f, 5.0f }));
+		r.dead.insert(10);
+		r.pawn["A"] = 20;
+		r.Respawned();
+		CHECK(r.Live(20, "boost") == Value(std::vector<float>{ 3.0f, 3.0f, 5.0f, 5.0f }));   // a max already above: kept
+		r.live["20|boost"] = Value(std::vector<float>{ 1.0f, 1.0f, 2.0f, 2.0f });             // the game lowered the max
+		r.ledger.Tick();
+		CHECK(r.Live(20, "boost") == Value(std::vector<float>{ 3.0f, 3.0f, 3.0f, 3.0f }));   // raised to the value again, from the new max
+		CHECK(r.ledger.Release(Kind::Toggle, "A", "feat", "boost"));
+		CHECK(r.Live(20, "boost") == Value(std::vector<float>{ 1.0f, 1.0f, 2.0f, 2.0f }));
+	}
+	{   // a failed write of the composed value is tried again next tick, from the game's value
+		Rig r; Weapon(r, 1.0f);
+		r.live["10|weapon"] = Value(1.5f);
+		r.failWrites = true;
+		r.ledger.Tick();
+		CHECK(r.Live(10, "weapon") == Value(1.5f));
+		r.failWrites = false;
+		r.ledger.Tick();
+		CHECK(r.Live(10, "weapon") == Value(3.0f));
+	}
+}
+
 static void FollowVehicle()
 {
 	const auto Setup = [](Rig& r)
@@ -779,6 +1002,8 @@ int main()
 {
 	Toggles();
 	Follow();
+	FollowBack();
+	Composed();
 	FollowVehicle();
 	FollowStance();
 	PawnClasses();

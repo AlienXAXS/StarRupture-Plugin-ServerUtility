@@ -25,6 +25,15 @@
 // Restore writes the prior value only while the live value is still the one SU wrote. Otherwise
 // the game or someone else changed it since, and it is left as is.
 //
+// A composed entry (asked is set) keeps what the player asked for (a multiplier) next to the
+// value SU wrote: applied is compose(prior, asked). On a move to a new object the prior is read
+// afresh and applied composed from it. When the pin reads something other than applied, the game
+// recomputed the value (an attachment, an upgrade): that value becomes the new prior and applied
+// is composed again, instead of the old applied being written over the game's change.
+//
+// When a follow entry moves to another live character, the old character is put back first, as
+// a park does, so no character is left holding a value with no prior to return to.
+//
 // The ledger keeps no pointer to a game object. A Weak is the object's slot index, serial and
 // class, plus its address as a bare number that is only compared to the slot, never used as a
 // pointer; the glue validates it before every use. Game thread only, except MarkReconcileDue.
@@ -89,7 +98,8 @@ namespace CheatLedger
 		Weak        settling;                    // follow: the new pawn being waited on, until the game has set it up
 		uint64_t    settleSinceMs = 0;           // when `settling` was first seen
 		Weak        target;                      // what the value lives on (an Override may have none)
-		Value       prior, applied;              // prior is captured once, on the first apply
+		Value       prior, applied;              // prior is captured on the first apply (and again on a move or a game change of a composed entry)
+		Value       asked;                       // composed entry: what the player asked for; applied = compose(prior, asked). monostate: not composed
 		uint64_t    appliedAtMs = 0;
 		uint32_t    reqId = 0;
 		bool        ownerProven = false;         // the owner's admin proof as last seen; decides a deny once they are gone
@@ -105,6 +115,7 @@ namespace CheatLedger
 		bool        follow = false;
 		Weak        target;
 		Value       value;                       // what to write
+		Value       asked;                       // see Entry::asked
 		uint32_t    reqId = 0;
 		bool        ownerProven = false;
 	};
@@ -125,6 +136,9 @@ namespace CheatLedger
 		// belongs on (the character's component or set), as a weak reference; invalid while the
 		// character has none yet. Game thread.
 		std::function<Weak(const Entry&, const Weak&)>    rebind;
+		// For a composed entry (asked set): the value to write for a given prior, on the object e.target
+		// (set to the one the prior was read from). monostate: the slot has no compose; applied stays.
+		std::function<Value(const Entry&, const Value&)>  compose;
 		// Whether the feature is still allowed for the entry's owner. While the owner is connected
 		// the glue refreshes e.ownerProven; once they are gone it decides from the stored value.
 		std::function<Allowance(Entry&)>                  allowed;
@@ -205,6 +219,11 @@ namespace CheatLedger
 		bool PutBack(const Entry& e, const char* why, bool quiet = false);
 		// The player entered a vehicle: put the character back and hold the entry.
 		void Park(Entry& e);
+		// The value to write for a prior: compose(prior, asked) for a composed entry, else the fallback.
+		Value ComposeFor(const Entry& e, const Value& prior, const Value& fallback) const;
+		// A composed entry whose live value is not the one SU wrote: the game recomputed it. Takes the
+		// game's value as the prior and writes the composed value again. False when not composed.
+		bool Rebase(Entry& e, const Value& live);
 		void CountFollowers();
 
 		Env               m_env;

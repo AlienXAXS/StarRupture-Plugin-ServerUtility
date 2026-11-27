@@ -114,7 +114,17 @@ namespace CheatLedger
 		// So is a parked entry's: its character was put back, the prior it holds is stale.
 		if (it != m_entries.end() && (it->second.parked || !(it->second.target == req.target)))
 		{
-			Drop(it, it->second.parked ? "the character was already put back" : "the target changed");
+			const Entry& old = it->second;
+			// A live old target still holds our value: put it back before the entry moves on.
+			if (!old.parked && old.target.Valid() && m_env.alive(old.target))
+			{
+				PutBack(old, "the target changed");
+				m_entries.erase(it);
+			}
+			else
+			{
+				Drop(it, old.parked ? "the character was already put back" : "the target changed");
+			}
 			it = m_entries.end();
 		}
 
@@ -148,6 +158,7 @@ namespace CheatLedger
 		e.playerId = req.playerId; e.playerName = req.playerName; e.conn = req.conn;
 		e.pin = req.pin; e.follow = req.follow; e.followStuck = false; e.settling = Weak(); e.reqId = req.reqId; e.ownerProven = req.ownerProven;
 		e.applied = req.value;
+		e.asked = req.asked;
 		e.appliedAtMs = m_env.nowMs ? m_env.nowMs() : 0;
 		if (isNew)
 			e.seq = ++m_seq;
@@ -259,6 +270,35 @@ namespace CheatLedger
 		e.followStuck = false;
 	}
 
+	Value Ledger::ComposeFor(const Entry& e, const Value& prior, const Value& fallback) const
+	{
+		if (std::holds_alternative<std::monostate>(e.asked) || !m_env.compose || std::holds_alternative<std::monostate>(prior))
+			return fallback;
+		Value v = m_env.compose(e, prior);
+		return std::holds_alternative<std::monostate>(v) ? fallback : v;
+	}
+
+	// The pin read something other than what SU wrote. For a composed entry the game recomputed the
+	// value (our own write is applied exactly, so it never lands here): the game's value is the new
+	// prior and applied is composed again from it. True when handled, written or not (a failed write
+	// is tried again next tick, with the same game value). False for an entry that is not composed.
+	bool Ledger::Rebase(Entry& e, const Value& live)
+	{
+		if (std::holds_alternative<std::monostate>(e.asked) || !m_env.compose || std::holds_alternative<std::monostate>(live))
+			return false;
+		const Value next = m_env.compose(e, live);
+		if (std::holds_alternative<std::monostate>(next))
+			return false;
+		if (!(next == live) && !m_env.write(e, next))
+			return true;
+		if (!(live == e.prior))
+			Log("rebase " + Describe(e) + ": the game changed it to " + ToText(live) + ", now " + ToText(next));
+		e.prior = live;
+		e.applied = next;
+		e.appliedAtMs = m_env.nowMs ? m_env.nowMs() : 0;
+		return true;
+	}
+
 	void Ledger::FollowTick()
 	{
 		if (!m_env.stance || !m_env.rebind)
@@ -322,7 +362,9 @@ namespace CheatLedger
 			Entry moved = e;
 			moved.target = target;
 			moved.prior = m_env.read(moved);
-			if (std::holds_alternative<std::monostate>(moved.prior) || !m_env.write(moved, e.applied))
+			// A composed value is made from this pawn's own prior; any other is carried over.
+			moved.applied = ComposeFor(moved, moved.prior, e.applied);
+			if (std::holds_alternative<std::monostate>(moved.prior) || !m_env.write(moved, moved.applied))
 			{
 				if (!e.followStuck)
 				{
@@ -331,7 +373,13 @@ namespace CheatLedger
 				}
 				continue;
 			}
-			Log("follow " + Describe(e) + ": " + (e.parked ? "character again, " : "new pawn, ") + ToText(moved.prior) + " -> " + ToText(e.applied));
+			// The old character, if it is still there, holds our value: put it back before the entry
+			// moves on, so no character is left with a value and no prior (a return to it would capture
+			// our own value as its prior). Done once the new one took the value, so a retry leaves the
+			// old one alone. A parked entry holds nothing; a dead one has nothing to put back.
+			if (!e.parked && e.target.Valid() && m_env.alive(e.target))
+				PutBack(e, "the player moved to another character");
+			Log("follow " + Describe(e) + ": " + (e.parked ? "character again, " : "new pawn, ") + ToText(moved.prior) + " -> " + ToText(moved.applied));
 			moved.followStuck = false;
 			moved.parked = false;
 			moved.settling = Weak();
@@ -349,7 +397,7 @@ namespace CheatLedger
 
 		for (auto it = m_entries.begin(); it != m_entries.end();)
 		{
-			const Entry& e = it->second;
+			Entry& e = it->second;
 			// A parked entry holds nothing on any object.
 			if (!e.pin || e.parked)
 			{
@@ -365,8 +413,12 @@ namespace CheatLedger
 					it = Drop(it, "its target is gone");
 				continue;
 			}
-			if (!(m_env.read(e) == e.applied))
-				m_env.write(e, e.applied);
+			const Value live = m_env.read(e);
+			if (!(live == e.applied))
+			{
+				if (!Rebase(e, live))
+					m_env.write(e, e.applied);
+			}
 			++it;
 		}
 	}

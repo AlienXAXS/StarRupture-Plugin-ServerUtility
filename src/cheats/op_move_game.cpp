@@ -219,6 +219,26 @@ namespace OpMoveGame
 			return WriteSpeed_SEH(static_cast<SDK::UCharacterMovementComponent*>(obj), (*v)[0], (*v)[1]);
 		}
 
+		// The flying values for a multiplier of the game's own top speed: a game value of zero or less
+		// falls back to the usual one, and the braking is a fixed factor of the top speed.
+		CheatLedger::Value ComposeSpeedValue(float base, float mult)
+		{
+			if (base <= 0.0f)
+				base = kFallbackMaxFlySpeed;
+			const float top = base * mult;
+			return CheatLedger::Value(std::vector<float>{ top, top * kBrakingFactor });
+		}
+
+		// The value to hold for a prior ({max fly speed, braking}) and the multiplier the player asked for.
+		CheatLedger::Value ComposeSpeed(SDK::UObject*, const CheatLedger::Entry& e, const CheatLedger::Value& prior)
+		{
+			const auto* p = std::get_if<std::vector<float>>(&prior);
+			const float* mult = std::get_if<float>(&e.asked);
+			if (!p || p->size() != 2 || !mult)
+				return {};
+			return ComposeSpeedValue((*p)[0], *mult);
+		}
+
 		// The player's current movement component, for the ledger to move a held toggle onto after a
 		// respawn.
 		CheatLedger::Weak RebindMove(SDK::UObject* character, const CheatLedger::Entry&)
@@ -346,13 +366,11 @@ namespace OpMoveGame
 			}
 			if (!fromHeld && !ReadSpeed_SEH(comp, &base, &braking))
 				return false;
-			if (base <= 0.0f)
-				base = kFallbackMaxFlySpeed;
 
-			const float top = base * mult;
 			CheatLedger::Request req = BaseRequest(ctx, reqId, id, OpMove::kSlotSpeed);
 			req.target = target;
-			req.value  = CheatLedger::Value(std::vector<float>{ top, top * kBrakingFactor });
+			req.value  = ComposeSpeedValue(base, mult);
+			req.asked  = CheatLedger::Value(std::in_place_type<float>, mult);
 			if (!ledger.Apply(req))
 				return false;
 			g_speed[id] = mult;
@@ -363,7 +381,7 @@ namespace OpMoveGame
 	void Init()
 	{
 		CheatLedgerGame::RegisterAccessor(OpMove::kFeature, OpMove::kSlotFly, { &ReadFly, &WriteFly, &RebindMove });
-		CheatLedgerGame::RegisterAccessor(OpMove::kFeature, OpMove::kSlotSpeed, { &ReadSpeed, &WriteSpeed, &RebindMove });
+		CheatLedgerGame::RegisterAccessor(OpMove::kFeature, OpMove::kSlotSpeed, { &ReadSpeed, &WriteSpeed, &RebindMove, &ComposeSpeed });
 
 		OpMove::Env env;
 		env.available    = &Available;

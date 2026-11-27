@@ -22,6 +22,9 @@ namespace CheatLedgerGame
 		CheatLedger::Value (*read)(SDK::UObject* obj, const CheatLedger::Entry& e) = nullptr;
 		bool               (*write)(SDK::UObject* obj, const CheatLedger::Entry& e, const CheatLedger::Value& v) = nullptr;
 		CheatLedger::Weak  (*rebind)(SDK::UObject* character, const CheatLedger::Entry& e) = nullptr;
+		// For a slot that composes its value from the game's (Entry::asked set): the value to write for a
+		// given prior, on obj (the entry's target, resolved just now). monostate: nothing to compose.
+		CheatLedger::Value (*compose)(SDK::UObject* obj, const CheatLedger::Entry& e, const CheatLedger::Value& prior) = nullptr;
 	};
 	void RegisterAccessor(const std::string& feature, const std::string& slot, Accessor accessor);
 

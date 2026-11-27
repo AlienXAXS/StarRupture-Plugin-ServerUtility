@@ -134,6 +134,26 @@ namespace OpMineGame
 			return WriteBoost_SEH(static_cast<SDK::UCrMiningBoostAttributeSet*>(obj), v->data());
 		}
 
+		// The boost values to hold for a boost multiplier: current at the value, and the max raised to
+		// it when it is below it. base is the game's four values (see ReadBoost_SEH).
+		std::vector<float> ComposeBoostValue(const float* base, float value)
+		{
+			std::vector<float> applied = { value, value, base[2], base[3] };
+			if (base[3] < value)
+				applied[2] = applied[3] = value;
+			return applied;
+		}
+
+		// The value to hold for a prior (the game's four values) and the boost the player asked for.
+		CheatLedger::Value ComposeBoostSlot(SDK::UObject*, const CheatLedger::Entry& e, const CheatLedger::Value& prior)
+		{
+			const auto* p = std::get_if<std::vector<float>>(&prior);
+			const float* value = std::get_if<float>(&e.asked);
+			if (!p || p->size() != 4 || !value)
+				return {};
+			return CheatLedger::Value(std::in_place_type<std::vector<float>>, ComposeBoostValue(p->data(), *value));
+		}
+
 		// ---- Heat tag
 
 		// The ability library's default object, which its static functions are called on.
@@ -389,14 +409,12 @@ namespace OpMineGame
 								base[i] = (*prior)[i];
 				}
 				const float value = *boost;
-				std::vector<float> applied = { value, value, base[2], base[3] };
-				if (base[3] < value)
-					applied[2] = applied[3] = value;
 
 				CheatLedger::Request req = BaseRequest(ctx, reqId, id, OpMine::kSlotBoost);
 				req.pin    = true;
 				req.target = target;
-				req.value  = CheatLedger::Value(std::in_place_type<std::vector<float>>, std::move(applied));
+				req.value  = CheatLedger::Value(std::in_place_type<std::vector<float>>, ComposeBoostValue(base, value));
+				req.asked  = CheatLedger::Value(std::in_place_type<float>, value);
 				if (!ledger.Apply(req))
 					return false;
 				g_boost[id] = value;
@@ -418,7 +436,7 @@ namespace OpMineGame
 	void Init()
 	{
 		CheatLedgerGame::RegisterAccessor(OpMine::kFeature, OpMine::kSlotHeat, { &ReadHeatSlot, &WriteHeatSlot, &RebindHeat });
-		CheatLedgerGame::RegisterAccessor(OpMine::kFeature, OpMine::kSlotBoost, { &ReadBoostSlot, &WriteBoostSlot, &RebindBoost });
+		CheatLedgerGame::RegisterAccessor(OpMine::kFeature, OpMine::kSlotBoost, { &ReadBoostSlot, &WriteBoostSlot, &RebindBoost, &ComposeBoostSlot });
 
 		OpMine::Env env;
 		env.available = &Available;

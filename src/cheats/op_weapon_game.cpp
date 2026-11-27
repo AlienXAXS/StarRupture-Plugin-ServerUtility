@@ -67,6 +67,20 @@ namespace OpWeaponGame
 			}
 		}
 
+		// A given player character's weapon attribute set, for the ledger to move a held toggle onto.
+		SDK::UCrWeaponAttributeSet* SetOf_SEH(SDK::UObject* character)
+		{
+			__try
+			{
+				SDK::UCrWeaponAttributeSet** setAt = ServerUtilityFields::CharacterWeaponAttributes.In(character);
+				return setAt ? *setAt : nullptr;
+			}
+			__except (EXCEPTION_EXECUTE_HANDLER)
+			{
+				return nullptr;
+			}
+		}
+
 		// The attribute's current and base value. False on a fault or an unresolved member.
 		bool ReadAttr_SEH(SDK::UCrWeaponAttributeSet* set, OpWeapon::Slot slot, float* current, float* base)
 		{
@@ -138,6 +152,27 @@ namespace OpWeaponGame
 			return WriteCurrent_SEH(static_cast<SDK::UCrWeaponAttributeSet*>(obj), SlotOf(e), *value);
 		}
 
+		// The weapon set of the player's current character, after a respawn.
+		CheatLedger::Weak RebindSlot(SDK::UObject* character, const CheatLedger::Entry&)
+		{
+			SDK::UCrWeaponAttributeSet* set = OnGameThread() ? SetOf_SEH(character) : nullptr;
+			return set ? CheatLedgerGame::MakeWeak(static_cast<SDK::UObject*>(set)) : CheatLedger::Weak();
+		}
+
+		// The value to hold for a prior: the same compose as Set, with the multiplier the player asked
+		// for and the base the game holds now.
+		CheatLedger::Value ComposeSlot(SDK::UObject* obj, const CheatLedger::Entry& e, const CheatLedger::Value& prior)
+		{
+			const float* game = std::get_if<float>(&prior);
+			const float* mult = std::get_if<float>(&e.asked);
+			if (!obj || !game || !mult || !OnGameThread())
+				return {};
+			float current = 0.0f, base = 0.0f;
+			if (!ReadAttr_SEH(static_cast<SDK::UCrWeaponAttributeSet*>(obj), SlotOf(e), &current, &base))
+				return {};
+			return CheatLedger::Value(std::in_place_type<float>, Compose(*game, base, *mult, SlotOf(e)));
+		}
+
 		// ---- OpWeapon::Env
 
 		bool InWorld() { return World() != nullptr; }
@@ -155,8 +190,8 @@ namespace OpWeaponGame
 			return it == g_mult.end() ? 1.0f : it->second;
 		}
 
-		// On: puts the multiplier on the attribute through the ledger (a Toggle of this player; the
-		// pin keeps it there). A change while it is already on composes from the value the game held
+		// On: puts the multiplier on the attribute through the ledger (a Toggle of this player that
+		// follows the player; the pin keeps it there). A change while it is already on composes from the value the game held
 		// before the first apply, so the multipliers do not stack. Off: releases the Toggle, which
 		// puts that prior value back.
 		bool Set(const CheatDispatch::Context& ctx, uint32_t reqId, OpWeapon::Slot slot, bool on, float mult)
@@ -203,8 +238,10 @@ namespace OpWeaponGame
 			req.slot        = slotName;
 			req.kind        = CheatLedger::Kind::Toggle;
 			req.pin         = true;
+			req.follow      = true;
 			req.target      = target;
 			req.value       = CheatLedger::Value(std::in_place_type<float>, Compose(game, base, mult, slot));
+			req.asked       = CheatLedger::Value(std::in_place_type<float>, mult);
 			req.reqId       = reqId;
 			req.ownerProven = InGameAdmin::IsProven(ctx.controller, id);
 			if (!ledger.Apply(req))
@@ -217,8 +254,8 @@ namespace OpWeaponGame
 
 	void Init()
 	{
-		CheatLedgerGame::RegisterAccessor(OpWeapon::kFeature, OpWeapon::kSlotDamage, { &ReadSlot, &WriteSlot });
-		CheatLedgerGame::RegisterAccessor(OpWeapon::kFeature, OpWeapon::kSlotRate, { &ReadSlot, &WriteSlot });
+		CheatLedgerGame::RegisterAccessor(OpWeapon::kFeature, OpWeapon::kSlotDamage, { &ReadSlot, &WriteSlot, &RebindSlot, &ComposeSlot });
+		CheatLedgerGame::RegisterAccessor(OpWeapon::kFeature, OpWeapon::kSlotRate, { &ReadSlot, &WriteSlot, &RebindSlot, &ComposeSlot });
 
 		OpWeapon::Env env;
 		env.available = &Available;
