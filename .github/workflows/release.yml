@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       sdk_ref:
-        description: "Plugin SDK branch, tag or sha to build against"
+        description: "Plugin SDK branch, tag or full sha to build against"
         type: string
         default: main
       game_sdk_ref:
-        description: "Game SDK branch, tag or sha to build against"
+        description: "Game SDK branch, tag or full sha to build against"
         type: string
         default: main
 
@@ -231,6 +231,7 @@ jobs:
 
           gh release create $tag @assets `
             --title "ServerUtility Plugin $tag" `
+            --target "${{ github.sha }}" `
             --generate-notes
 
       - name: Upload Server build to Nexus Mods
