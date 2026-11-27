@@ -7,6 +7,7 @@
 #include "cheats/op_stack.h"
 #include "cheats/op_corp.h"
 #include "cheats/op_power.h"
+#include "cheats/op_enemy.h"
 
 #include <cstdio>
 #include <map>
@@ -694,10 +695,132 @@ static void PowerTests()
 	}
 }
 
+// A fake enemy game: the two settings, the calls recorded.
+struct EnemyFake
+{
+	bool available = true;
+	bool world = true;
+	bool callsOk = true;
+	bool ai = false, hit = false;
+	int tracked = 12;
+	int aiCalls = 0, hitCalls = 0;
+	uint32_t lastReq = 0;
+
+	OpEnemy::Env MakeEnv()
+	{
+		OpEnemy::Env e;
+		e.available  = [this] { return available; };
+		e.inWorld    = [this] { return world; };
+		e.aiDisabled = [this] { return ai; };
+		e.oneHit     = [this] { return hit; };
+		e.tracked    = [this] { return tracked; };
+		e.setAi      = [this](const Context&, uint32_t id, bool on) { ++aiCalls; lastReq = id; if (callsOk) ai = on; return callsOk; };
+		e.setOneHit  = [this](const Context&, uint32_t id, bool on) { ++hitCalls; lastReq = id; if (callsOk) hit = on; return callsOk; };
+		e.log        = [](const std::string&) {};
+		return e;
+	}
+};
+
+static CheatWire::Request EnemyReq(const char* ai, const char* onehit = nullptr)
+{
+	CheatWire::Request r;
+	r.id = 15;
+	r.op = "cheat.enemy";
+	if (ai) r.fields.emplace_back("ai", ai);
+	if (onehit) r.fields.emplace_back("onehit", onehit);
+	return r;
+}
+
+static void EnemyTests()
+{
+	const Context ctx;
+	EnemyFake f;
+	OpEnemy::SetEnv(f.MakeEnv());
+	CHECK(OpEnemy::Available());
+
+	// ai=on turns Disable AI on: the reply carries both settings and the tracked count.
+	{
+		const Result r = OpEnemy::Handle(ctx, EnemyReq("on"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == "Enemy AI turned off.");
+		CHECK(r.fields.size() == 3 && *Field(r, "ai") == "on" && *Field(r, "onehit") == "off" && *Field(r, "tracked") == "12");
+		CHECK(f.aiCalls == 1 && f.hitCalls == 0 && f.lastReq == 15);
+	}
+	CHECK(OpEnemy::Handle(ctx, EnemyReq("off")).reason == "Enemy AI turned on.");
+	CHECK(!f.ai);
+	CHECK(OpEnemy::Handle(ctx, EnemyReq(nullptr, "on")).reason == "One-hit kill on.");
+	CHECK(f.hit && f.aiCalls == 2 && f.hitCalls == 1);
+	CHECK(OpEnemy::Handle(ctx, EnemyReq(nullptr, "off")).reason == "One-hit kill off.");
+	CHECK(!f.hit);
+
+	// Both fields: both calls, both texts.
+	{
+		const Result r = OpEnemy::Handle(ctx, EnemyReq("on", "on"));
+		CHECK(r.status == CheatWire::Status::Ok && r.reason == "Enemy AI turned off. One-hit kill on.");
+		CHECK(*Field(r, "ai") == "on" && *Field(r, "onehit") == "on");
+	}
+
+	// Neither field: refused, nothing asked of the game. Bad values: unreadable, nothing changed.
+	{
+		const int a = f.aiCalls, h = f.hitCalls;
+		const Result r = OpEnemy::Handle(ctx, EnemyReq(nullptr));
+		CHECK(r.status == CheatWire::Status::Refused && r.reason == "Pick at least one setting.");
+		CHECK(OpEnemy::Handle(ctx, EnemyReq("yes")).reason == CheatDispatch::kTextBadRequest);
+		CHECK(OpEnemy::Handle(ctx, EnemyReq("on", "1")).reason == CheatDispatch::kTextBadRequest);
+		CHECK(OpEnemy::Handle(ctx, EnemyReq("ON")).status == CheatWire::Status::Refused);
+		CHECK(f.aiCalls == a && f.hitCalls == h);
+	}
+
+	// No world: error, nothing asked.
+	{
+		f.world = false;
+		const int a = f.aiCalls;
+		const Result r = OpEnemy::Handle(ctx, EnemyReq("on"));
+		CHECK(r.status == CheatWire::Status::Error && r.reason == "Not in a world right now.");
+		CHECK(f.aiCalls == a);
+		f.world = true;
+	}
+
+	// The game side fails: the error text; a failed first call stops before the second.
+	{
+		f.callsOk = false;
+		const int h = f.hitCalls;
+		const Result r = OpEnemy::Handle(ctx, EnemyReq("off", "off"));
+		CHECK(r.status == CheatWire::Status::Error && r.reason == "Could not change enemies on this server.");
+		CHECK(f.hitCalls == h);
+		f.callsOk = true;
+	}
+
+	// State hook: ai and onehit, on = in force.
+	{
+		f.ai = true; f.hit = false;
+		const Fields s = OpEnemy::StateFields("p1");
+		CHECK(s.size() == 2 && s[0].first == "ai" && s[0].second == "on" && s[1].first == "onehit" && s[1].second == "off");
+	}
+
+	// Feature unavailable: off, refused with the build text before anything is parsed.
+	{
+		f.available = false;
+		CHECK(!OpEnemy::Available());
+		const Result r = OpEnemy::Handle(ctx, EnemyReq("on"));
+		CHECK(r.status == CheatWire::Status::Refused && r.reason == "Not available on this server's game build.");
+		CHECK(OpEnemy::Handle(ctx, EnemyReq(nullptr)).reason == OpEnemy::kTextOff);
+		f.available = true;
+		CHECK(OpEnemy::Available());
+	}
+
+	// No env at all: off, no state fields.
+	OpEnemy::SetEnv(OpEnemy::Env());
+	CHECK(!OpEnemy::Available());
+	CHECK(OpEnemy::StateFields("p1").empty());
+
+	CHECK(std::string(OpEnemy::kFeature) == "enemies" && std::string(OpEnemy::kSlotAi) == "ai" && std::string(OpEnemy::kSlotOneHit) == "onehit");
+}
+
 int main()
 {
 	const Context ctx;
 	PowerTests();
+	EnemyTests();
 	WaveTests();
 	StackTests();
 	CorpTests();

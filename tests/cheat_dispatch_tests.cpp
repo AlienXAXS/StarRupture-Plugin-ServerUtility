@@ -9,6 +9,7 @@
 #include "cheats/op_corp.h"
 #include "cheats/op_state.h"
 #include "cheats/op_power.h"
+#include "cheats/op_enemy.h"
 
 #include <cstdio>
 #include <optional>
@@ -89,7 +90,7 @@ int main()
 		CHECK(fresh.Idle(0));
 	}
 
-	// The op table: ten ops. Give, wave, stack and corp have a handler (with an `available` hook); the rest are stubs.
+	// The op table: ten ops. Give, wave, stack, corp, power and enemy have a handler (with an `available` hook); the rest are stubs.
 	{
 		CHECK(Ops().size() == 10);
 		for (const OpEntry& op : Ops())
@@ -105,6 +106,8 @@ int main()
 				CHECK(op.run == &OpCorp::Handle && op.available == &OpCorp::Available && op.state == &OpCorp::StateFields);
 			else if (std::strcmp(op.name, "cheat.power") == 0)
 				CHECK(op.run == &OpPower::Handle && op.available == &OpPower::Available && op.state == &OpPower::StateFields);
+			else if (std::strcmp(op.name, "cheat.enemy") == 0)
+				CHECK(op.run == &OpEnemy::Handle && op.available == &OpEnemy::Available && op.state == &OpEnemy::StateFields);
 			else
 				CHECK(op.run == &NotYet && !op.available);
 		}
@@ -135,6 +138,7 @@ int main()
 			if (std::strcmp(op.name, "cheat.stack") == 0) text = OpStack::kTextOff;
 			if (std::strcmp(op.name, "cheat.corp") == 0) text = OpCorp::kTextOff;
 			if (std::strcmp(op.name, "cheat.power") == 0) text = OpPower::kTextOff;
+			if (std::strcmp(op.name, "cheat.enemy") == 0) text = OpEnemy::kTextOff;
 			CHECK(r.Send("p1", Req(id, op.name)) == Res(id, "refused", text));
 			++id;
 		}
@@ -332,6 +336,28 @@ int main()
 			CHECK(r.Send("p1", Req(83, "cheat.state")) == Res(83, "ok", "", U + "wave=paused" + U + "stack=500"));
 			OpCorp::SetEnv(OpCorp::Env());
 			OpPower::SetEnv(OpPower::Env());
+		}
+		// cheat.enemy adds ai and onehit (on = in force), and drops them when the feature is denied.
+		{
+			bool ai = true, hit = false;
+			OpEnemy::Env ee;
+			ee.available  = [] { return true; };
+			ee.inWorld    = [] { return true; };
+			ee.aiDisabled = [&] { return ai; };
+			ee.oneHit     = [&] { return hit; };
+			ee.tracked    = [] { return 0; };
+			ee.setAi      = [](const Context&, uint32_t, bool) { return true; };
+			ee.setOneHit  = [](const Context&, uint32_t, bool) { return true; };
+			OpEnemy::SetEnv(ee);
+			Rig r;
+			CHECK(r.Send("p1", Req(90, "cheat.state")) == Res(90, "ok", "", U + "wave=paused" + U + "stack=500" + U + "ai=on" + U + "onehit=off"));
+			ai = false; hit = true;
+			r.now += 10;
+			CHECK(r.Send("p1", Req(91, "cheat.state")) == Res(91, "ok", "", U + "wave=paused" + U + "stack=500" + U + "ai=off" + U + "onehit=on"));
+			r.denyFeature = "enemies";
+			r.now += 10;
+			CHECK(r.Send("p1", Req(92, "cheat.state")) == Res(92, "ok", "", U + "wave=paused" + U + "stack=500"));
+			OpEnemy::SetEnv(OpEnemy::Env());
 		}
 		// The wave's three states.
 		{

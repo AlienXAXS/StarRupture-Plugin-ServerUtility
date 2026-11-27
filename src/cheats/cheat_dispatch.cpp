@@ -4,6 +4,7 @@
 #include "op_stack.h"
 #include "op_corp.h"
 #include "op_power.h"
+#include "op_enemy.h"
 #include "op_state.h"
 
 #include <algorithm>
@@ -55,7 +56,7 @@ namespace CheatDispatch
 			{ "cheat.skill", 1, "skills",         &NotYet },
 			{ "cheat.corp",  1, "corporations",   &OpCorp::Handle, &OpCorp::Available, &OpCorp::StateFields },
 			{ "cheat.power", 1, "machine-power",  &OpPower::Handle, &OpPower::Available, &OpPower::StateFields },
-			{ "cheat.enemy", 1, "enemies",        &NotYet },
+			{ "cheat.enemy", 1, "enemies",        &OpEnemy::Handle, &OpEnemy::Available, &OpEnemy::StateFields },
 			{ "cheat.build", 1, "build-free",     &NotYet },
 		};
 		return table;

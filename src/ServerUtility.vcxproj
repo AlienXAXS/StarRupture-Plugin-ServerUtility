@@ -450,6 +450,8 @@
     <ClInclude Include="cheats\op_corp_game.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClInclude Include="cheats\op_power.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClInclude Include="cheats\op_power_game.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
+    <ClInclude Include="cheats\op_enemy.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
+    <ClInclude Include="cheats\op_enemy_game.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClInclude Include="cheats\op_state.h" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClInclude Include="host_rules\player_list.h" />
     <ClInclude Include="host_rules\ini_file.h" />
@@ -531,6 +533,8 @@
     <ClCompile Include="cheats\op_corp_game.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClCompile Include="cheats\op_power.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClCompile Include="cheats\op_power_game.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
+    <ClCompile Include="cheats\op_enemy.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
+    <ClCompile Include="cheats\op_enemy_game.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClCompile Include="cheats\op_state.cpp" Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release'" />
     <ClCompile Include="host_rules\player_list.cpp" />
     <ClCompile Include="host_rules\ini_file.cpp" />

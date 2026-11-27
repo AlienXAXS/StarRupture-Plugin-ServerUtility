@@ -30,6 +30,7 @@
 #include "cheats/op_stack_game.h"
 #include "cheats/op_corp_game.h"
 #include "cheats/op_power_game.h"
+#include "cheats/op_enemy_game.h"
 #endif
 
 // -----------------------------------------------------------------------
@@ -210,6 +211,7 @@ __declspec(dllexport) bool PluginInit(IPluginSelf* self)
 	OpStackGame::Init();
 	OpCorpGame::Init();
 	OpPowerGame::Init();
+	OpEnemyGame::Init();
 	CheatNet::Init();
 #endif
 
