@@ -49,7 +49,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)' == 'Server Debug' Or '$(Configuration)' == 'Server Release' Or '$(Configuration)' == 'Local SDK Server Debug' Or '$(Configuration)' == 'Local SDK Server Release'">
     <ClCompile>
-      <PreprocessorDefinitions>MODLOADER_SERVER_BUILD;PLUGIN_NEEDS_INTERFACE=79;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>MODLOADER_SERVER_BUILD;PLUGIN_NEEDS_INTERFACE=79;PLUGIN_OPTIONAL_INTERFACE=83;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
 

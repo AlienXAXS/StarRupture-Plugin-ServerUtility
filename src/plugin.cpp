@@ -109,6 +109,11 @@ static bool IsServerBinary()
 	return g_self->hooks->Network->IsServer();
 }
 
+#ifdef MODLOADER_SERVER_BUILD
+// Lets a loader with interface 83 or newer report its level, so the cheat reply send turns on.
+PLUGIN_EXPORT_HOST_INFO()
+#endif
+
 // -----------------------------------------------------------------------
 // Plugin exports
 // -----------------------------------------------------------------------
