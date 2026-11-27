@@ -3,6 +3,7 @@
 #include "server_utility_fields.h"
 #include "plugin_helpers.h"
 #include "game_signatures.h"
+#include "policy_map.h"
 #include "object_serial.h"
 
 #include <Windows.h>
@@ -119,60 +120,34 @@ static std::vector<T*> FindInstancesOf(SDK::UClass* cls)
 //
 // UCrReplicationGraph::ClassRepNodePolicies is a TClassMap: a TFunction
 // followed by TMap<FObjectKey, EClassRepNodeMapping>. Neither is a UPROPERTY,
-// so the SDK shows only padding. The member's offset comes from the loader's
-// map (ServerUtilityFields::ClassRepNodePolicies); the map's position inside it
-// and the 20-byte element (FObjectKey 8, value 4, HashNextId 4, HashIndex 4)
-// are the engine's container layout, from the class constructor and
-// PrintRepNodePolicies in the server binary -- see game_signatures.h. Returns
-// the number of entries changed.
+// so the SDK shows only padding. The member's offset, the map's position
+// inside it and the two ints of the key come from the loader's map (see
+// policy_map.h); the SDK's script map view walks the sparse array at the
+// stride the key and value sizes give. Returns the number of entries changed.
 static int PatchClassPolicy(SDK::UCrReplicationGraph* graph, SDK::UClass* cls, uint32_t newValue)
 {
-	namespace RG = GameSig::ReplicationGraph;
-
-	// The farthest read below is the map's NumBits; it has to lie inside the
-	// block the loader's row sizes.
-	static_assert(RG::POLICIES_MAP + RG::OFFSET_MAP_NUM_BITS + sizeof(int32_t) <= sizeof(ClassRepNodePolicyBlock),
-	              "the policy map must lie inside ClassRepNodePolicies");
-
 	uint8_t* policies = reinterpret_cast<uint8_t*>(ServerUtilityFields::ClassRepNodePolicies.In(graph));
 	if (!policies)
 	{
 		LOG_ERROR("[GatherableFix] ClassRepNodePolicies did not resolve - cannot patch the live graph");
 		return -1;
 	}
-	const auto base = policies + RG::POLICIES_MAP;
-
-	uint8_t* elements = nullptr;
-	int32_t  arrayNum = 0, arrayMax = 0, numBits = 0;
-	std::memcpy(&elements, base + RG::OFFSET_MAP_ELEMENTS,  sizeof(elements));
-	std::memcpy(&arrayNum, base + RG::OFFSET_MAP_ARRAY_NUM, sizeof(arrayNum));
-	std::memcpy(&arrayMax, base + RG::OFFSET_MAP_ARRAY_MAX, sizeof(arrayMax));
-	std::memcpy(&numBits,  base + RG::OFFSET_MAP_NUM_BITS,  sizeof(numBits));
-
-	// The one sanity check that catches a wrong offset before it is trusted:
-	// a TSparseArray keeps these three consistent, garbage does not.
-	if (!elements || arrayNum < 0 || arrayNum > arrayMax || arrayMax > 65536 || numBits != arrayNum)
+	// The map has to lie inside the block the loader's row sizes.
+	if (PolicyMap::Map.offset < 0 || !PolicyMap::Layout().valid
+	    || static_cast<size_t>(PolicyMap::Map.offset) + sizeof(PluginMap::ScriptSetMemory) > sizeof(ClassRepNodePolicyBlock))
 	{
-		LOG_ERROR("[GatherableFix] ClassRepNodePolicies map at graph+0x%zX does not look like a TMap "
-		          "(data=%p num=%d max=%d bits=%d) - the layout needs re-deriving for this build",
-		          static_cast<size_t>(base - reinterpret_cast<uint8_t*>(graph)),
-		          static_cast<void*>(elements), arrayNum, arrayMax, numBits);
+		LOG_ERROR("[GatherableFix] The loader has no usable row for the policy map or its key - policy not patched");
 		return -1;
 	}
+	const auto base = policies + PolicyMap::Map.offset;
 
-	// Allocation bits: TInlineAllocator<4> words, or a heap block once the
-	// sparse array outgrows 128 slots.
-	const uint32_t* bits = reinterpret_cast<const uint32_t*>(base + RG::OFFSET_MAP_BITS_INLINE);
-	if (numBits > RG::POLICIES_BITS_INLINE_CAPACITY)
+	const PluginMap::ScriptMapView map(base, PolicyMap::Layout());
+	if (!map)
 	{
-		const uint32_t* heapBits = nullptr;
-		std::memcpy(&heapBits, base + RG::OFFSET_MAP_BITS_SECONDARY, sizeof(heapBits));
-		if (!heapBits)
-		{
-			LOG_ERROR("[GatherableFix] ClassRepNodePolicies has %d slots but no allocation bits", numBits);
-			return -1;
-		}
-		bits = heapBits;
+		LOG_ERROR("[GatherableFix] ClassRepNodePolicies map at graph+0x%zX does not look like a TMap (%s) - "
+		          "the layout needs re-deriving for this build",
+		          static_cast<size_t>(base - reinterpret_cast<uint8_t*>(graph)), map.ReasonText());
+		return -1;
 	}
 
 	const int32_t* indexAt = ServerUtilityFields::ObjectIndex.In(cls);
@@ -194,32 +169,28 @@ static int PatchClassPolicy(SDK::UCrReplicationGraph* graph, SDK::UClass* cls, u
 	}
 
 	int changed = 0;
-	for (int32_t i = 0; i < arrayNum; ++i)
+	map.ForEach([&](uint8_t* key, uint8_t* valueAt)
 	{
-		if ((bits[i / 32] & (1u << (i % 32))) == 0)
-			continue;   // free slot
-
-		uint8_t* el = elements + static_cast<size_t>(i) * RG::POLICIES_ELEMENT_SIZE;
 		int32_t keyIndex = 0, keySerial = 0;
-		uint32_t value = 0;
-		std::memcpy(&keyIndex,  el + RG::POLICIES_KEY_OBJECT_INDEX,  sizeof(keyIndex));
-		std::memcpy(&keySerial, el + RG::POLICIES_KEY_SERIAL_NUMBER, sizeof(keySerial));
-		std::memcpy(&value,     el + RG::POLICIES_VALUE,             sizeof(value));
+		PolicyMap::Value value = 0;
+		std::memcpy(&keyIndex,  key + PolicyMap::KeyIndex.offset,  sizeof(keyIndex));
+		std::memcpy(&keySerial, key + PolicyMap::KeySerial.offset, sizeof(keySerial));
+		std::memcpy(&value,     valueAt,                           sizeof(value));
 
 		if (keyIndex != wantIndex)
-			continue;
+			return;
 		if (keySerial != wantSerial)
 		{
 			LOG_WARN("[GatherableFix] Policy entry for object index %d has serial %d, expected %d - skipping",
 			         keyIndex, keySerial, wantSerial);
-			continue;
+			return;
 		}
 
 		LOG_INFO("[GatherableFix] Graph %s: %s policy %u -> %u",
 		         graph->GetName().c_str(), cls->GetName().c_str(), value, newValue);
-		std::memcpy(el + RG::POLICIES_VALUE, &newValue, sizeof(newValue));
+		std::memcpy(valueAt, &newValue, sizeof(newValue));
 		++changed;
-	}
+	});
 
 	return changed;
 }

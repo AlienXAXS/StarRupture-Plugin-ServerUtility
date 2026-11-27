@@ -15,6 +15,7 @@
 #include "SDK/GameplayAbilities_classes.hpp"
 #include "SDK/GameplayAbilities_parameters.hpp"
 #include "plugin_map.h"
+#include "policy_map.h"
 
 #include <cstdint>
 
@@ -41,7 +42,7 @@ struct EngineString
 
 // UCrReplicationGraph::ClassRepNodePolicies as one block: a TClassMap, which is
 // a TFunction followed by a TMap. Neither is a UPROPERTY, so the SDK shows
-// padding there. GameSig::ReplicationGraph says where the map lies inside it.
+// padding there. PolicyMap (policy_map.h) says where the map lies inside it.
 struct ClassRepNodePolicyBlock
 {
 	uint8_t Bytes[0x80];
@@ -315,7 +316,8 @@ namespace ServerUtilityFields
 	// Keeping the gatherable spawners' replication actor relevant to every
 	// client (see gatherable_relevancy.cpp). While it is off none of that runs.
 	inline PluginMap::Feature GatherableRelevancy{ "gatherable-relevancy", "Gatherable relevancy fix", PluginMap::KeysOf(
-		ActorAlwaysRelevant, ObjectClass, ObjectIndex) };
+		ActorAlwaysRelevant, ObjectClass, ObjectIndex,
+		PolicyMap::Map, PolicyMap::KeyIndex, PolicyMap::KeySerial) };
 
 	// The RCON save command finds the save subsystem among the live objects by
 	// its class. While it is off the command says so.
@@ -417,7 +419,7 @@ namespace ServerUtilityFields
 		PluginMap::ResolveFields(scanner, self,
 			WorldGameState, GameStatePlayerArray, ActorOwner, ControllerPlayerState,
 			PlayerStateName, PlayerStatePing,
-			ActorAlwaysRelevant, ObjectClass, ObjectIndex,
+			ActorAlwaysRelevant, ObjectClass, ObjectIndex, PolicyMap::Map, PolicyMap::KeyIndex, PolicyMap::KeySerial,
 			ItemName, InventoryComponent, AuAddedItem_Amount, AuAddedItem_Size,
 			StartWaveSize, StartWaveType, IsWaveInProgressSize, IsWaveInProgressResult, IsWavePausedSize, IsWavePausedResult,
 			CorporationsOwner, CorporationsDataPoints,

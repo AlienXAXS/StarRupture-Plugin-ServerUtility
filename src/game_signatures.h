@@ -52,41 +52,6 @@ namespace GameSig
 
 
 	// =======================================================================
-	// Engine container layout
-	//
-	// Where each game member lies is the loader's map's to say (see
-	// server_utility_fields.h). What follows is the engine's own container
-	// layout inside UCrReplicationGraph::ClassRepNodePolicies, which is the same
-	// on every build and so has no key.
-	// =======================================================================
-
-	// TClassMap<EClassRepNodeMapping> = { TFunction InitNewElement; TMap<FObjectKey,
-	// EClassRepNodeMapping> Map; }. The TFunction is 0x30 bytes, so the map starts
-	// that far into the member. Its positions, read from the zero-initialising
-	// stores in UCrReplicationGraph::UCrReplicationGraph: Elements.Data at +0x00,
-	// ArrayNum +0x08, ArrayMax +0x0C, inline allocation-flag words +0x10, secondary
-	// bits pointer +0x20, NumBits +0x28 (MaxBits +0x2C = 128, FirstFreeIndex +0x30
-	// = -1). PrintRepNodePolicies indexes elements by `20 * Index`:
-	//   FObjectKey { int32 ObjectIndex; int32 ObjectSerialNumber; }  +0
-	//   uint32 EClassRepNodeMapping                                   +8
-	//   int32 HashNextId, int32 HashIndex                            +12
-	namespace ReplicationGraph
-	{
-		inline constexpr size_t POLICIES_MAP                   = 0x30;
-		inline constexpr size_t OFFSET_MAP_ELEMENTS            = 0x00;
-		inline constexpr size_t OFFSET_MAP_ARRAY_NUM           = 0x08;
-		inline constexpr size_t OFFSET_MAP_ARRAY_MAX           = 0x0C;
-		inline constexpr size_t OFFSET_MAP_BITS_INLINE         = 0x10;
-		inline constexpr size_t OFFSET_MAP_BITS_SECONDARY      = 0x20;
-		inline constexpr size_t OFFSET_MAP_NUM_BITS            = 0x28;
-		inline constexpr int    POLICIES_BITS_INLINE_CAPACITY  = 128;   // 4 x uint32
-		inline constexpr size_t POLICIES_ELEMENT_SIZE          = 20;
-		inline constexpr size_t POLICIES_KEY_OBJECT_INDEX      = 0;
-		inline constexpr size_t POLICIES_KEY_SERIAL_NUMBER     = 4;
-		inline constexpr size_t POLICIES_VALUE                 = 8;
-	}
-
-	// =======================================================================
 	// Intra-function offsets
 	// =======================================================================
 

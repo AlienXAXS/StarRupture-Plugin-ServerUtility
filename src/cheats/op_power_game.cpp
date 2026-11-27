@@ -28,8 +28,8 @@ namespace OpPowerGame
 
 		// The engine layout constant: an FConstSharedStruct points at an FStructSharedMemory, which is
 		// the UScriptStruct pointer and then the struct's data, aligned up to the struct's minimum
-		// alignment (the engine's FStructSharedMemory::GetMemory). A later version-map row could
-		// carry this beside the TMap layout constants.
+		// alignment (the engine's FStructSharedMemory::GetMemory). The header is one pointer by the
+		// engine's own definition, not a game value, so it has no version-map row.
 		constexpr size_t kSharedMemoryHeader = sizeof(void*);
 		constexpr size_t kMaxHistory         = 64;   // values one building has been set to this world
 
